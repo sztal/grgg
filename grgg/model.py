@@ -386,6 +386,6 @@ class GRGG:
             obj.set_mu(mu, q)
             return (obj.kbar - kbar) ** 2
 
-        mu0 = self.sphere.R * np.pi / 2
+        mu0 = 0
         solution = minimize(objective, mu0, method="Nelder-Mead")
         return float(solution.x[0])
