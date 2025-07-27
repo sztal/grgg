@@ -17,12 +17,16 @@ requires-python = ">=3.12"
 dependencies = [
     "numpy>=2.2",
     "scipy>=1.16.0",
+    "pandas>= 2.2",
     "python-igraph>=0.11.9",
     "networkx>=3.5",
     "matplotlib>=3.10.3",
     "seaborn>=0.13.2",
     "pathcensus>=0.1",
     "tqdm>=4.65",
+    "ipykernel",
+    "ipywidgets",
+    "jupyterlab",
 ]
 dynamic = ["version"]
 classifiers = [

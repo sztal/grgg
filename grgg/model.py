@@ -174,14 +174,14 @@ class GRGG:
         if n <= 0:
             errmsg = "'n' must be positive"
             raise ValueError(errmsg)
-        if eps <= 0:
+        if eps <= 0:  # type: ignore
             errmsg = "'eps' must be positive"
             raise ValueError(errmsg)
         if kernels and args:
             errmsg = "cannot combine 'kernels' list and '**args'"
             raise ValueError(errmsg)
         if args:
-            kernels = args
+            kernels = args  # type: ignore
         self.n = n
         self.sphere = sphere
         self.kernels = list(kernels or [])
@@ -274,7 +274,7 @@ class GRGG:
                 P *= p
         if np.isscalar(d):
             P = P.item()
-        return 1 - P
+        return 1 - P  # type: ignore
 
     def sample(
         self, *, sparse: bool = True, seed: int | np.random.Generator | None = None
@@ -296,8 +296,7 @@ class GRGG:
         kerntype: type[AbstractGeometricKernel],
         *,
         kbar: float | None = None,
-        mu: float | None = None,
-        beta: float | None = None,
+        **kwargs: Any,
     ) -> Self:
         """Set a kernel function for the model.
 
@@ -309,11 +308,13 @@ class GRGG:
             Average degree of the graph. If provided, it will be used to set
             the `mu` parameter of the kernel. When `kbar` is provided,
             setting `mu` will raise an error.
+        **kwargs
+            Additional parameters for the kernel.
         """
-        if kbar is not None and mu is not None:
+        if kbar is not None and kwargs.get("mu") is not None:
             errmsg = "cannot set both 'kbar' and 'mu'"
             raise ValueError(errmsg)
-        kernel = kerntype.from_sphere(self.sphere, mu=mu, beta=beta)
+        kernel = kerntype.from_sphere(self.sphere, **kwargs)
         if kbar is not None:
             rgg = self.copy(kernels=[kernel])
             mu = rgg._estimate_mu_from_kbar(kbar)
@@ -356,8 +357,8 @@ class GRGG:
         if q is None:
             q = np.ones(len(self.kernels)) / len(self.kernels)
         if np.isscalar(q):
-            if 0 <= q <= 1:
-                q = np.array([q, 1 - q])
+            if 0 <= q <= 1:  # type: ignore
+                q = np.array([q, 1 - q])  # type: ignore
             else:
                 errmsg = "if scalar 'q' must be in [0, 1]"
                 raise ValueError(errmsg)
@@ -385,6 +386,6 @@ class GRGG:
             obj.set_mu(mu, q)
             return (obj.kbar - kbar) ** 2
 
-        mu0 = 0.0
+        mu0 = self.sphere.R * np.pi / 2
         solution = minimize(objective, mu0, method="Nelder-Mead")
         return float(solution.x[0])

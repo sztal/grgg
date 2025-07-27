@@ -24,7 +24,7 @@ assert np.isclose(
     sim["sim_g"], G.transitivity_undirected(), atol=1e-2
 ), "Similarity coefficient does not match the transitivity of the graph."
 
-sim  # noqa
+sim  # noqa # type: ignore
 
 # %% ----------------------------------------------------------------------------------
 
@@ -45,7 +45,7 @@ assert G.transitivity_undirected() <= 0.02, "Transitivity of the graph is too hi
 
 assert comp["comp_g"] >= 0.2, "Complementarity coefficient is too low"
 
-comp  # noqa
+comp  # noqa # type: ignore
 
 # %% ----------------------------------------------------------------------------------
 
@@ -71,7 +71,7 @@ simcomp = PathCensus(G).coefs("global").iloc[0]
 assert simcomp["sim_g"] >= 0.1, "Similarity coefficient is too low"
 assert simcomp["comp_g"] >= 0.1, "Complementarity coefficient is too low"
 
-simcomp  # noqa
+simcomp  # noqa # type: ignore
 
 # %% ----------------------------------------------------------------------------------
 

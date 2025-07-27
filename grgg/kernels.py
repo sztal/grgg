@@ -43,12 +43,14 @@ class AbstractGeometricKernel(ABC):
         sphere: Sphere,
         *,
         mu: float | None = None,
-        beta: float | None = None,
+        beta: float = 1.0,
     ) -> dict[str, float]:
+        if beta < 0:
+            errmsg = "'beta' must be non-negative"
+            raise ValueError(errmsg)
+        beta = float(beta * sphere.k)
         if mu is None:
             mu = np.pi * sphere.R / 2
-        if beta is None:
-            beta = sphere.k * 3 / 2
         return {"mu": mu, "beta": beta}
 
     def copy(self, **kwargs: Any) -> Self:
