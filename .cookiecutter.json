@@ -1,0 +1,22 @@
+{
+    "_checkout": null,
+    "_output_dir": "/home/sztal/Coding/python",
+    "_repo_dir": "../cookiecutters/package/",
+    "_template": "../cookiecutters/package/",
+    "author": "Szymon Talaga",
+    "cli": "no",
+    "copyright_year": "2025",
+    "description": "Similarity+Complementarity Random Geometric Graphs [Proof-of-Concept]",
+    "development_status": "Development Status :: 3 - Alpha",
+    "email": "stalaga@protonmail.com",
+    "friendly_name": "SC-RGG",
+    "github_owner": "sztal",
+    "github_repo": "grgg",
+    "license": "MIT",
+    "numpy": "yes",
+    "package_name": "grgg",
+    "project_name": "grgg",
+    "python": "3.12",
+    "pyversion": "py312",
+    "template_version": "0.0"
+}
