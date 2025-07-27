@@ -22,6 +22,7 @@ dependencies = [
     "matplotlib>=3.10.3",
     "seaborn>=0.13.2",
     "pathcensus>=0.1",
+    "tqdm>=4.65",
 ]
 dynamic = ["version"]
 classifiers = [

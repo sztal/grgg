@@ -62,7 +62,7 @@ class Similarity(AbstractGeometricKernel):
 
     def __call__(self, d: np.ndarray) -> np.ndarray:
         """Evaluate the similarity kernel function."""
-        return np.exp(self.beta * (d - self.mu))
+        return np.exp(self.beta * d - self.mu)
 
 
 @dataclass
@@ -73,7 +73,7 @@ class Complementarity(AbstractGeometricKernel):
 
     def __call__(self, d: np.ndarray) -> np.ndarray:
         """Evaluate the complementarity kernel function."""
-        return np.exp(self.beta * (self.dmax - d - self.mu))
+        return np.exp(self.beta * (self.dmax - d) - self.mu)
 
     def __copy__(self) -> Self:
         """Create a copy of the complementarity kernel instance."""
