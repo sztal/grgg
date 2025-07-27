@@ -9,6 +9,7 @@ from scipy.integrate import quad
 from scipy.optimize import minimize
 from scipy.sparse import csr_array, issparse, sparray
 
+from . import options
 from .kernels import AbstractGeometricKernel
 from .manifolds import Sphere
 from .utils import (
@@ -149,8 +150,8 @@ class GRGG:
     n: int
     sphere: Sphere
     kernels: MutableSequence = field(default_factory=list)
-    logdist: bool = False
-    eps: float = 1e-6
+    logdist: bool = options.logdist
+    eps: float = options.eps
 
     def __init__(
         self,
@@ -158,14 +159,18 @@ class GRGG:
         sphere: Sphere,
         *args: AbstractGeometricKernel,
         kernels: MutableSequence[AbstractGeometricKernel] = (),
-        logdist: bool = False,
-        eps: float = 1e-6,
+        logdist: bool | None = None,
+        eps: float | None = None,
     ) -> None:
         """Initialize the GRGG model.
 
         Kernels may be passed as `*args` and/or as `kernels` list.
         However, the two methods of passing kernels may not be combined.
         """
+        if logdist is None:
+            logdist = options.logdist
+        if eps is None:
+            eps = options.eps
         if n <= 0:
             errmsg = "'n' must be positive"
             raise ValueError(errmsg)

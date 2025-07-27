@@ -4,7 +4,7 @@ import igraph as ig
 import numpy as np
 from pathcensus import PathCensus
 
-from grgg import GRGG, Complementarity, Similarity  # noqa
+from grgg import GRGG, Complementarity, Similarity, options  # noqa
 
 N = 1000  # number of nodes
 KBAR = 10.0  # average degree
