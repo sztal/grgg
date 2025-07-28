@@ -13,6 +13,9 @@ warnings.filterwarnings("ignore", message="last has more values", category=UserW
 
 # Paths
 paths = make_paths()
+paths.figures /= "spherical"
+paths.figures.mkdir(parents=True, exist_ok=True)
+
 simulation = joblib.load(paths.proc / "regimes-spherical.pkl")
 params = simulation.params
 
@@ -61,6 +64,7 @@ for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
 
 fig.supylabel(r"clustering", x=0.02)
 fig.tight_layout()
+fig.savefig(paths.figures / "regimes-sim-clust.pdf")
 
 # %% Plot | Q-Clustering -------------------------------------------------------------
 
@@ -92,6 +96,7 @@ for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
 
 fig.supylabel(r"$q$-clustering", x=0.02)
 fig.tight_layout()
+fig.savefig(paths.figures / "regimes-sim-qclust.pdf")
 
 # %% Plot | Average Path Length ------------------------------------------------------
 
@@ -122,7 +127,7 @@ for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
 
 fig.supylabel(r"Avg. path length (L)", x=0.02)
 fig.tight_layout()
-
+fig.savefig(paths.figures / "regimes-sim-paths.pdf")
 
 # %% Shared legend -------------------------------------------------------------------
 
@@ -146,6 +151,7 @@ fig.legend(
     frameon=False,
     labelspacing=3,
 )
+fig.savefig(paths.figures / "regimes-legend.pdf")
 
 # %%
 # ====================================================================================
@@ -186,6 +192,7 @@ for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
 
 fig.supylabel(r"clustering", x=0.02)
 fig.tight_layout()
+fig.savefig(paths.figures / "regimes-comp-clust.pdf")
 
 # %% Plot | Q-Clustering -------------------------------------------------------------
 
@@ -217,6 +224,7 @@ for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
 
 fig.supylabel(r"$q$-clustering", x=0.02)
 fig.tight_layout()
+fig.savefig(paths.figures / "regimes-comp-qclust.pdf")
 
 # %% Plot | Average Path Length ------------------------------------------------------
 
@@ -247,5 +255,6 @@ for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
 
 fig.supylabel(r"Avg. path length (L)", x=0.02)
 fig.tight_layout()
+fig.savefig(paths.figures / "regimes-comp-paths.pdf")
 
 # %% ---------------------------------------------------------------------------------

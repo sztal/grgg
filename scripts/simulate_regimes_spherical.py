@@ -14,10 +14,10 @@ from grgg.kernels import AbstractGeometricKernel, Complementarity, Similarity
 paths = make_paths()
 params = SimpleNamespace(
     n=10 ** np.arange(2, 5),  # Number of nodes
-    k=2 ** np.arange(4),  # Surface dimensions of the sphere
-    beta=[0.0, 0.5, 1.1, 1.5, 3.0, np.inf],  # 'beta' values for the kernels
+    k=2 ** np.arange(3),  # Surface dimensions of the sphere
+    beta=[0.0, 1.1, 1.5, 5.0, np.inf],  # 'beta' values for the kernels
     kbar=10,  # Average degree
-    nrep=10,  # Number of replications
+    nrep=5,  # Number of replications
 )
 rng = np.random.default_rng(421765311)
 
@@ -65,6 +65,6 @@ comp = simulate(Complementarity, params, rng)
 # %% Save results --------------------------------------------------------------------
 
 results = SimpleNamespace(params=params, sim=sim, comp=comp)
-joblib.dump(results, paths.proc / "regimes-spherical.pkl")
+joblib.dump(results, paths.proc / "regimes-spherical.pkl", compress=9)
 
 # %% ---------------------------------------------------------------------------------

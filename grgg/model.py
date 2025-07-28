@@ -44,7 +44,8 @@ class GRGGSample(NamedTuple):
             # Make igraph graph from sparse adjacency matrix
             edges = list(zip(*self.A.nonzero(), strict=True))
             G = ig.Graph(edges, directed=False, n=self.A.shape[0])
-        G = ig.Graph.Adjacency(self.A, mode="undirected", loops=False)
+        else:
+            G = ig.Graph.Adjacency(self.A, mode="undirected", loops=False)
         return G.simplify()
 
 
@@ -341,6 +342,8 @@ class GRGG:
         q : float or np.ndarray, optional
             If provided, it will be used to set the relative weights of the kernels.
         """
+        if isinstance(mu, np.ndarray) and mu.size == 1:
+            mu = mu.item()
         q = self._preprocess_q(q)
         for qi, kernel in zip(q, self.kernels, strict=True):
             kernel.mu = float(mu * qi)
