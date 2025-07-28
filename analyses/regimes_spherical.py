@@ -1,140 +1,251 @@
 # %% ---------------------------------------------------------------------------------
 
-from pathlib import Path
-from types import SimpleNamespace
+import warnings
 
+import joblib
 import matplotlib as mpl
 import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-from pathcensus import PathCensus
-from tqdm.auto import tqdm, trange
+import seaborn.objects as so
 
-from grgg import GRGG, Similarity, options
+from grgg import make_paths, plotting
 
-options.logdist = True  # logarithmic distance to allow for small-world effects
+warnings.filterwarnings("ignore", message="last has more values", category=UserWarning)
 
 # Paths
-paths = SimpleNamespace(here=Path(__file__).parent.absolute())
-paths.root = paths.here.parent
-paths.figures = paths.root / "figures"
-paths.figures.mkdir(exist_ok=True, parents=True)
+paths = make_paths()
+simulation = joblib.load(paths.proc / "regimes-spherical.pkl")
+params = simulation.params
 
-# Matplotlib settings
-mpl.rcParams["savefig.dpi"] = 300
-mpl.rcParams["savefig.bbox"] = "tight"
+# Plotting settings
+mpl.rcParams.update(plotting.theme())
 
-N = [
-    100,
-    1000,
-]  # Numbers of nodes
-D = [1, 2, 4, 8]  # Surface dimensions of the sphere
-K = 10  # Average degree
-R = 10  # Number of replications
-B = [  # 'beta' values for the kernels
-    0.0,  # ER model
-    0.5,
-    1.1,
-    1.5,
-    3.0,
-    np.inf,  # Hard RGG
-]
-rng = np.random.default_rng(425365311)
+PLOT_HEIGHT = 2.5  # Height of the plots in inches
+COLORS = mpl.rcParams["axes.prop_cycle"].by_key()["color"]
+MARKERS = mpl.rcParams["axes.prop_cycle"].by_key()["marker"]
 
+# %%
 # ====================================================================================
 # SIMILARITY
 # ====================================================================================
 
-# %% Simulate ------------------------------------------------------------------------
-
-results = []
-for b in tqdm(B):
-    for d in tqdm(D, leave=False):
-        for n in tqdm(N, leave=False):
-            rgg = GRGG.from_n(n=n, k=d).set_kernel(Similarity, kbar=K, beta=b)
-            for i in trange(R, leave=False):
-                G = rgg.sample(sparse=False, seed=rng).G
-                coefs = PathCensus(G).coefs("global").iloc[0]
-                results.append(
-                    {
-                        "n": n,
-                        "k": d,
-                        "beta": b,
-                        "idx": i,
-                        "density": G.density(),
-                        "clustering": coefs["sim_g"],
-                        "qclustering": coefs["comp_g"],
-                        "average_path_length": G.average_path_length(),
-                    }
-                )
-
-results = pd.DataFrame(results)
-simdata = (
-    results.groupby(["n", "k", "beta"])[
-        ["density", "clustering", "qclustering", "average_path_length"]
-    ]
-    .mean()
-    .reset_index()
-)
+results = simulation.sim
+simdata = results.drop(columns=["idx"]).groupby(["n", "k", "beta"]).mean().reset_index()
 
 # %% Plot | Clustering ---------------------------------------------------------------
 
+h = PLOT_HEIGHT
 fig, axes = plt.subplots(
-    ncols=(ncols := len(D)), figsize=(10, 2), sharex=True, sharey=True
+    ncols=(ncols := len(params.k)), figsize=(h * ncols, h), sharex=True, sharey=True
 )
 
 for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
     k, gdf = gdf
-    for bdf in gdf.groupby("beta"):
-        beta, bdf = bdf
-        label = f"β={beta:.2f}"
-        ax.plot(bdf["n"], bdf["clustering"], "o-", label=label)
+    y = "clustering"
+    (
+        so.Plot(gdf, x="n", y=y, color="beta", marker="beta")
+        .add(so.Line(), so.Dodge(by=y), legend=False)
+        .add(so.Dot(), so.Dodge(by=y), legend=False)
+        .scale(
+            color=so.Nominal(values=COLORS),
+            marker=so.Nominal(values=MARKERS),
+        )
+        .on(ax)
+        .plot()
+    )
+    ax.set_xlabel(None)
+    ax.set_ylabel(None)
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_ylim(0, 1)
     ax.set_title(f"k={k}")
-axes.flatten()[-1].legend()
+    ax.set_ylim(top=1.0)
 
+fig.supylabel(r"clustering", x=0.02)
 fig.tight_layout()
 
 # %% Plot | Q-Clustering -------------------------------------------------------------
 
+h = PLOT_HEIGHT
 fig, axes = plt.subplots(
-    ncols=(ncols := len(D)), figsize=(10, 2), sharex=True, sharey=True
+    ncols=(ncols := len(params.k)), figsize=(h * ncols, h), sharex=True, sharey=True
 )
 
 for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
     k, gdf = gdf
-    for bdf in gdf.groupby("beta"):
-        beta, bdf = bdf
-        label = f"β={beta:.2f}"
-        ax.plot(bdf["n"], bdf["qclustering"], "o-", label=label)
+    y = "qclustering"
+    (
+        so.Plot(gdf, x="n", y=y, color="beta", marker="beta")
+        .add(so.Line(), so.Dodge(by=y), legend=False)
+        .add(so.Dot(), so.Dodge(by=y), legend=False)
+        .scale(
+            color=so.Nominal(values=COLORS),
+            marker=so.Nominal(values=MARKERS),
+        )
+        .on(ax)
+        .plot()
+    )
+    ax.set_xlabel(None)
+    ax.set_ylabel(None)
     ax.set_xscale("log")
     ax.set_yscale("log")
-    ax.set_ylim(0, 1)
     ax.set_title(f"k={k}")
-axes.flatten()[-1].legend()
+    ax.set_ylim(top=1.0)
 
+fig.supylabel(r"$q$-clustering", x=0.02)
 fig.tight_layout()
 
 # %% Plot | Average Path Length ------------------------------------------------------
 
+h = PLOT_HEIGHT
 fig, axes = plt.subplots(
-    ncols=(ncols := len(D)), figsize=(10, 2), sharex=True, sharey=True
+    ncols=(ncols := len(params.k)), figsize=(h * ncols, h), sharex=True, sharey=True
 )
 
 for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
     k, gdf = gdf
-    for bdf in gdf.groupby("beta"):
-        beta, bdf = bdf
-        label = f"β={beta:.2f}"
-        ax.plot(bdf["n"], bdf["average_path_length"], "o-", label=label)
+    y = "average_path_length"
+    (
+        so.Plot(gdf, x="n", y=y, color="beta", marker="beta")
+        .add(so.Line(), so.Dodge(by=y), legend=False)
+        .add(so.Dot(), so.Dodge(by=y), legend=False)
+        .scale(
+            color=so.Nominal(values=COLORS),
+            marker=so.Nominal(values=MARKERS),
+        )
+        .on(ax)
+        .plot()
+    )
+    ax.set_xlabel(None)
+    ax.set_ylabel(None)
     ax.set_xscale("log")
     ax.set_yscale("log")
     ax.set_title(f"k={k}")
-axes.flatten()[-1].legend()
 
+fig.supylabel(r"Avg. path length (L)", x=0.02)
 fig.tight_layout()
 
+
+# %% Shared legend -------------------------------------------------------------------
+
+handles = [
+    mpl.lines.Line2D(
+        [],
+        [],
+        color=color,
+        marker="o",
+        linestyle="--",
+        label=f"β'={beta:.2f}",
+    )
+    for color, beta in zip(COLORS, params.beta, strict=False)
+]
+fig, ax = plt.subplots(figsize=(h / 10, h * 3))
+ax.axis("off")
+fig.legend(
+    handles=handles,
+    loc="center",
+    ncols=1,
+    frameon=False,
+    labelspacing=3,
+)
+
+# %%
+# ====================================================================================
+# COMPLEMENTARITY
+# ====================================================================================
+
+results = simulation.comp
+simdata = results.drop(columns=["idx"]).groupby(["n", "k", "beta"]).mean().reset_index()
+
+# %% Plot | Clustering ---------------------------------------------------------------
+
+h = PLOT_HEIGHT
+fig, axes = plt.subplots(
+    ncols=(ncols := len(params.k)), figsize=(h * ncols, h), sharex=True, sharey=True
+)
+
+for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
+    k, gdf = gdf
+    gdf["clustering"] += 1e-16  # Avoid log(0) issues
+    y = "clustering"
+    (
+        so.Plot(gdf, x="n", y=y, color="beta", marker="beta")
+        .add(so.Line(), so.Dodge(by=y), legend=False)
+        .add(so.Dot(), so.Dodge(by=y), legend=False)
+        .scale(
+            color=so.Nominal(values=COLORS),
+            marker=so.Nominal(values=MARKERS),
+        )
+        .on(ax)
+        .plot()
+    )
+    ax.set_xlabel(None)
+    ax.set_ylabel(None)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_title(f"k={k}")
+    ax.set_ylim(top=1.0)
+
+fig.supylabel(r"clustering", x=0.02)
+fig.tight_layout()
+
+# %% Plot | Q-Clustering -------------------------------------------------------------
+
+h = PLOT_HEIGHT
+fig, axes = plt.subplots(
+    ncols=(ncols := len(params.k)), figsize=(h * ncols, h), sharex=True, sharey=True
+)
+
+for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
+    k, gdf = gdf
+    y = "qclustering"
+    (
+        so.Plot(gdf, x="n", y=y, color="beta", marker="beta")
+        .add(so.Line(), so.Dodge(by=y), legend=False)
+        .add(so.Dot(), so.Dodge(by=y), legend=False)
+        .scale(
+            color=so.Nominal(values=COLORS),
+            marker=so.Nominal(values=MARKERS),
+        )
+        .on(ax)
+        .plot()
+    )
+    ax.set_xlabel(None)
+    ax.set_ylabel(None)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_title(f"k={k}")
+    ax.set_ylim(top=1.0)
+
+fig.supylabel(r"$q$-clustering", x=0.02)
+fig.tight_layout()
+
+# %% Plot | Average Path Length ------------------------------------------------------
+
+h = PLOT_HEIGHT
+fig, axes = plt.subplots(
+    ncols=(ncols := len(params.k)), figsize=(h * ncols, h), sharex=True, sharey=True
+)
+
+for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
+    k, gdf = gdf
+    y = "average_path_length"
+    (
+        so.Plot(gdf, x="n", y=y, color="beta", marker="beta")
+        .add(so.Line(), so.Dodge(by=y), legend=False)
+        .add(so.Dot(), so.Dodge(by=y), legend=False)
+        .scale(
+            color=so.Nominal(values=COLORS),
+            marker=so.Nominal(values=MARKERS),
+        )
+        .on(ax)
+        .plot()
+    )
+    ax.set_xlabel(None)
+    ax.set_ylabel(None)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_title(f"k={k}")
+
+fig.supylabel(r"Avg. path length (L)", x=0.02)
+fig.tight_layout()
 
 # %% ---------------------------------------------------------------------------------

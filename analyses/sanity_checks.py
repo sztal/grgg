@@ -8,6 +8,10 @@ from grgg import GRGG, Complementarity, Similarity, options  # noqa
 
 N = 1000  # number of nodes
 KBAR = 10.0  # average degree
+igraph_plot_kwargs = {
+    "vertex_size": 5,
+    "edge_width": 0.1,
+}
 
 # %% Sanity check | Similarity and transitivity --------------------------------------
 
@@ -28,7 +32,7 @@ sim  # noqa # type: ignore
 
 # %% ----------------------------------------------------------------------------------
 
-ig.plot(G, backend="matplotlib", vertex_size=5, edge_width=0.1)
+ig.plot(G, **igraph_plot_kwargs)
 
 # %% Sanity check | Complementarity and transitivity ---------------------------------
 
@@ -49,7 +53,7 @@ comp  # noqa # type: ignore
 
 # %% ----------------------------------------------------------------------------------
 
-ig.plot(G, backend="matplotlib", vertex_size=5, edge_width=0.1)
+ig.plot(G, **igraph_plot_kwargs)
 
 # %% Sanity check | Similarity-Complementarity RGG model ------------------------------
 
@@ -75,6 +79,6 @@ simcomp  # noqa # type: ignore
 
 # %% ----------------------------------------------------------------------------------
 
-ig.plot(G, backend="matplotlib", vertex_size=5, edge_width=0.1)
+ig.plot(G, **igraph_plot_kwargs)
 
 # %% ---------------------------------------------------------------------------------
