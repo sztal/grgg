@@ -9,6 +9,7 @@ from scipy.integrate import quad
 from scipy.optimize import minimize
 from scipy.sparse import csr_array, issparse, sparray
 from scipy.spatial.distance import squareform
+from scipy.special import expit
 
 from . import options
 from .kernels import AbstractGeometricKernel
@@ -268,7 +269,7 @@ class GRGG:
         P = None
         for kernel in self.kernels:
             K = kernel(d)
-            p = 1 - 1 / (K + 1)
+            p = 1 - expit(-K)
             if P is None:
                 P = p
             else:

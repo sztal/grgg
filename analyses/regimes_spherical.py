@@ -24,19 +24,22 @@ paths.figures.mkdir(exist_ok=True, parents=True)
 mpl.rcParams["savefig.dpi"] = 300
 mpl.rcParams["savefig.bbox"] = "tight"
 
-N = [100, 1000, 10000]  # Numbers of nodes
-D = [1, 2, 4, 8, 16]  # Surface dimensions of the sphere
+N = [
+    100,
+    1000,
+]  # Numbers of nodes
+D = [1, 2, 4, 8]  # Surface dimensions of the sphere
 K = 10  # Average degree
 R = 10  # Number of replications
 B = [  # 'beta' values for the kernels
     0.0,  # ER model
     0.5,
-    1.0,
-    2.0,
-    4.0,
+    1.1,
+    1.5,
+    3.0,
     np.inf,  # Hard RGG
 ]
-rng = np.random.default_rng(4253653)
+rng = np.random.default_rng(425365311)
 
 # ====================================================================================
 # SIMILARITY
@@ -68,13 +71,13 @@ for b in tqdm(B):
 results = pd.DataFrame(results)
 simdata = (
     results.groupby(["n", "k", "beta"])[
-        ["clustering", "qclustering", "average_path_length"]
+        ["density", "clustering", "qclustering", "average_path_length"]
     ]
     .mean()
     .reset_index()
 )
 
-# %% Visualization -------------------------------------------------------------------
+# %% Plot | Clustering ---------------------------------------------------------------
 
 fig, axes = plt.subplots(
     ncols=(ncols := len(D)), figsize=(10, 2), sharex=True, sharey=True
@@ -87,9 +90,51 @@ for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
         label = f"β={beta:.2f}"
         ax.plot(bdf["n"], bdf["clustering"], "o-", label=label)
     ax.set_xscale("log")
+    ax.set_yscale("log")
     ax.set_ylim(0, 1)
+    ax.set_title(f"k={k}")
 axes.flatten()[-1].legend()
 
 fig.tight_layout()
+
+# %% Plot | Q-Clustering -------------------------------------------------------------
+
+fig, axes = plt.subplots(
+    ncols=(ncols := len(D)), figsize=(10, 2), sharex=True, sharey=True
+)
+
+for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
+    k, gdf = gdf
+    for bdf in gdf.groupby("beta"):
+        beta, bdf = bdf
+        label = f"β={beta:.2f}"
+        ax.plot(bdf["n"], bdf["qclustering"], "o-", label=label)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_ylim(0, 1)
+    ax.set_title(f"k={k}")
+axes.flatten()[-1].legend()
+
+fig.tight_layout()
+
+# %% Plot | Average Path Length ------------------------------------------------------
+
+fig, axes = plt.subplots(
+    ncols=(ncols := len(D)), figsize=(10, 2), sharex=True, sharey=True
+)
+
+for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
+    k, gdf = gdf
+    for bdf in gdf.groupby("beta"):
+        beta, bdf = bdf
+        label = f"β={beta:.2f}"
+        ax.plot(bdf["n"], bdf["average_path_length"], "o-", label=label)
+    ax.set_xscale("log")
+    ax.set_yscale("log")
+    ax.set_title(f"k={k}")
+axes.flatten()[-1].legend()
+
+fig.tight_layout()
+
 
 # %% ---------------------------------------------------------------------------------
