@@ -1,7 +1,15 @@
 from dataclasses import dataclass
 from typing import Any, Self
 
-from .utils import copy_with_update, sphere_radius, sphere_surface_area, sphere_volume
+import numpy as np
+
+from .utils import (
+    copy_with_update,
+    sphere_radius,
+    sphere_surface_area,
+    sphere_surface_sample,
+    sphere_volume,
+)
 
 
 @dataclass
@@ -53,3 +61,7 @@ class Sphere:
     def copy(self, **kwargs: Any) -> Self:
         """Create a copy of the sphere with optional modifications."""
         return copy_with_update(self, **kwargs)
+
+    def sample_surface(self, n: int, **kwargs: Any) -> np.ndarray:
+        """Sample points uniformly from the surface of the sphere."""
+        return sphere_surface_sample(n, self.k, **kwargs) * self.R

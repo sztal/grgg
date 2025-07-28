@@ -19,7 +19,6 @@ from .utils import (
     get_rng,
     sphere_distances,
     sphere_surface_area,
-    sphere_surface_sample,
 )
 
 
@@ -283,13 +282,14 @@ class GRGG:
     ) -> GRGGSample:
         """Sample adjacency matrix from the SRGG model."""
         rng = get_rng(seed)
-        points = sphere_surface_sample(self.n, self.sphere.k, seed=rng)
-        distances = sphere_distances(points, full=False)
-        P = self.edgeprob(distances * self.sphere.R)
+        R = self.sphere.R
+        points = self.sphere.sample_surface(self.n, seed=rng)
+        distances = R * sphere_distances(points / R, full=False)
+        P = self.edgeprob(distances)
         A = squareform((rng.random(size=P.shape) <= P).astype(np.uint8))
         if sparse:
             A = csr_array(A)
-        return GRGGSample(A, points * self.sphere.R)
+        return GRGGSample(A, points)
 
     def set_kernel(
         self,
