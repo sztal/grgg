@@ -8,10 +8,8 @@ import pandas as pd
 from pathcensus import PathCensus
 from tqdm.auto import tqdm, trange
 
-from grgg import GRGG, make_paths, options
+from grgg import GRGG, make_paths
 from grgg.kernels import AbstractGeometricKernel, Complementarity, Similarity
-
-options.logdist = True  # logarithmic distance to allow for small-world effects
 
 paths = make_paths()
 params = SimpleNamespace(

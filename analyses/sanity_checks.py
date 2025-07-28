@@ -6,6 +6,8 @@ from pathcensus import PathCensus
 
 from grgg import GRGG, Complementarity, Similarity, options  # noqa
 
+options.logdist = False
+
 N = 1000  # number of nodes
 KBAR = 10.0  # average degree
 igraph_plot_kwargs = {

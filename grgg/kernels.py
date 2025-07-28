@@ -82,7 +82,7 @@ class AbstractGeometricKernel(ABC):
         sphere: Sphere,
         *,
         mu: float | None = None,
-        beta: float = 1.0,
+        beta: float = 1.5,
         logdist: bool | None = None,
         eps: float | None = None,
     ) -> dict[str, float]:

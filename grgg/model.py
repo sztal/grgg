@@ -142,22 +142,24 @@ class GRGG:
     >>> bool(np.isclose(rgg.kbar, kbar, atol=1e-1))
     True
 
-    Kernels can also operate based on logarithmic distances,
-    which allows for small-world effects.
-    This may be set individually for each kernel
+    By default, kernels use logarithmic distances to allow for small-world effects.
+    This can be disabled by setting the `logdist` option to `False`,
+    either for a specific kernel or globally for all kernels.
+
+    Below is an example of how to set the `logdist` option for a specific kernel.
     >>> kbar = 10.0
-    >>> rgg = GRGG.from_n(n=100, k=2).set_kernel(Similarity, kbar=kbar, logdist=True)
+    >>> rgg = GRGG.from_n(n=100, k=2).set_kernel(Similarity, kbar=kbar, logdist=False)
     >>> rgg.kernels[0].logdist
-    True
+    False
     >>> bool(np.isclose(rgg.kbar, kbar, atol=1e-1))
     True
 
-    Or globally for all kernels.
+    Below is an example of how to set the `logdist` option globally.
     >>> from grgg import options
-    >>> options.logdist = True  # logarithmic distance to allow for small-world effects
+    >>> options.logdist = False  # logarithmic distance to allow for small-world effects
     >>> rgg = GRGG.from_n(n=100, k=1).set_kernel(Complementarity, kbar=kbar)
     >>> rgg.kernels[0].logdist
-    True
+    False
     >>> bool(np.isclose(rgg.kbar, kbar, atol=1e-1))
     True
     """
