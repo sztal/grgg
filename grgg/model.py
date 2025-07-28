@@ -8,6 +8,7 @@ import numpy as np
 from scipy.integrate import quad
 from scipy.optimize import minimize
 from scipy.sparse import csr_array, issparse, sparray
+from scipy.spatial.distance import squareform
 
 from . import options
 from .kernels import AbstractGeometricKernel
@@ -282,11 +283,9 @@ class GRGG:
         """Sample adjacency matrix from the SRGG model."""
         rng = get_rng(seed)
         points = sphere_surface_sample(self.n, self.sphere.k, seed=rng)
-        distances = sphere_distances(points)
+        distances = sphere_distances(points, full=False)
         P = self.edgeprob(distances * self.sphere.R)
-        np.fill_diagonal(P, 0)
-        A = (rng.random(size=P.shape) <= P).astype(int)
-        A = np.tril(A) + np.tril(A, -1).T  # make it symmetric
+        A = squareform((rng.random(size=P.shape) <= P).astype(np.uint8))
         if sparse:
             A = csr_array(A)
         return GRGGSample(A, points * self.sphere.R)

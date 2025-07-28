@@ -3,6 +3,7 @@ from copy import copy
 from typing import Any
 
 import numpy as np
+from scipy.spatial.distance import pdist, squareform
 
 
 def get_rng(seed: int | np.random.Generator | None = None) -> np.random.Generator:
@@ -157,7 +158,7 @@ def sphere_surface_sample(
     return X
 
 
-def sphere_distances(X: np.ndarray) -> np.ndarray:
+def sphere_distances(X: np.ndarray, full: bool = True) -> np.ndarray:
     """
     Compute the pairwise spherical distance between points on the unit sphere.
 
@@ -165,6 +166,9 @@ def sphere_distances(X: np.ndarray) -> np.ndarray:
     ----------
     X : np.ndarray
         An array of shape (n, k) containing points on the sphere.
+    full : bool, optional
+        If True, return a full distance matrix.
+        If False, return a condensed distance vector, by default True.
 
     Returns
     -------
@@ -178,7 +182,10 @@ def sphere_distances(X: np.ndarray) -> np.ndarray:
         array([[0.        , 1.57079],
            [1.57079, 0.        ]])
     """
-    return np.arccos(np.clip(np.dot(X, X.T), -1.0, 1.0))
+    angles = np.arccos(1 - pdist(X, metric="cosine"))
+    if full:
+        angles = squareform(angles)
+    return angles
 
 
 def copy_with_update[T](obj: T, **kwargs: Any) -> T:
