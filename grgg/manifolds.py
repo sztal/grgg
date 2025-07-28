@@ -38,6 +38,17 @@ class Sphere:
     R: float
     k: int
 
+    def __post_init__(self) -> None:
+        """Validate the sphere's attributes."""
+        if self.R <= 0:
+            errmsg = "Radius must be positive."
+            raise ValueError(errmsg)
+        if self.k < 1:
+            errmsg = "Surface dimension must be at least 1."
+            raise ValueError(errmsg)
+        self.R = float(self.R)
+        self.k = int(self.k)
+
     def __copy__(self) -> Self:
         """Create a shallow copy of the sphere."""
         return self.__class__(self.R, self.k)

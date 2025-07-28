@@ -1,28 +1,67 @@
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from typing import Any, Self
 
 import numpy as np
 
+from . import options
 from .manifolds import Sphere
 from .utils import copy_with_update
 
 
-@dataclass
 class AbstractGeometricKernel(ABC):
     """Abstract base class for geometric kernels."""
 
-    mu: float
-    beta: float
+    def __init__(
+        self,
+        mu: float,
+        beta: float,
+        *,
+        logdist: bool | None = None,
+        eps: float | None = None,
+    ) -> None:
+        if logdist is None:
+            logdist = options.logdist
+        if eps is None:
+            eps = options.eps
+        eps = float(eps)
+        if eps <= 0:
+            errmsg = "'eps' must be positive"
+            raise ValueError(errmsg)
+        if beta < 0:
+            errmsg = "'beta' must be non-negative"
+            raise ValueError(errmsg)
+        self.mu = float(mu)
+        self.beta = float(beta)
+        self.logdist = bool(logdist)
+        self.eps = eps
 
-    def __post_init__(self) -> None:
-        for k, v in self.__dict__.items():
-            if isinstance(v, np.ndarray) and v.size == 1:
-                setattr(self, k, v.item())
+    def __repr__(self) -> str:
+        cn = self.__class__.__name__
+        params = {**self.params, "logdist": self.logdist, "eps": self.eps}
+        params_str = ", ".join(f"{k}={v}" for k, v in params.items())
+        return f"{cn}({params_str})"
+
+    def __call__(self, d: np.ndarray) -> np.ndarray:
+        """Evaluate the kernel function for distances `d`."""
+        d = self.preprocess(d)
+        d = np.maximum(d, self.eps)  # ensure no zero distances
+        if self.logdist:
+            d = np.log(d)
+        return self.kernel(d)
+
+    @property
+    def params(self) -> dict[str, float]:
+        return {"mu": self.mu, "beta": self.beta}
 
     @abstractmethod
-    def __call__(self, d: np.ndarray, *args: Any, **kwargs: Any) -> np.ndarray:
-        """Evaluate the kernel function for distances `d`."""
+    def preprocess(self, d: np.ndarray) -> np.ndarray:
+        """Process distances before applying the kernel function."""
+
+    def kernel(self, d: np.ndarray) -> np.ndarray:
+        """Evaluate the kernel function."""
+        if np.isinf(self.beta):
+            return self.beta * (d - self.mu)
+        return self.beta * d - self.mu
 
     def __copy__(self) -> Self:
         """Create a copy of the kernel instance with updated parameters."""
@@ -44,42 +83,43 @@ class AbstractGeometricKernel(ABC):
         *,
         mu: float | None = None,
         beta: float = 1.0,
+        logdist: bool | None = None,
+        eps: float | None = None,
     ) -> dict[str, float]:
-        if beta < 0:
-            errmsg = "'beta' must be non-negative"
-            raise ValueError(errmsg)
         beta = float(beta * sphere.k)
         if mu is None:
             mu = np.pi * sphere.R / 2
-        return {"mu": mu, "beta": beta}
+        return {"mu": mu, "beta": beta, "logdist": logdist, "eps": eps}
 
     def copy(self, **kwargs: Any) -> Self:
         """Create a copy of the kernel instance with updated parameters."""
         return copy_with_update(self, **kwargs)
 
 
-@dataclass
 class Similarity(AbstractGeometricKernel):
     """Kernel for the Similarity-RGG model."""
 
-    def __call__(self, d: np.ndarray) -> np.ndarray:
-        """Evaluate the similarity kernel function."""
-        if np.isinf(self.beta):
-            return self.beta * (d - self.mu)
-        return self.beta * d - self.mu
+    def preprocess(self, d: np.ndarray) -> np.ndarray:
+        return d
 
 
-@dataclass
 class Complementarity(AbstractGeometricKernel):
     """Kernel for the Complementarity-RGG model."""
 
-    dmax: float
+    def __init__(self, mu: float, beta: float, dmax: float, **kwargs: Any) -> None:
+        """Initialize the complementarity kernel."""
+        super().__init__(mu, beta, **kwargs)
+        self.dmax = float(dmax)
 
-    def __call__(self, d: np.ndarray) -> np.ndarray:
-        """Evaluate the complementarity kernel function."""
-        if np.isinf(self.beta):
-            return self.beta * (self.dmax - d - self.mu)
-        return self.beta * (self.dmax - d) - self.mu
+    @property
+    def params(self) -> dict[str, float]:
+        """Return the parameters of the complementarity kernel."""
+        params = super().params
+        params["dmax"] = self.dmax
+        return params
+
+    def preprocess(self, d: np.ndarray) -> np.ndarray:
+        return self.dmax - d
 
     def __copy__(self) -> Self:
         """Create a copy of the complementarity kernel instance."""

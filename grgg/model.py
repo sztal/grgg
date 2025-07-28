@@ -11,7 +11,6 @@ from scipy.sparse import csr_array, issparse, sparray
 from scipy.spatial.distance import squareform
 from scipy.special import expit
 
-from . import options
 from .kernels import AbstractGeometricKernel
 from .manifolds import Sphere
 from .utils import (
@@ -60,10 +59,6 @@ class GRGG:
         Sphere on which the graph is defined.
     kernel : AbstractGeometricKernel
         Kernel function defining the edge probabilities.
-    logdist : bool, optional
-        If `True`, the model uses logarithmic distances for edge probabilities.
-    eps : float, optional
-        Small value to avoid numerical issues with distances.
 
     Examples
     --------
@@ -146,13 +141,30 @@ class GRGG:
     >>> rgg = rgg.calibrate(kbar, q=q)
     >>> bool(np.isclose(rgg.kbar, kbar, atol=1e-1))
     True
+
+    Kernels can also operate based on logarithmic distances,
+    which allows for small-world effects.
+    This may be set individually for each kernel
+    >>> kbar = 10.0
+    >>> rgg = GRGG.from_n(n=100, k=2).set_kernel(Similarity, kbar=kbar, logdist=True)
+    >>> rgg.kernels[0].logdist
+    True
+    >>> bool(np.isclose(rgg.kbar, kbar, atol=1e-1))
+    True
+
+    Or globally for all kernels.
+    >>> from grgg import options
+    >>> options.logdist = True  # logarithmic distance to allow for small-world effects
+    >>> rgg = GRGG.from_n(n=100, k=1).set_kernel(Complementarity, kbar=kbar)
+    >>> rgg.kernels[0].logdist
+    True
+    >>> bool(np.isclose(rgg.kbar, kbar, atol=1e-1))
+    True
     """
 
     n: int
     sphere: Sphere
     kernels: MutableSequence = field(default_factory=list)
-    logdist: bool = options.logdist
-    eps: float = options.eps
 
     def __init__(
         self,
@@ -160,44 +172,27 @@ class GRGG:
         sphere: Sphere,
         *args: AbstractGeometricKernel,
         kernels: MutableSequence[AbstractGeometricKernel] = (),
-        logdist: bool | None = None,
-        eps: float | None = None,
     ) -> None:
         """Initialize the GRGG model.
 
         Kernels may be passed as `*args` and/or as `kernels` list.
         However, the two methods of passing kernels may not be combined.
         """
-        if logdist is None:
-            logdist = options.logdist
-        if eps is None:
-            eps = options.eps
         if n <= 0:
             errmsg = "'n' must be positive"
-            raise ValueError(errmsg)
-        if eps <= 0:  # type: ignore
-            errmsg = "'eps' must be positive"
             raise ValueError(errmsg)
         if kernels and args:
             errmsg = "cannot combine 'kernels' list and '**args'"
             raise ValueError(errmsg)
         if args:
             kernels = args  # type: ignore
-        self.n = n
+        self.n = int(n)
         self.sphere = sphere
         self.kernels = list(kernels or [])
-        self.logdist = logdist
-        self.eps = eps
 
     def __copy__(self) -> Self:
         """Create a copy of the GRGG model."""
-        return self.__class__(
-            self.n,
-            self.sphere,
-            kernels=self.kernels,
-            logdist=self.logdist,
-            eps=self.eps,
-        )
+        return self.__class__(self.n, self.sphere, kernels=self.kernels)
 
     def __getitem__(self, idx: int | slice) -> Self:
         """Get a copy of the GRGG model with a subset of kernels."""
@@ -212,8 +207,6 @@ class GRGG:
             self.n,
             self.sphere.copy(),
             kernels=[k.copy() for k in kernels],
-            logdist=self.logdist,
-            eps=self.eps,
         )
 
     @classmethod
@@ -262,9 +255,6 @@ class GRGG:
         if not self.kernels:
             errmsg = "At least one kernel function must be defined."
             raise ValueError(errmsg)
-        d = np.maximum(d, self.eps)
-        if self.logdist:
-            d = np.log(d)
         P = None
         for kernel in self.kernels:
             K = kernel(d)
