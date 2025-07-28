@@ -43,8 +43,9 @@ class GRGGSample(NamedTuple):
         if issparse(self.A):
             # Make igraph graph from sparse adjacency matrix
             edges = list(zip(*self.A.nonzero(), strict=True))
-            return ig.Graph(edges, directed=False, n=self.A.shape[0])
-        return ig.Graph.Adjacency(self.A, mode="undirected", loops=False)
+            G = ig.Graph(edges, directed=False, n=self.A.shape[0])
+        G = ig.Graph.Adjacency(self.A, mode="undirected", loops=False)
+        return G.simplify()
 
 
 @dataclass(init=False)
@@ -326,9 +327,11 @@ class GRGG:
         """
         q = self._preprocess_q(q)
         mu = self._estimate_mu_from_kbar(kbar, q)
-        return self.set_mu(mu, q)
+        return self._set_mu(mu, q)
 
-    def set_mu(self, mu: float, q: float | np.ndarray | None = None) -> Self:
+    # Internals ----------------------------------------------------------------------
+
+    def _set_mu(self, mu: float, q: float | np.ndarray | None = None) -> Self:
         """Set the `mu` parameter for all kernels in the model.
 
         Parameters
@@ -340,10 +343,8 @@ class GRGG:
         """
         q = self._preprocess_q(q)
         for qi, kernel in zip(q, self.kernels, strict=True):
-            kernel.mu = float((mu * qi).item())
+            kernel.mu = float(mu * qi)
         return self
-
-    # Internals ----------------------------------------------------------------------
 
     def _preprocess_q(self, q: float | np.ndarray | None) -> np.ndarray:
         if q is None:
@@ -375,7 +376,7 @@ class GRGG:
         q = obj._preprocess_q(q)
 
         def objective(mu: float) -> float:
-            obj.set_mu(mu, q)
+            obj._set_mu(mu, q)
             return (obj.kbar - kbar) ** 2
 
         mu0 = 0
