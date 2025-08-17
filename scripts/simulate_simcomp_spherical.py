@@ -18,7 +18,7 @@ params = SimpleNamespace(
     beta_s=np.linspace(0, 10, gridsize),  # 'beta' values for the similarity kernel
     beta_c=np.linspace(0, 10, gridsize),  # 'beta' values for the complementarity kernel
     q=np.linspace(0, 1, gridsize),  # Relative range of similarity
-    logdist=[True, False],  # Whether to use log distance
+    logspace=[True, False],  # Whether to use log distance
     kbar=10,  # Average degree
     nrep=10,  # Number of replications
 )
@@ -36,15 +36,18 @@ def simulate(
         for beta_c in tqdm(params.beta_c, leave=False):
             for q in tqdm(params.q, leave=False):
                 for k in tqdm(params.k, leave=False):
-                    for logdist in tqdm(params.logdist, leave=False):
+                    for logspace in tqdm(params.logspace, leave=False):
                         kbar = params.kbar
                         rgg = (
                             GRGG.from_n(n=params.n, k=k)
                             .set_kernel(
-                                Similarity, kbar=kbar, beta=beta_s, logdist=logdist
+                                Similarity, kbar=kbar, beta=beta_s, logspace=logspace
                             )
                             .set_kernel(
-                                Complementarity, kbar=kbar, beta=beta_c, logdist=logdist
+                                Complementarity,
+                                kbar=kbar,
+                                beta=beta_c,
+                                logspace=logspace,
                             )
                             .calibrate(kbar=params.kbar, q=q)
                         )
@@ -57,7 +60,7 @@ def simulate(
                                 "beta_s": beta_s,
                                 "beta_c": beta_c,
                                 "q": q,
-                                "logdist": logdist,
+                                "logspace": logspace,
                                 "idx": i,
                                 "density": G.density(),
                                 "clustering": coefs["sim_g"],

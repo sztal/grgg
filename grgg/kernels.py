@@ -1,11 +1,12 @@
 from abc import ABC, abstractmethod
+from functools import singledispatchmethod
 from typing import Any, Self
 
 import numpy as np
+from geomstats.geometry.manifold import Manifold
 
 from . import options
 from .manifolds import Sphere
-from .utils import copy_with_update
 
 
 class AbstractGeometricKernel(ABC):
@@ -16,11 +17,11 @@ class AbstractGeometricKernel(ABC):
         mu: float,
         beta: float,
         *,
-        logdist: bool | None = None,
+        logspace: bool | None = None,
         eps: float | None = None,
     ) -> None:
-        if logdist is None:
-            logdist = options.logdist
+        if logspace is None:
+            logspace = options.logspace
         if eps is None:
             eps = options.eps
         eps = float(eps)
@@ -32,74 +33,88 @@ class AbstractGeometricKernel(ABC):
             raise ValueError(errmsg)
         self.mu = float(mu)
         self.beta = float(beta)
-        self.logdist = bool(logdist)
+        self.logspace = bool(logspace)
         self.eps = eps
 
     def __repr__(self) -> str:
         cn = self.__class__.__name__
-        params = {**self.params, "logdist": self.logdist, "eps": self.eps}
+        params = {**self.params, "logspace": self.logspace}
         params_str = ", ".join(f"{k}={v}" for k, v in params.items())
         return f"{cn}({params_str})"
 
     def __call__(self, d: np.ndarray) -> np.ndarray:
         """Evaluate the kernel function for distances `d`."""
-        d = self.preprocess(d)
-        d = np.maximum(d, self.eps)  # ensure no zero distances
-        if self.logdist:
-            d = np.log(d)
-        return self.kernel(d)
+        r = self.relation_scores(d)
+        r = np.maximum(r, self.eps)  # ensure no zero relation scores
+        if self.logspace:
+            r = np.log(r)
+        return self.kernel(r)
 
     @property
     def params(self) -> dict[str, float]:
         return {"mu": self.mu, "beta": self.beta}
 
     @abstractmethod
-    def preprocess(self, d: np.ndarray) -> np.ndarray:
-        """Process distances before applying the kernel function."""
+    def relation_scores(self, d: np.ndarray) -> np.ndarray:
+        """Convert manifold distances to relation scores."""
 
     def kernel(self, d: np.ndarray) -> np.ndarray:
         """Evaluate the kernel function."""
         if np.isinf(self.beta):
-            return self.beta * (d - self.mu)
+            return np.where(d <= self.mu, -np.inf, np.inf)
         return self.beta * d - self.mu
 
     def __copy__(self) -> Self:
         """Create a copy of the kernel instance with updated parameters."""
-        return self.__class__(self.mu, self.beta)
+        kwargs = {
+            **self.params,
+            "logspace": self.logspace,
+            "eps": self.eps,
+        }
+        return self.__class__(**kwargs)
 
     @classmethod
-    def from_sphere(cls, sphere: Sphere, **kwargs: Any) -> Self:
-        """Create a kernel instance from a model.
+    def from_manifold(cls, manifold: Manifold, n_nodes: int, **kwargs: Any) -> Self:
+        """Create a kernel instance from a manifold."""
+        default_params = cls.params_from_manifold(manifold, n_nodes, **kwargs)
+        return cls(**default_params)
 
-        This allows for setting reasonable defaults for `mu` and `beta`.
-        """
-        params = cls.params_from_sphere(sphere, **kwargs)
-        return cls(**params)
+    @singledispatchmethod
+    @classmethod
+    def params_from_manifold(
+        cls,
+        manifold: Manifold,
+        n_nodes: int,  # noqa
+        **kwargs: Any,  # noqa
+    ) -> dict[str, Any]:
+        errmsg = f"not implemented for '{manifold.__class__.__name__}'"
+        raise NotImplementedError(errmsg)
+
+    @params_from_manifold.register
+    @classmethod
+    def _(cls, manifold: Sphere, n_nodes: int, **kwargs: Any) -> dict[str, float]:
+        return cls.params_from_sphere(manifold, n_nodes, **kwargs)
 
     @classmethod
     def params_from_sphere(
-        cls,
-        sphere: Sphere,
-        *,
-        mu: float | None = None,
-        beta: float = 1.5,
-        logdist: bool | None = None,
-        eps: float | None = None,
-    ) -> dict[str, float]:
-        beta = float(beta * sphere.k)
-        if mu is None:
-            mu = np.pi * sphere.R / 2
-        return {"mu": mu, "beta": beta, "logdist": logdist, "eps": eps}
+        cls, sphere: Sphere, n_nodes: int, **kwargs: Any
+    ) -> dict[str, Any]:
+        """Create a kernel instance from a sphere."""
+        if (key := "mu") not in kwargs:
+            kwargs[key] = sphere.radius(n_nodes) * np.pi / 2
+        if (key := "beta") not in kwargs:
+            kwargs[key] = 1.5 * sphere.dim
+        return kwargs
 
-    def copy(self, **kwargs: Any) -> Self:
+    def copy(self) -> Self:
         """Create a copy of the kernel instance with updated parameters."""
-        return copy_with_update(self, **kwargs)
+        return self.__copy__()
 
 
 class Similarity(AbstractGeometricKernel):
     """Kernel for the Similarity-RGG model."""
 
-    def preprocess(self, d: np.ndarray) -> np.ndarray:
+    def relation_scores(self, d: np.ndarray) -> np.ndarray:
         return d
 
 
@@ -118,19 +133,14 @@ class Complementarity(AbstractGeometricKernel):
         params["dmax"] = self.dmax
         return params
 
-    def preprocess(self, d: np.ndarray) -> np.ndarray:
+    def relation_scores(self, d: np.ndarray) -> np.ndarray:
         return self.dmax - d
-
-    def __copy__(self) -> Self:
-        """Create a copy of the complementarity kernel instance."""
-        return self.__class__(self.mu, self.beta, self.dmax)
 
     @classmethod
     def params_from_sphere(
-        cls, sphere: Sphere, *, dmax: float | None = None, **kwargs: Any
+        cls, sphere: Sphere, n_nodes: int, **kwargs: Any
     ) -> dict[str, float]:
-        params = super().params_from_sphere(sphere, **kwargs)
-        if dmax is None:
-            dmax = sphere.R * np.pi
-        params["dmax"] = dmax
+        params = super().params_from_sphere(sphere, n_nodes, **kwargs)
+        if (key := "dmax") not in params:
+            params[key] = sphere.radius(n_nodes) * np.pi
         return params
