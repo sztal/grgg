@@ -58,11 +58,11 @@ class AbstractGeometricKernel(ABC):
     def relation_scores(self, d: np.ndarray) -> np.ndarray:
         """Convert manifold distances to relation scores."""
 
-    def kernel(self, d: np.ndarray) -> np.ndarray:
+    def kernel(self, r: np.ndarray) -> np.ndarray:
         """Evaluate the kernel function."""
         if np.isinf(self.beta):
-            return np.where(d <= self.mu, -np.inf, np.inf)
-        return self.beta * d - self.mu
+            return np.where(r <= self.mu, -np.inf, np.inf)
+        return self.beta * r - self.mu
 
     def __copy__(self) -> Self:
         """Create a copy of the kernel instance with updated parameters."""

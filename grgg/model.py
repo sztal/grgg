@@ -1,17 +1,17 @@
 import math
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterator, Mapping, Sequence
 from functools import singledispatchmethod
 from typing import Any, NamedTuple, Self
 
 import igraph as ig
 import numpy as np
 from scipy.integrate import quad
-from scipy.optimize import minimize
 from scipy.sparse import issparse, sparray
 from scipy.special import expit
 
 from .kernels import AbstractGeometricKernel
 from .manifolds import Sphere
+from .optim import KBarOptimizer
 
 
 class GRGGSample(NamedTuple):
@@ -285,7 +285,7 @@ class GRGG:
         model = self.copy()
         model.kernels = [kernel]
         optim = optim or {}
-        mu = model._estimate_mu_from_kbar(kbar, **optim)
+        mu = model._solve_for_kbar(kbar, **optim)
         kernel.mu = float(mu[0])
         self.kernels.append(kernel)
         return self
@@ -322,15 +322,21 @@ class GRGG:
             Optional optimization parameters for the
             :func:`scipy.optimize.minimize` function.
         """
-        weights = self._make_weights(weights)
         optim = optim or {}
-        mu = self._estimate_mu_from_kbar(kbar, weights, **optim)
-        self._set_mu(mu)
+
+        mu = self._solve_for_kbar(kbar, weights, **optim)
+        self.set_mu(mu)
         return self
+
+    def set_mu(self, mu: Sequence) -> None:
+        """Set the `mu` parameter for each kernel in the model."""
+        for m, kernel in zip(mu, self.kernels, strict=True):
+            if m is not None:
+                kernel.mu = float(m)
 
     # Internals ----------------------------------------------------------------------
 
-    def _estimate_mu_from_kbar(
+    def _solve_for_kbar(
         self,
         kbar: float,
         weights: np.ndarray | None = None,
@@ -340,45 +346,5 @@ class GRGG:
         **kwargs: Any,
     ) -> np.ndarray:
         """Estimate the `mu` parameter from the desired average degree `kbar`."""
-        model = self.copy()
-        weights = self._make_weights(weights)
-
-        def objective(mu: np.ndarray) -> float:
-            model._set_mu(mu)
-            kbar_target = model.kbar
-            loss = (kbar_target - kbar) ** 2
-            if mu.size > 1:
-                K = [submodel.kbar for submodel in model.submodels]
-                K_target = weights * sum(K)
-                loss += ((K - K_target) ** 2).sum()
-            return loss
-
-        if x0 is None:
-            x0 = np.asarray([k.mu for k in model.kernels])
-        x0 = np.atleast_1d(x0)
-        if x0.ndim != 1:
-            errmsg = "'x0' must be a 1D array-like"
-            raise ValueError(errmsg)
-        if x0.size != len(model.kernels):
-            errmsg = "'x0' must have the same length as 'kernels'"
-            raise ValueError(errmsg)
-
-        solution = minimize(objective, x0, method=method, **kwargs)
-        return solution.x
-
-    def _make_weights(self, weights: np.ndarray | None = None) -> np.ndarray:
-        if weights is None:
-            weights = np.ones(len(self.kernels))
-        weights = np.atleast_1d(weights)
-        if weights.ndim != 1:
-            errmsg = "'weights' must be a 1D array-like"
-            raise ValueError(errmsg)
-        if weights.size != len(self.kernels):
-            errmsg = "'weights' must have the same length as 'kernels'"
-            raise ValueError(errmsg)
-        weights = weights / weights.sum()
-        return weights
-
-    def _set_mu(self, mu: np.ndarray) -> None:
-        for m, kernel in zip(mu, self.kernels, strict=True):
-            kernel.mu = float(m)
+        optimizer = KBarOptimizer(self.copy(), kbar, weights)
+        return optimizer.optimize(x0, method, **kwargs)
