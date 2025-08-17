@@ -1,78 +1,54 @@
-from dataclasses import dataclass
-from typing import Any, Self
+import math
 
 import numpy as np
-
-from .utils import (
-    copy_with_update,
-    sphere_radius,
-    sphere_surface_area,
-    sphere_surface_sample,
-    sphere_volume,
-)
+from geomstats.geometry.hypersphere import Hypersphere
+from scipy.spatial.distance import cdist, pdist, squareform
 
 
-@dataclass
-class Sphere:
-    """Sphere in :math:`k`-dimensional space.
+class Sphere(Hypersphere):
+    def pdist(self, X: np.ndarray, *, full: bool = True) -> np.ndarray:
+        """Compute pairwise distances between points on the sphere."""
+        angles = np.arccos(1 - pdist(X, metric="cosine"))
+        if full:
+            angles = squareform(angles)
+        return angles
 
-    Attributes
-    ----------
-    R : float
-        Radius of the sphere.
-    k : int
-        Surface dimension of the sphere.
+    def cdist(self, X: np.ndarray, Y: np.ndarray) -> np.ndarray:
+        """Compute pairwise distances between two sets of points on the sphere."""
+        angles = np.arccos(1 - cdist(X, Y, metric="cosine"))
+        return angles
 
-    Examples
-    --------
-    >>> sphere = Sphere(R=1.0, k=2)
-    >>> sphere.S  # doctest: +FLOAT_CMP
-    12.566370614359172
-    >>> sphere.V  # doctest: +FLOAT_CMP
-    4.1887902047863905
-    >>> sphere = Sphere.from_area(S=100.0, k=2)
-    >>> sphere.S  # doctest: +FLOAT_CMP
-    100.0
-    """
+    def surface_area(self, radius: float = 1.0) -> float:
+        """Compute the surface area of the sphere.
 
-    R: float
-    k: int
+        Parameters
+        ----------
+        radius
+            Radius of the sphere, by default 1.0.
+        """
+        k = self.embedding_space.dim
+        return float((2 * math.pi ** (k / 2)) / math.gamma(k / 2) * radius ** (k - 1))
 
-    def __post_init__(self) -> None:
-        """Validate the sphere's attributes."""
-        if self.R <= 0:
-            errmsg = "Radius must be positive."
-            raise ValueError(errmsg)
-        if self.k < 1:
-            errmsg = "Surface dimension must be at least 1."
-            raise ValueError(errmsg)
-        self.R = float(self.R)
-        self.k = int(self.k)
+    def volume(self, radius: float = 1.0) -> float:
+        """Compute the volume of the sphere.
 
-    def __copy__(self) -> Self:
-        """Create a shallow copy of the sphere."""
-        return self.__class__(self.R, self.k)
+        Parameters
+        ----------
+        radius
+            Radius of the sphere, by default 1.0.
+        """
+        k = self.embedding_space.dim
+        return float((math.pi ** (k / 2)) / math.gamma(k / 2 + 1) * radius**k)
 
-    @property
-    def S(self) -> float:
-        """Compute the surface area of the sphere."""
-        return sphere_surface_area(self.R, self.k)
+    def radius(self, area: float) -> float:
+        """Compute the radius of the sphere given its surface area.
 
-    @property
-    def V(self) -> float:
-        """Compute the volume of the sphere."""
-        return sphere_volume(self.R, self.k)
-
-    @classmethod
-    def from_area(cls, S: float, k: int) -> Self:
-        """Create a sphere instance from its surface area."""
-        R = sphere_radius(S, k)
-        return cls(R=R, k=k)
-
-    def copy(self, **kwargs: Any) -> Self:
-        """Create a copy of the sphere with optional modifications."""
-        return copy_with_update(self, **kwargs)
-
-    def sample_surface(self, n: int, **kwargs: Any) -> np.ndarray:
-        """Sample points uniformly from the surface of the sphere."""
-        return sphere_surface_sample(n, self.k, **kwargs) * self.R
+        Parameters
+        ----------
+        area
+            Surface area of the sphere.
+        """
+        k = self.embedding_space.dim
+        return float(
+            (area * math.gamma(k / 2) / (2 * math.pi ** (k / 2))) ** (1 / (k - 1))
+        )

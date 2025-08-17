@@ -1,7 +1,6 @@
 # Root level
 /figures
-_sandbox.py
-_sandbox
+/_sandbox*
 build/
 .mypy_cache/
 .coverage
