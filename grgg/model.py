@@ -267,6 +267,39 @@ class GRGG:
             The kernel class to instantiate.
         **kwargs
             Additional parameters for the kernel.
+
+        Examples
+        --------
+        Here we define a model with 100 nodes on a 2-dimensional sphere
+        and add a `Similarity` with default parameters.
+
+        >>> from grgg import GRGG, Sphere, Similarity, Complementarity
+        >>> GRGG(100, Sphere(2)).add_kernel(Similarity)
+        GRGG(100, Sphere(2), Similarity(mu=..., beta=3.0, logspace=True))
+
+        However, typically it is more useful to add a kernels inducing specific
+        average degrees. This can be done by passing the desired average degree
+        as the first argument to the `add_kernel` method.
+
+        Below we define a model with two kernels, both inducing an average degree of 5.
+
+        >>> model = (
+        ...     GRGG(100, Sphere(2))
+        ...     .add_kernel(5, Similarity)
+        ...     .add_kernel(5, Complementarity)
+        ... )
+        >>> model[0].kbar  # Similarity kernel submodel
+        5.0
+        >>> model[1].kbar  # Complementarity kernel submodel
+        5.0
+
+        Note that the average degree of the combined model may be lower than the sum
+        of the average degrees of the submodels due to overlaps in connections.
+        >>> model.kbar < 10
+        True
+
+        To address this issue, the model provides a `calibrate` method.
+        See :meth:`calibrate` for more details.
         """
         kernel = kernel_type.from_manifold(self.manifold, self.n_nodes, **kwargs)
         self.kernels.append(kernel)
@@ -321,6 +354,39 @@ class GRGG:
         optim
             Optional optimization parameters for the
             :func:`scipy.optimize.minimize` function.
+
+        Examples
+        --------
+        The model can be calibrated to have a specific average degree
+        by calling the `calibrate` method with the desired average degree.
+        This method ensures that the overall average degree of the model
+        is equal to the specified `kbar`, taking into account the possible overlaps
+        of connections defined by different kernels.
+
+        >>> from grgg import GRGG, Sphere, Similarity, Complementarity
+        >>> model = (
+        ...     GRGG(100, Sphere(2))
+        ...     .add_kernel(Similarity)
+        ...     .add_kernel(Complementarity)
+        ...     .calibrate(10)
+        ... )
+        >>> model.kbar
+        10.0
+
+        It is also possible to calibrate the model while assuming different relative
+        strengths of the kernels. This can be done by passing a second `weights`
+        argument to the `calibrate` method.
+
+        Below we calibrate to `kbar=10` while assuming that the second kernel
+        (Complementarity) is twice as strong as the first one (Similarity).
+
+        >>> model = model.calibrate(10, [1, 2])
+        >>> model.kbar
+        10.0
+        >>> model[0].kbar  # Similarity kernel
+        3.4188314
+        >>> model[1].kbar  # Complementarity kernel
+        6.8374754
         """
         optim = optim or {}
 
@@ -348,3 +414,9 @@ class GRGG:
         """Estimate the `mu` parameter from the desired average degree `kbar`."""
         optimizer = KBarOptimizer(self.copy(), kbar, weights)
         return optimizer.optimize(x0, method, **kwargs)
+
+
+# Run doctests not discoverable in the standard way due to decorator usage -----------
+__test__ = {
+    "GRGG.add_kernel": GRGG.add_kernel.__doc__,
+}
