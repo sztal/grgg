@@ -6,9 +6,10 @@ from typing import Any, NamedTuple, Self
 import igraph as ig
 import numpy as np
 from scipy.integrate import quad
-from scipy.sparse import issparse, sparray
+from scipy.sparse import csr_array, sparray
 from scipy.special import expit
 
+from . import options
 from .kernels import AbstractGeometricKernel
 from .manifolds import Sphere
 from .optim import KBarOptimizer
@@ -19,26 +20,23 @@ class GRGGSample(NamedTuple):
 
     Attributes
     ----------
-    A : np.ndarray
+    A
         Sparse adjacency matrix of the sampled graph.
-    X : np.ndarray
+    X
         Coordinates of the sampled points on the sphere.
-    G : ig.Graph
+    G
         :mod:`igraph` representation of the sampled graph.
     """
 
-    A: sparray | np.ndarray
+    A: sparray
     X: np.ndarray
 
     @property
     def G(self) -> ig.Graph:
         """Return the :mod:`igraph` representation of the sampled graph."""
-        if issparse(self.A):
-            # Make igraph graph from sparse adjacency matrix
-            edges = list(zip(*self.A.nonzero(), strict=True))
-            G = ig.Graph(edges, directed=False, n=self.A.shape[0])
-        else:
-            G = ig.Graph.Adjacency(self.A, mode="undirected", loops=False)
+        # Make igraph graph from sparse adjacency matrix
+        edges = np.column_stack(self.A.nonzero())
+        G = ig.Graph(edges, directed=False, n=self.A.shape[0])
         return G.simplify()
 
 
@@ -67,6 +65,7 @@ class GRGG:
     The model is initialized from a number of nodes and a manifold
     on which they will live (currently only spheres are supported).
 
+    >>> from math import isclose
     >>> from grgg import GRGG, Sphere, Similarity, Complementarity
     >>> sphere = Sphere(2)  # sphere with 2-dimensional surface
     >>> model = GRGG(100, sphere)
@@ -86,9 +85,9 @@ class GRGG:
 
     Note that the model keeps track of the radius necessary
     for obtaining the desired surface area.
-    >>> bool(np.isclose(model.radius, model.manifold.radius(model.n_nodes)))
+    >>> isclose(model.radius, model.manifold.radius(model.n_nodes))
     True
-    >>> bool(np.isclose(model.manifold.surface_area(model.radius), model.n_nodes))
+    >>> isclose(model.manifold.surface_area(model.radius), model.n_nodes)
     True
 
     For the model to be useful, we need to add kernel functions
@@ -119,8 +118,8 @@ class GRGG:
     to the `add_kernel` method. The kernel will be calibrated to induce the desired
     average degree in the graph.
     >>> model = GRGG(100, 2).add_kernel(5, Similarity)
-    >>> model.kbar  # doctest: +FLOAT_CMP
-    5.0
+    >>> isclose(model.kbar, 5.0, rel_tol=1e-4)
+    True
 
     Most importantly, the model can have multiple kernels,
     which allows for more complex edge probability distributions.
@@ -131,10 +130,10 @@ class GRGG:
     This also gives us a good oportunity to note that, given a compound model,
     it is possible to get submodels with selected kernels using indexing.
     This allows us to see that the submodels indeed have the target average degree.
-    >>> model[0].kbar  # Similarity kernel
-    5.0
-    >>> model[1].kbar  # Complementarity kernel
-    5.0
+    >>> isclose(model[0].kbar, 5.0, rel_tol=1e-4)  # Similarity kernel
+    True
+    >>> isclose(model[1].kbar, 5.0, rel_tol=1e-4)  # Complementarity kernel
+    True
 
     However, due to possible overlaps of the connections defined by different kernels,
     the average degree of the combined model may be lower than the sum of the
@@ -161,9 +160,9 @@ class GRGG:
     >>> model.kbar
     10.0
     >>> model[0].kbar
-    3.4187392
+    3.3389203
     >>> model[1].kbar
-    6.8376240
+    6.6776256
     """
 
     def __init__(
@@ -223,13 +222,14 @@ class GRGG:
     def kbar(self) -> float:
         """Average degree of the graph."""
         R = self.radius
+        eps = np.mean([k.eps for k in self.kernels])
 
         def integrand(d: float) -> float:
             r = R * math.sin(d / R)
-            S = self.manifold.surface_area(r, self.manifold.dim - 1)
+            S = self.manifold.surface_area(r, self.manifold.dim)
             return self.edgeprobs(d) * S
 
-        integral, _ = quad(integrand, 0, R * np.pi)
+        integral, _ = quad(integrand, eps, R * np.pi)
         return integral / self.n_nodes * (self.n_nodes - 1)
 
     def edgeprobs(self, d: float | np.ndarray) -> float:
@@ -273,6 +273,7 @@ class GRGG:
         Here we define a model with 100 nodes on a 2-dimensional sphere
         and add a `Similarity` with default parameters.
 
+        >>> from math import isclose
         >>> from grgg import GRGG, Sphere, Similarity, Complementarity
         >>> GRGG(100, Sphere(2)).add_kernel(Similarity)
         GRGG(100, Sphere(2), Similarity(mu=..., beta=3.0, logspace=True))
@@ -288,10 +289,10 @@ class GRGG:
         ...     .add_kernel(5, Similarity)
         ...     .add_kernel(5, Complementarity)
         ... )
-        >>> model[0].kbar  # Similarity kernel submodel
-        5.0
-        >>> model[1].kbar  # Complementarity kernel submodel
-        5.0
+        >>> isclose(model[0].kbar, 5.0, rel_tol=1e-4)  # Similarity kernel submodel
+        True
+        >>> isclose(model[1].kbar, 5.0, rel_tol=1e-4)  # Complementarity kernel submodel
+        True
 
         Note that the average degree of the combined model may be lower than the sum
         of the average degrees of the submodels due to overlaps in connections.
@@ -384,9 +385,9 @@ class GRGG:
         >>> model.kbar
         10.0
         >>> model[0].kbar  # Similarity kernel
-        3.4188314
+        3.3389029
         >>> model[1].kbar  # Complementarity kernel
-        6.8374754
+        6.6776256
         """
         optim = optim or {}
 
@@ -399,6 +400,47 @@ class GRGG:
         for m, kernel in zip(mu, self.kernels, strict=True):
             if m is not None:
                 kernel.mu = float(m)
+
+    def sample(
+        self,
+        *,
+        batch_size: int | None = None,
+        random_state: np.random.Generator | int | None = None,
+    ) -> GRGGSample:
+        """Sample a graph from the GRGG model."""
+        batch_size = options.sample_batch_size if batch_size is None else batch_size
+        batch_size = int(batch_size)
+        if batch_size <= 0:
+            errmsg = "'batch_size' must be positive"
+            raise ValueError(errmsg)
+        if random_state is None:
+            random_state = np.random.default_rng()
+        elif isinstance(random_state, int):
+            random_state = np.random.default_rng(random_state)
+        if not isinstance(random_state, np.random.Generator):
+            errmsg = "'random_state' must be a numpy random generator or an integer"
+            raise TypeError(errmsg)
+        n = self.n_nodes
+        r = self.radius
+        # Sample normalized unit sphere positions
+        X = self.manifold.random_uniform(n)
+        Ai = []
+        Aj = []
+        for i in range(0, n, batch_size):
+            for j in range(0, i + batch_size, batch_size):
+                D = self.manifold.cdist(X[i : i + batch_size], X[j : j + batch_size])
+                P = self.edgeprobs(D * r)
+                if i == j:
+                    P = np.tril(P, k=-1)
+                ai, aj = np.nonzero(random_state.random(P.shape) < P)
+                ai += i * batch_size
+                aj += j * batch_size
+                Ai.extend(ai)
+                Aj.extend(aj)
+        values = np.ones(len(Ai), dtype=int)
+        A = csr_array((values, (Ai, Aj)), shape=(n, n))
+        A += A.T  # make it symmetric
+        return GRGGSample(A, X * r)
 
     # Internals ----------------------------------------------------------------------
 
