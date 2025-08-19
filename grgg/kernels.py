@@ -3,10 +3,11 @@ from functools import singledispatchmethod
 from typing import Any, Self
 
 import numpy as np
-from geomstats.geometry.manifold import Manifold
 
 from . import options
-from .manifolds import Sphere
+from .manifolds import CompactManifold, Manifold
+
+__all__ = ("Similarity", "Complementarity")
 
 
 class AbstractGeometricKernel(ABC):
@@ -38,31 +39,15 @@ class AbstractGeometricKernel(ABC):
 
     def __repr__(self) -> str:
         cn = self.__class__.__name__
-        params = {**self.params, "logspace": self.logspace}
-        params_str = ", ".join(f"{k}={v}" for k, v in params.items())
-        return f"{cn}({params_str})"
+        attrs = [
+            f"{k}={v:f.3}" if isinstance(v, float) else f"{k}={v}"
+            for k, v in self.repr_attrs.items()
+        ]
+        return f"{cn}({", ".join(attrs)})"
 
     def __call__(self, d: np.ndarray) -> np.ndarray:
         """Evaluate the kernel function for distances `d`."""
-        r = self.relation_scores(d)
-        r = np.maximum(r, self.eps)  # ensure no zero relation scores
-        if self.logspace:
-            r = np.log(r)
-        return self.kernel(r)
-
-    @property
-    def params(self) -> dict[str, float]:
-        return {"mu": self.mu, "beta": self.beta}
-
-    @abstractmethod
-    def relation_scores(self, d: np.ndarray) -> np.ndarray:
-        """Convert manifold distances to relation scores."""
-
-    def kernel(self, r: np.ndarray) -> np.ndarray:
-        """Evaluate the kernel function."""
-        if np.isinf(self.beta):
-            return np.where(r <= self.mu, -np.inf, np.inf)
-        return self.beta * r - self.mu
+        return self.kernel(d)
 
     def __copy__(self) -> Self:
         """Create a copy of the kernel instance with updated parameters."""
@@ -73,37 +58,45 @@ class AbstractGeometricKernel(ABC):
         }
         return self.__class__(**kwargs)
 
+    @property
+    def params(self) -> dict[str, float]:
+        return {"mu": self.mu, "beta": self.beta}
+
+    @property
+    def repr_attrs(self) -> dict[str, Any]:
+        """Return parameters suitable for printing."""
+        return {"mu": self.mu, "beta": self.beta, "logspace": self.logspace}
+
+    @abstractmethod
+    def kernel(self, r: np.ndarray) -> np.ndarray:
+        """Evaluate the kernel function."""
+        r = np.maximum(r, self.eps)  # ensure no zero relation scores
+        if self.logspace:
+            r = np.log(r)
+        if np.isinf(self.beta):
+            return np.where(r <= self.mu, -np.inf, np.inf)
+        return self.beta * r - self.mu
+
     @classmethod
-    def from_manifold(cls, manifold: Manifold, n_nodes: int, **kwargs: Any) -> Self:
+    def from_manifold(cls, manifold, **kwargs: Any) -> Self:
         """Create a kernel instance from a manifold."""
-        default_params = cls.params_from_manifold(manifold, n_nodes, **kwargs)
+        default_params = cls.params_from_manifold(manifold, **kwargs)
         return cls(**default_params)
 
     @singledispatchmethod
     @classmethod
-    def params_from_manifold(
-        cls,
-        manifold: Manifold,
-        n_nodes: int,  # noqa
-        **kwargs: Any,  # noqa
-    ) -> dict[str, Any]:
+    def params_from_manifold(cls, manifold, **kwargs: Any) -> dict[str, Any]:  # noqa
         errmsg = f"not implemented for '{manifold.__class__.__name__}'"
         raise NotImplementedError(errmsg)
 
     @params_from_manifold.register
     @classmethod
-    def _(cls, manifold: Sphere, n_nodes: int, **kwargs: Any) -> dict[str, float]:
-        return cls.params_from_sphere(manifold, n_nodes, **kwargs)
-
-    @classmethod
-    def params_from_sphere(
-        cls, sphere: Sphere, n_nodes: int, **kwargs: Any
-    ) -> dict[str, Any]:
+    def _(cls, manifold: Manifold, **kwargs: Any) -> dict[str, Any]:
         """Create a kernel instance from a sphere."""
         if (key := "mu") not in kwargs:
-            kwargs[key] = sphere.radius(n_nodes) * np.pi / 2
+            kwargs[key] = 0.0
         if (key := "beta") not in kwargs:
-            kwargs[key] = 1.5 * sphere.dim
+            kwargs[key] = 1.5 * manifold.dim
         return kwargs
 
     def copy(self) -> Self:
@@ -114,33 +107,40 @@ class AbstractGeometricKernel(ABC):
 class Similarity(AbstractGeometricKernel):
     """Kernel for the Similarity-RGG model."""
 
-    def relation_scores(self, d: np.ndarray) -> np.ndarray:
-        return d
+    def kernel(self, d: np.ndarray) -> np.ndarray:
+        """Evaluate the similarity kernel function."""
+        return super().kernel(d)
 
 
 class Complementarity(AbstractGeometricKernel):
     """Kernel for the Complementarity-RGG model."""
 
-    def __init__(self, mu: float, beta: float, dmax: float, **kwargs: Any) -> None:
+    def __init__(
+        self, mu: float, beta: float, max_distance: float, **kwargs: Any
+    ) -> None:
         """Initialize the complementarity kernel."""
         super().__init__(mu, beta, **kwargs)
-        self.dmax = float(dmax)
+        self.max_distance = float(max_distance)
 
     @property
     def params(self) -> dict[str, float]:
         """Return the parameters of the complementarity kernel."""
         params = super().params
-        params["dmax"] = self.dmax
+        params["max_distance"] = self.dmax
         return params
 
-    def relation_scores(self, d: np.ndarray) -> np.ndarray:
-        return self.dmax - d
+    def kernel(self, d: np.ndarray) -> np.ndarray:
+        """Evaluate the complementarity kernel function."""
+        r = self.max_distance - d
+        return super().kernel(r)
 
+    @AbstractGeometricKernel.params_from_manifold.register
     @classmethod
-    def params_from_sphere(
-        cls, sphere: Sphere, n_nodes: int, **kwargs: Any
-    ) -> dict[str, float]:
-        params = super().params_from_sphere(sphere, n_nodes, **kwargs)
+    def _(cls, manifold: Manifold, **kwargs: Any) -> dict[str, float]:
+        if not isinstance(manifold, CompactManifold):
+            errmsg = "complementarity kernel requires a compact manifold"
+            raise TypeError(errmsg)
+        params = super().params_from_sphere(manifold, **kwargs)
         if (key := "dmax") not in params:
-            params[key] = sphere.radius(n_nodes) * np.pi
+            params[key] = manifold.max_distance
         return params
