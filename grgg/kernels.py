@@ -22,9 +22,9 @@ class AbstractGeometricKernel(ABC):
         eps: float | None = None,
     ) -> None:
         if logspace is None:
-            logspace = options.logspace
+            logspace = options.kernel.logspace
         if eps is None:
-            eps = options.eps
+            eps = options.kernel.eps
         eps = float(eps)
         if eps <= 0:
             errmsg = "'eps' must be positive"
@@ -40,7 +40,7 @@ class AbstractGeometricKernel(ABC):
     def __repr__(self) -> str:
         cn = self.__class__.__name__
         attrs = [
-            f"{k}={v:f.3}" if isinstance(v, float) else f"{k}={v}"
+            f"{k}={v:.2f}" if isinstance(v, float) else f"{k}={v}"
             for k, v in self.repr_attrs.items()
         ]
         return f"{cn}({", ".join(attrs)})"
@@ -126,7 +126,7 @@ class Complementarity(AbstractGeometricKernel):
     def params(self) -> dict[str, float]:
         """Return the parameters of the complementarity kernel."""
         params = super().params
-        params["max_distance"] = self.dmax
+        params["max_distance"] = self.max_distance
         return params
 
     def kernel(self, d: np.ndarray) -> np.ndarray:
@@ -134,13 +134,17 @@ class Complementarity(AbstractGeometricKernel):
         r = self.max_distance - d
         return super().kernel(r)
 
-    @AbstractGeometricKernel.params_from_manifold.register
+    @singledispatchmethod
+    def params_from_manifold(cls, manifold, **kwargs: Any) -> dict[str, Any]:
+        return super().params_from_manifold(manifold, **kwargs)
+
+    @params_from_manifold.register
     @classmethod
     def _(cls, manifold: Manifold, **kwargs: Any) -> dict[str, float]:
         if not isinstance(manifold, CompactManifold):
             errmsg = "complementarity kernel requires a compact manifold"
             raise TypeError(errmsg)
-        params = super().params_from_sphere(manifold, **kwargs)
-        if (key := "dmax") not in params:
+        params = super().params_from_manifold(manifold, **kwargs)
+        if (key := "max_distance") not in params:
             params[key] = manifold.max_distance
         return params

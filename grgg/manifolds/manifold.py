@@ -22,11 +22,11 @@ class Manifold(ABC):
     def __repr__(self) -> str:
         cn = self.__class__.__name__
         params = [
-            f"{k}={v:f.3}" if isinstance(v, float) else f"{k}={v}"
+            f"{k}={v:.2f}" if isinstance(v, float) else f"{k}={v}"
             for k, v in self.params.items()
         ]
         params = [str(self.dim), *params]
-        return f"{cn}({",".join(params)})"
+        return f"{cn}({", ".join(params)})"
 
     def __copy__(self) -> Self:
         return self.__class__(self.dim, **self.params)

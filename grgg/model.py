@@ -1,18 +1,17 @@
-import math
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Iterator, Mapping
 from functools import singledispatchmethod
 from typing import Any, NamedTuple, Self
 
 import igraph as ig
 import numpy as np
-from scipy.integrate import quad
 from scipy.sparse import csr_array, sparray
 from scipy.special import expit
 
 from . import options
+from .integrate import GRGGIntegration
 from .kernels import AbstractGeometricKernel
-from .manifolds import Sphere
-from .optimize import KBarOptimizer
+from .manifolds import Manifold, Sphere
+from .optimize import GRGGOptimization
 
 
 class GRGGSample(NamedTuple):
@@ -89,7 +88,7 @@ class GRGG:
     default parameters. The kernel is added in place, but the method also returns the
     reference to the model itself, so multiple invocations can be chained.
     >>> model.add_kernel(Similarity)
-    GRGG(100, Sphere(2, r=...), Similarity(mu=..., beta=3.0, logspace=True))
+    GRGG(100, Sphere(...), Similarity(..., logspace=True))
 
     Note the 'logspace=True' parameter, which is the default for all kernels.
     This means that the kernel will use logarithmic distance-relations to allow for
@@ -98,10 +97,19 @@ class GRGG:
     module.
 
     >>> from grgg import options
-    >>> options.logspace = False  # disable logarithmic distance for all kernels
+    >>> options.kernel.logspace = False  # disable logarithmic distance for all kernels
     >>> model.add_kernel(Similarity)
     GRGG(100, Sphere(2, r=...), Similarity(mu=..., beta=3.0, logspace=False))
-    >>> options.logspace = True  # restore default behavior
+    >>> options.kernel.logspace = True  # restore default behavior
+
+    Temporary options handling can be done more conveniently using the context manager.
+    >>> with options:
+    ...     options.kernel.logspace = False
+    ...     model.add_kernel(Similarity)
+    GRGG(100, Sphere(2, r=...), Similarity(mu=..., beta=3.0, logspace=False))
+
+    >>> options.kernel.logspace
+    True
 
     Now, it is typically more useful to add kernels with specific average degrees.
     This is done by passing the desired average degree as the first argument to the
@@ -142,40 +150,49 @@ class GRGG:
     10.0
 
     Note that in this case both kernels induce the same average degree.
-    >>> isclose(model[0].kbar, model[1].kbar)
+    >>> isclose(model[0].kbar, model[1].kbar, rel_tol=1e-4)
     True
 
     Here we calibrate to `kbar=10` while assuming that the second kernel
     (Complementarity) is twice as strong as the first one (Similarity).
     >>> model = model.calibrate(10, [1, 2])
-    >>> model.kbar
-    10.0
-    >>> model[0].kbar
-    3.3389203
-    >>> model[1].kbar
-    6.6776256
+    >>> isclose(10.0, model.kbar, rel_tol=1e-4)
+    True
+    >>> isclose(model[0].kbar, 3.3389203, rel_tol=1e-4) # Similarity kernel
+    True
+    >>> isclose(model[1].kbar, 6.6776256, rel_tol=1e-4) # Complementarity kernel
+    True
     """
 
     def __init__(
         self,
         n_nodes: int,
-        manifold: Sphere | int,
+        manifold: Manifold | int,
         *kernels: AbstractGeometricKernel,
     ) -> None:
         if n_nodes <= 0:
             errmsg = "'n_nodes' must be positive"
             raise ValueError(errmsg)
-        if isinstance(manifold, int):
-            manifold = Sphere.from_surface_area(manifold, n_nodes)
-        if not isinstance(manifold, Sphere):
-            errmsg = "'manifold' must be an int or an instance of 'Sphere'"
-            raise TypeError(errmsg)
+        self.n_nodes = int(n_nodes)
+        self.manifold = self._make_manifold(manifold)
         if not all(isinstance(k, AbstractGeometricKernel) for k in kernels):
             errmsg = "'kernels' must inherit from 'AbstractGeometricKernel'"
             raise TypeError(errmsg)
-        self.n_nodes = n_nodes
-        self.manifold = manifold
         self.kernels = list(kernels)
+        self.integrate = GRGGIntegration(self)
+        self.optimize = GRGGOptimization(self)
+
+    @singledispatchmethod
+    def _make_manifold(self, manifold: Manifold) -> Manifold:
+        if not isinstance(manifold, Manifold):
+            errmsg = "'manifold' must be an instance of 'Manifold'"
+            raise TypeError(errmsg)
+        return manifold
+
+    @_make_manifold.register
+    def _(self, dim: int, manifold_type: type[Manifold] = Sphere) -> Manifold:
+        manifold = manifold_type.from_surface_area(dim, self.n_nodes)
+        return self._make_manifold(manifold)
 
     def __repr__(self) -> str:
         cn = self.__class__.__name__
@@ -201,6 +218,11 @@ class GRGG:
         return self.__copy__()
 
     @property
+    def rho(self) -> float:
+        """Sampling density over the manifold."""
+        return self.n_nodes / self.manifold.surface_area
+
+    @property
     def submodels(self) -> Iterator[Self]:
         for i in range(len(self.kernels)):
             yield self[i]
@@ -208,19 +230,7 @@ class GRGG:
     @property
     def kbar(self) -> float:
         """Average degree of the graph."""
-        R = self.manifold.radius
-        rho = self.rho
-
-        def integrand(d: float) -> float:
-            r = R * math.sin(d / R)
-            S = self.manifold.surface_area(r, self.manifold.dim)
-            return self.edgeprobs(d) * S * rho
-
-        lo, up = 0.0, R * np.pi
-        points = [lo, up] if any(k.logspace for k in self.kernels) else None
-        eps = 1e-6
-        integral, _ = quad(integrand, lo, up, points=points, epsabs=eps, epsrel=eps)
-        return integral / self.n_nodes * (self.n_nodes - 1)
+        return self.integrate.kbar()
 
     def edgeprobs(self, d: float | np.ndarray) -> float:
         """Probability of connection between two points at distance `d`."""
@@ -238,6 +248,102 @@ class GRGG:
         if np.isscalar(d):
             P = P.item()
         return 1 - P  # type: ignore
+
+    def sample(
+        self,
+        *,
+        batch_size: int | None = None,
+        random_state: np.random.Generator | int | None = None,
+    ) -> GRGGSample:
+        """Sample a graph from the GRGG model.
+
+        Parameters
+        ----------
+        batch_size
+            Number of points to sample in each batch.
+            If not provided, the default is 1000.
+        random_state
+            Random state or seed for reproducibility.
+            If not provided, a new random state will be created.
+
+        Returns
+        -------
+        GRGGSample
+            A named tuple containing the adjacency matrix, coordinates of the sampled
+            points, and the igraph representation of the sampled graph.
+
+        Examples
+        --------
+        >>> from math import isclose
+        >>> from grgg import GRGG, Similarity, Complementarity
+        >>> from grgg.utils import random_generator
+        >>> rng = random_generator(17)
+        >>> model = (
+        ...     GRGG(100, 2)
+        ...     .add_kernel(Similarity)
+        ...     .add_kernel(Complementarity)
+        ...     .calibrate(10)
+        ... )
+
+        Check that the average degree of the sampled graphs is close
+        to the model expectation.
+        >>> Kbars = [
+        ...     model.sample(random_state=rng).A.sum(axis=1).mean()
+        ...     for _ in range(100)
+        ... ]
+        >>> isclose(np.mean(Kbars), model.kbar, rel_tol=1e-2)
+        True
+
+        Check that the same holds when using batching.
+        >>> Kbars = [
+        ...     model.sample(batch_size=10, random_state=rng).A.sum(axis=1).mean()
+        ...     for _ in range(100)
+        ... ]
+        >>> isclose(np.mean(Kbars), model.kbar, rel_tol=1e-2)
+        True
+        """
+        batch_size = options.sample.batch_size if batch_size is None else batch_size
+        batch_size = int(batch_size)
+        if batch_size <= 0:
+            errmsg = "'batch_size' must be positive"
+            raise ValueError(errmsg)
+        if not isinstance(random_state, np.random.Generator):
+            random_state = np.random.default_rng(random_state)
+        n_nodes = self.n_nodes
+        X = self.manifold.sample_points(n_nodes, random_state=random_state)
+        Ai = []
+        Aj = []
+        # Sample edges in batches to avoid memory issues with large graphs
+        # consider only the lower triangle of the adjacency matrix
+        # as the graph is undirected
+        for i in range(0, n_nodes, batch_size):
+            for j in range(0, i + batch_size, batch_size):
+                if i == j:
+                    x = X[i : i + batch_size]
+                    n = len(x)
+                    d = self.manifold.pdist(x, full=False)
+                    D = np.zeros_like(d, shape=(n, n))
+                    D[np.triu_indices_from(D, k=1)] = d
+                    D = D.T
+                else:
+                    D = self.manifold.cdist(
+                        X[i : i + batch_size],
+                        X[j : j + batch_size],
+                    )
+                P = self.edgeprobs(D)
+                if i == j:
+                    P = np.tril(P, k=-1)
+                ai, aj = np.nonzero(random_state.random(P.shape) < P)
+                ai += i
+                aj += j
+                Ai.append(ai)
+                Aj.append(aj)
+        Ai = np.concatenate(Ai)
+        Aj = np.concatenate(Aj)
+        values = np.ones(len(Ai), dtype=int)
+        A = csr_array((values, (Ai, Aj)), shape=(n_nodes, n_nodes))
+        A += A.T  # make it symmetric
+        return GRGGSample(A, X)
 
     @singledispatchmethod
     def add_kernel(
@@ -309,7 +415,7 @@ class GRGG:
         model = self.copy()
         model.kernels = [kernel]
         optim = optim or {}
-        mu = model._solve_for_kbar(kbar, **optim)
+        mu = model.optimize.kbar(kbar, **optim)
         kernel.mu = float(mu[0])
         self.kernels.append(kernel)
         return self
@@ -354,6 +460,7 @@ class GRGG:
         is equal to the specified `kbar`, taking into account the possible overlaps
         of connections defined by different kernels.
 
+        >>> from math import isclose
         >>> from grgg import GRGG, Similarity, Complementarity
         >>> model = (
         ...     GRGG(100, 2)
@@ -374,83 +481,21 @@ class GRGG:
         >>> model = model.calibrate(10, [1, 2])
         >>> model.kbar
         10.0
-        >>> model[0].kbar  # Similarity kernel
-        3.3389029
-        >>> model[1].kbar  # Complementarity kernel
-        6.6776256
+        >>> isclose(model[0].kbar, 3.3389029, rel_tol=1e-4)  # Similarity kernel
+        True
+        >>> isclose(model[1].kbar, 6.6776256, rel_tol=1e-4)  # Complementarity kernel
+        True
         """
         optim = optim or {}
-        mu = self._solve_for_kbar(kbar, weights, **optim)
-        self.set_mu(mu)
+        mu = self.optimize.kbar(kbar, weights=weights, **optim)
+        self.set_kernel_params(mu=mu)
         return self
 
-    def set_mu(self, mu: Sequence) -> None:
-        """Set the `mu` parameter for each kernel in the model."""
-        for m, kernel in zip(mu, self.kernels, strict=True):
-            if m is not None:
-                kernel.mu = float(m)
-
-    def sample(
-        self,
-        *,
-        batch_size: int | None = None,
-        random_state: np.random.Generator | int | None = None,
-    ) -> GRGGSample:
-        """Sample a graph from the GRGG model."""
-        batch_size = options.sample_batch_size if batch_size is None else batch_size
-        batch_size = int(batch_size)
-        if batch_size <= 0:
-            errmsg = "'batch_size' must be positive"
-            raise ValueError(errmsg)
-        if not isinstance(random_state, np.random.Generator):
-            random_state = np.random.default_rng(random_state)
-        n = self.n_nodes
-        r = self.radius
-        X = self.manifold.sample_points(n, random_state=random_state)
-        # Sample normalized unit sphere positions
-        Ai = []
-        Aj = []
-        for i in range(0, n, batch_size):
-            for j in range(0, i + batch_size, batch_size):
-                if i == j:
-                    d = self.manifold.pdist(X[i : i + batch_size], full=False)
-                    D = np.zeros_like(d, shape=(batch_size, batch_size))
-                    D[np.triu_indices_from(D, k=1)] = d
-                    D = D.T
-                else:
-                    D = self.manifold.cdist(
-                        X[i : i + batch_size],
-                        X[j : j + batch_size],
-                    )
-                P = self.edgeprobs(D * r)
-                if i == j:
-                    P = np.tril(P, k=-1)
-                ai, aj = np.nonzero(random_state.random(P.shape) < P)
-                ai += i
-                aj += j
-                Ai.append(ai)
-                Aj.append(aj)
-        Ai = np.concatenate(Ai)
-        Aj = np.concatenate(Aj)
-        values = np.ones(len(Ai), dtype=int)
-        A = csr_array((values, (Ai, Aj)), shape=(n, n))
-        A += A.T  # make it symmetric
-        return GRGGSample(A, X * r)
-
-    # Internals ----------------------------------------------------------------------
-
-    def _solve_for_kbar(
-        self,
-        kbar: float,
-        weights: np.ndarray | None = None,
-        *,
-        x0: np.ndarray | None = None,
-        method: str = "Nelder-Mead",
-        **kwargs: Any,
-    ) -> np.ndarray:
-        """Estimate the `mu` parameter from the desired average degree `kbar`."""
-        optimizer = KBarOptimizer(self.copy(), kbar, weights)
-        return optimizer.optimize(x0, method, **kwargs)
+    def set_kernel_params(self, **params: np.ndarray) -> None:
+        """Set kernel parameters."""
+        for param, values in params.items():
+            for kernel, value in zip(self.kernels, values, strict=True):
+                setattr(kernel, param, value)
 
 
 # Run doctests not discoverable in the standard way due to decorator usage -----------
