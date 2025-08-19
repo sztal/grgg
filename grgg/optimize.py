@@ -103,6 +103,8 @@ class KBarOptimizer(GRGGOptimizer):
     def __init__(self, model: "GRGG", kbar: float, **kwargs: Any) -> None:
         super().__init__(model, **kwargs)
         self.kbar = kbar
+        for kernel in self.model.kernels:
+            kernel.beta = min(1e6, kernel.beta)
 
     def loss(self) -> float:
         """Compute the loss function for the objective function."""

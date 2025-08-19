@@ -1,3 +1,4 @@
+import math
 from abc import ABC, abstractmethod
 from functools import singledispatchmethod
 from typing import Any, Self
@@ -73,10 +74,12 @@ class AbstractGeometricKernel(ABC):
         r = np.maximum(r, self.eps)  # ensure no zero relation scores
         if self.logspace:
             r = np.log(r)
-        return self.beta * (r - self.mu)
-        # if np.isinf(self.beta):
-        #     return np.where(r <= self.mu, -np.inf, np.inf)
-        # return self.beta * r - self.mu
+        # This is a trick that allows to safely interpolate
+        # between hard RGGs and ER graphs
+        if math.isinf(self.beta):
+            return np.where(r < self.mu, -np.inf, np.inf)
+        alpha = math.exp(-self.beta) * self.mu * (self.beta - 1)
+        return alpha + self.beta * (r - self.mu)
 
     @classmethod
     def from_manifold(cls, manifold, **kwargs: Any) -> Self:
