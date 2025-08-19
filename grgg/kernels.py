@@ -73,9 +73,10 @@ class AbstractGeometricKernel(ABC):
         r = np.maximum(r, self.eps)  # ensure no zero relation scores
         if self.logspace:
             r = np.log(r)
-        if np.isinf(self.beta):
-            return np.where(r <= self.mu, -np.inf, np.inf)
-        return self.beta * r - self.mu
+        return self.beta * (r - self.mu)
+        # if np.isinf(self.beta):
+        #     return np.where(r <= self.mu, -np.inf, np.inf)
+        # return self.beta * r - self.mu
 
     @classmethod
     def from_manifold(cls, manifold, **kwargs: Any) -> Self:

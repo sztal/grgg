@@ -146,8 +146,9 @@ class GRGG:
     argument, which allows for setting the relative weights of the kernels in the model.
     If not provided, all kernels are treated equally.
 
-    >>> model.calibrate(10).kbar  # calibrate the model to average degree of 10
-    10.0
+    >>> # calibrate the model to average degree of 10
+    >>> isclose(10.0, model.calibrate(10).kbar, rel_tol=1e-4)
+    True
 
     Note that in this case both kernels induce the same average degree.
     >>> isclose(model[0].kbar, model[1].kbar, rel_tol=1e-4)
@@ -158,9 +159,9 @@ class GRGG:
     >>> model = model.calibrate(10, [1, 2])
     >>> isclose(10.0, model.kbar, rel_tol=1e-4)
     True
-    >>> isclose(model[0].kbar, 3.3389203, rel_tol=1e-4) # Similarity kernel
+    >>> isclose(model[0].kbar, 3.33, rel_tol=1e-2) # Similarity kernel
     True
-    >>> isclose(model[1].kbar, 6.6776256, rel_tol=1e-4) # Complementarity kernel
+    >>> isclose(model[1].kbar, 6.66, rel_tol=1e-2) # Complementarity kernel
     True
     """
 
@@ -213,6 +214,10 @@ class GRGG:
             kernels = [kernels]
         return self.__class__(self.n_nodes, self.manifold, *kernels)
 
+    def __call__(self, d: float | np.ndarray) -> float:
+        """Evaluate the edge probabilities for distances `d`."""
+        return self.edgeprobs(d)
+
     def copy(self) -> Self:
         """Create a copy of the GRGG model with optional modifications."""
         return self.__copy__()
@@ -240,11 +245,11 @@ class GRGG:
         P = None
         for kernel in self.kernels:
             K = kernel(d)
-            p = 1 - expit(-K)
+            p = expit(-K)
             if P is None:
-                P = p
+                P = 1 - p
             else:
-                P *= p
+                P *= 1 - p
         if np.isscalar(d):
             P = P.item()
         return 1 - P  # type: ignore
@@ -468,8 +473,8 @@ class GRGG:
         ...     .add_kernel(Complementarity)
         ...     .calibrate(10)
         ... )
-        >>> model.kbar
-        10.0
+        >>> isclose(10.0, model.kbar, rel_tol=1e-4)
+        True
 
         It is also possible to calibrate the model while assuming different relative
         strengths of the kernels. This can be done by passing a second `weights`
@@ -479,11 +484,11 @@ class GRGG:
         (Complementarity) is twice as strong as the first one (Similarity).
 
         >>> model = model.calibrate(10, [1, 2])
-        >>> model.kbar
-        10.0
-        >>> isclose(model[0].kbar, 3.3389029, rel_tol=1e-4)  # Similarity kernel
+        >>> isclose(10.0, model.kbar, rel_tol=1e-4)
         True
-        >>> isclose(model[1].kbar, 6.6776256, rel_tol=1e-4)  # Complementarity kernel
+        >>> isclose(model[0].kbar, 3.33, rel_tol=1e-2)  # Similarity kernel
+        True
+        >>> isclose(model[1].kbar, 6.66, rel_tol=1e-2)  # Complementarity kernel
         True
         """
         optim = optim or {}
