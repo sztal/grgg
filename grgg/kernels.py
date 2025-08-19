@@ -97,10 +97,16 @@ class AbstractGeometricKernel(ABC):
     @classmethod
     def _(cls, manifold: Manifold, **kwargs: Any) -> dict[str, Any]:
         """Create a kernel instance from a sphere."""
-        if (key := "mu") not in kwargs:
-            kwargs[key] = 0.0
         if (key := "beta") not in kwargs:
             kwargs[key] = 1.5 * manifold.dim
+        if (key := "mu") not in kwargs:
+            if np.isinf(kwargs["beta"]):
+                mu = manifold.surface_area ** (1 / manifold.embedding_dim) / np.pi
+                if kwargs.get("logspace", options.kernel.logspace):
+                    mu = np.log(mu)
+                kwargs[key] = mu
+            else:
+                kwargs[key] = 0.0
         return kwargs
 
     def copy(self) -> Self:

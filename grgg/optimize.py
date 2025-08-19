@@ -18,11 +18,11 @@ class GRGGOptimization:
     """
 
     def __init__(self, model: "GRGG") -> None:
-        self._model = model
+        self.__model = model
 
     def kbar(self, kbar: float, *args: Any, **kwargs: Any) -> np.ndarray:
         weights = kwargs.pop("weights", None)
-        optimizer = KBarOptimizer(self._model.copy(), kbar, weights=weights)
+        optimizer = KBarOptimizer(self.__model.copy(), kbar, weights=weights)
         return optimizer.optimize(*args, **kwargs)
 
 
@@ -40,6 +40,10 @@ class GRGGOptimizer(ABC):
     @abstractmethod
     def loss(self) -> float:
         """Compute the loss function for the objective function."""
+
+    @abstractmethod
+    def objective(self, *args: Any, **kwargs: Any) -> float:
+        """Objective function for optimization."""
 
     @abstractmethod
     def get_x0(self) -> np.ndarray:
@@ -104,7 +108,7 @@ class KBarOptimizer(GRGGOptimizer):
         super().__init__(model, **kwargs)
         self.kbar = kbar
         for kernel in self.model.kernels:
-            kernel.beta = min(1e6, kernel.beta)
+            kernel.beta = min(kernel.beta, 1e3)
 
     def loss(self) -> float:
         """Compute the loss function for the objective function."""
