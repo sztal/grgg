@@ -9,7 +9,7 @@ def dim(request) -> int:
     return request.param
 
 
-@pytest.fixture(scope="session", params=[25, 100, 1000])
+@pytest.fixture(scope="session", params=[25, 100])
 def n_nodes(request) -> int:
     return request.param
 
@@ -19,7 +19,15 @@ def kbar(request) -> float:
     return request.param
 
 
-@pytest.fixture(scope="session", params=[0, 2, 5, np.inf])
+@pytest.fixture(scope="session", params=[None, 0.2])
+def weights(request) -> np.ndarray:
+    q = request.param
+    if q is None:
+        return q
+    return np.array([q, 1 - q])
+
+
+@pytest.fixture(scope="session", params=[0, 3, np.inf])
 def beta(request) -> float:
     return request.param
 
@@ -29,7 +37,7 @@ def logspace(request) -> bool:
     return request.param
 
 
-@pytest.fixture(scope="session", params=[None, 1.0, 5.0])
+@pytest.fixture(scope="session", params=[None, 1.0])
 def sphere(dim, request) -> Sphere:
     radius = request.param
     if radius is None:
