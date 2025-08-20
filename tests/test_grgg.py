@@ -9,7 +9,7 @@ class TestSimilarity:
         model = model_sim
         model.calibrate(kbar)
         assert model.kbar == pytest.approx(kbar, rel=1e-2)
-        K = [model.sample().A.sum(axis=1).mean() for _ in range(10)]
+        K = [model.sample().A.sum(axis=1).mean() for _ in range(20)]
         assert np.mean(K) == pytest.approx(kbar, rel=1e-1)
 
 
@@ -18,7 +18,7 @@ class TestComplementarity:
         model = model_comp
         model.calibrate(kbar)
         assert model.kbar == pytest.approx(kbar, rel=1e-2)
-        K = [model.sample().A.sum(axis=1).mean() for _ in range(10)]
+        K = [model.sample().A.sum(axis=1).mean() for _ in range(20)]
         assert np.mean(K) == pytest.approx(kbar, rel=1e-1)
 
 
@@ -27,7 +27,7 @@ class TestSimilarityComplementarity:
         model = model_simcomp
         model.calibrate(kbar, weights)
         assert model.kbar == pytest.approx(kbar, rel=1e-2)
-        K = [model.sample().A.sum(axis=1).mean() for _ in range(10)]
+        K = [model.sample().A.sum(axis=1).mean() for _ in range(20)]
         assert np.mean(K) == pytest.approx(kbar, rel=1e-1)
         q = weights[0] if weights is not None else 0.5
         kbar = sum(m.kbar for m in model.submodels)

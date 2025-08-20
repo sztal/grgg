@@ -44,9 +44,22 @@ class SampleOptions(Options):
 
 
 @dataclass(slots=True)
+class OptimizeMuOptions(Options):
+    beta_max: float = 1e2
+
+
+@dataclass(slots=True)
+class OptimizeOptions(Options):
+    method: str = "Nelder-Mead"
+    tol: float = 1e-3
+    mu: OptimizeMuOptions = field(default_factory=OptimizeMuOptions)
+
+
+@dataclass(slots=True)
 class TopOptions(Options):
     kernel: KernelOptions = field(default_factory=KernelOptions)
     sample: SampleOptions = field(default_factory=SampleOptions)
+    optimize: OptimizeOptions = field(default_factory=OptimizeOptions)
 
 
 options = TopOptions()

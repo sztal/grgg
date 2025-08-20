@@ -82,7 +82,7 @@ class AbstractGeometricKernel(ABC):
         return alpha + self.beta * (r - self.mu)
 
     @classmethod
-    def from_manifold(cls, manifold, **kwargs: Any) -> Self:
+    def from_manifold(cls, manifold: CompactManifold, **kwargs: Any) -> Self:
         """Create a kernel instance from a manifold."""
         default_params = cls.params_from_manifold(manifold, **kwargs)
         return cls(**default_params)
@@ -95,18 +95,22 @@ class AbstractGeometricKernel(ABC):
 
     @params_from_manifold.register
     @classmethod
-    def _(cls, manifold: Manifold, **kwargs: Any) -> dict[str, Any]:
+    def _(cls, manifold: Manifold, **kwargs: Any) -> dict[str, Any]:  # noqa
+        """Create a kernel instance from a generic manifold."""
+        errmsg = "only compact manifolds are supported"
+        raise NotImplementedError(errmsg)
+
+    @params_from_manifold.register
+    @classmethod
+    def _(cls, manifold: CompactManifold, **kwargs: Any) -> dict[str, Any]:
         """Create a kernel instance from a sphere."""
         if (key := "beta") not in kwargs:
             kwargs[key] = 1.5 * manifold.dim
         if (key := "mu") not in kwargs:
-            if np.isinf(kwargs["beta"]):
-                mu = manifold.surface_area ** (1 / manifold.embedding_dim) / np.pi
-                if kwargs.get("logspace", options.kernel.logspace):
-                    mu = np.log(mu)
-                kwargs[key] = mu
-            else:
-                kwargs[key] = 0.0
+            max_distance = manifold.max_distance
+            if kwargs.get("logspace", options.kernel.logspace):
+                max_distance = np.log(max_distance)
+            kwargs[key] = max_distance / 2
         return kwargs
 
     def copy(self) -> Self:
@@ -150,10 +154,7 @@ class Complementarity(AbstractGeometricKernel):
 
     @params_from_manifold.register
     @classmethod
-    def _(cls, manifold: Manifold, **kwargs: Any) -> dict[str, float]:
-        if not isinstance(manifold, CompactManifold):
-            errmsg = "complementarity kernel requires a compact manifold"
-            raise TypeError(errmsg)
+    def _(cls, manifold: CompactManifold, **kwargs: Any) -> dict[str, float]:
         params = super().params_from_manifold(manifold, **kwargs)
         if (key := "max_distance") not in params:
             params[key] = manifold.max_distance

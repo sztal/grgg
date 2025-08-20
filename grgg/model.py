@@ -10,7 +10,7 @@ from scipy.special import expit
 from . import options
 from .integrate import GRGGIntegration
 from .kernels import AbstractGeometricKernel
-from .manifolds import Manifold, Sphere
+from .manifolds import CompactManifold, Manifold, Sphere
 from .optimize import GRGGOptimization
 
 
@@ -47,7 +47,7 @@ class GRGG:
     n_nodes
         Number of nodes in the graph.
     manifold
-        Manifold on which the graph is defined.
+        compact manigold on which the graph is to be defined.
         Currently only :class:`grgg.manifolds.Sphere` is supported.
         Can also be specified as an integer, which will be interpreted
         as the surface dimension of a sphere with surface area equal to `n_nodes`.
@@ -168,25 +168,39 @@ class GRGG:
     def __init__(
         self,
         n_nodes: int,
-        manifold: Manifold | int,
+        manifold: CompactManifold | int | tuple[int, type[Manifold]],
         *kernels: AbstractGeometricKernel,
     ) -> None:
+        # Check nodes specification
         if n_nodes <= 0:
             errmsg = "'n_nodes' must be positive"
             raise ValueError(errmsg)
         self.n_nodes = int(n_nodes)
-        self.manifold = self._make_manifold(manifold)
+        # Handle manifold initialization
+        if kernels and isinstance(kernels[0], type | int):
+            dim = kernels[0]
+            kernels = kernels[1:]
+            self.manifold = self._make_manifold((dim, manifold))
+        else:
+            self.manifold = self._make_manifold(manifold)
+        # Check kernels
         if not all(isinstance(k, AbstractGeometricKernel) for k in kernels):
             errmsg = "'kernels' must inherit from 'AbstractGeometricKernel'"
             raise TypeError(errmsg)
         self.kernels = list(kernels)
+        # Initialize integration and optimization namespaces
         self.integrate = GRGGIntegration(self)
         self.optimize = GRGGOptimization(self)
 
     @singledispatchmethod
     def _make_manifold(self, manifold: Manifold) -> Manifold:
-        if not isinstance(manifold, Manifold):
-            errmsg = "'manifold' must be an instance of 'Manifold'"
+        if isinstance(manifold, tuple):
+            manifold_type, dim = manifold
+            if isinstance(manifold_type, int):
+                manifold_type, dim = dim, manifold_type
+            return self._make_manifold(dim, manifold_type)
+        if not isinstance(manifold, CompactManifold):
+            errmsg = "'manifold' be a 'CompactManifold'"
             raise TypeError(errmsg)
         return manifold
 
@@ -420,7 +434,7 @@ class GRGG:
         model = self.copy()
         model.kernels = [kernel]
         optim = optim or {}
-        mu = model.optimize.kbar(kbar, **optim)
+        mu = model.optimize.mu(kbar, **optim).x
         kernel.mu = float(mu[0])
         self.kernels.append(kernel)
         return self
@@ -440,8 +454,7 @@ class GRGG:
         self,
         kbar: float,
         weights: np.ndarray | None = None,
-        *,
-        optim: Mapping | None = None,
+        **kwargs: Any,
     ) -> Self:
         """Calibrate the model to have a specific average degree `kbar`.
 
@@ -453,7 +466,7 @@ class GRGG:
             Relative weights of the kernels in the model.
             If provided, it will be used to set the relative weights of the kernels.
             If not provided, all kernels will be treated equally.
-        optim
+        **kwargs
             Optional optimization parameters for the
             :func:`scipy.optimize.minimize` function.
 
@@ -491,16 +504,16 @@ class GRGG:
         >>> isclose(model[1].kbar, 6.66, rel_tol=1e-2)  # Complementarity kernel
         True
         """
-        optim = optim or {}
-        mu = self.optimize.kbar(kbar, weights=weights, **optim)
+        mu = self.optimize.mu(kbar, weights=weights, **kwargs).x
         self.set_kernel_params(mu=mu)
         return self
 
-    def set_kernel_params(self, **params: np.ndarray) -> None:
+    def set_kernel_params(self, **params: np.ndarray) -> Self:
         """Set kernel parameters."""
         for param, values in params.items():
             for kernel, value in zip(self.kernels, values, strict=True):
                 setattr(kernel, param, value)
+        return self
 
 
 # Run doctests not discoverable in the standard way due to decorator usage -----------

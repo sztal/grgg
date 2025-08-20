@@ -55,19 +55,19 @@ def kernel_comp(beta, logspace) -> tuple[float, float, type[Complementarity]]:
     return beta, logspace, Complementarity
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def model_sim(n_nodes, sphere, kernel_sim) -> GRGG:
     beta, logspace, kernel = kernel_sim
     return GRGG(n_nodes, sphere).add_kernel(kernel, beta=beta, logspace=logspace)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def model_comp(n_nodes, sphere, kernel_comp) -> GRGG:
     beta, logspace, kernel = kernel_comp
     return GRGG(n_nodes, sphere).add_kernel(kernel, beta=beta, logspace=logspace)
 
 
-@pytest.fixture(scope="session")
+@pytest.fixture(scope="function")
 def model_simcomp(n_nodes, sphere, kernel_sim, kernel_comp) -> GRGG:
     beta_sim, logspace_sim, kernel_sim = kernel_sim
     beta_comp, logspace_comp, kernel_comp = kernel_comp
