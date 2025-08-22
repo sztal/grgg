@@ -4,6 +4,11 @@ import pytest
 from grgg import GRGG, Complementarity, Similarity, Sphere
 
 
+@pytest.fixture(scope="function")
+def rng() -> np.random.Generator:
+    return np.random.default_rng(342794234)
+
+
 @pytest.fixture(scope="session", params=[1, 2, 3])
 def dim(request) -> int:
     return request.param
@@ -43,6 +48,11 @@ def sphere(dim, request) -> Sphere:
     if radius is None:
         return dim
     return Sphere(dim, radius)
+
+
+@pytest.fixture(scope="function")
+def model(n_nodes: int, sphere: Sphere) -> GRGG:
+    return GRGG(n_nodes, sphere)
 
 
 @pytest.fixture(scope="session")

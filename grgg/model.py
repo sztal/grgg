@@ -251,6 +251,10 @@ class GRGG:
         """Average degree of the graph."""
         return self.integrate.kbar()
 
+    @property
+    def density(self) -> float:
+        return self.kbar / (self.n_nodes - 1)
+
     def edgeprobs(self, d: float | np.ndarray) -> float:
         """Probability of connection between two points at distance `d`."""
         if not self.kernels:
