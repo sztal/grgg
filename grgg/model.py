@@ -200,7 +200,7 @@ class GRGG:
                 manifold_type, dim = dim, manifold_type
             return self._make_manifold(dim, manifold_type)
         if not isinstance(manifold, CompactManifold):
-            errmsg = "'manifold' be a 'CompactManifold'"
+            errmsg = "'manifold' must be a 'CompactManifold'"
             raise TypeError(errmsg)
         return manifold
 
@@ -208,6 +208,10 @@ class GRGG:
     def _(self, dim: int, manifold_type: type[Manifold] = Sphere) -> Manifold:
         manifold = manifold_type.from_surface_area(dim, self.n_nodes)
         return self._make_manifold(manifold)
+
+    @_make_manifold.register
+    def _(self, dim: np.integer, *args: Any, **kwargs: Any) -> Manifold:
+        return self._make_manifold(int(dim), *args, **kwargs)
 
     def __repr__(self) -> str:
         cn = self.__class__.__name__

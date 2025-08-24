@@ -85,8 +85,11 @@ class GRGGOptimizer(ABC):
         if x0 is None:
             x0 = self.get_x0()
         solution = minimize(objective, x0, method=method, **kwargs)
-        if not solution.success or solution.fun > self.tol:
+        if not solution.success:
             errmsg = f"optimization failed: {solution.message}"
+            raise RuntimeError(errmsg)
+        if solution.fun > self.tol:
+            errmsg = f"optimization loss to high: {solution.fun} > {self.tol}"
             raise RuntimeError(errmsg)
         return solution
 

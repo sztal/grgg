@@ -25,6 +25,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "pathcensus>=0.1",
     "tqdm>=4.65",
+    "pqdm>=0.2.0",
     "ipykernel",
     "ipywidgets",
     "jupyterlab",

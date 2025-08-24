@@ -51,7 +51,7 @@ class OptimizeMuOptions(Options):
 @dataclass(slots=True)
 class OptimizeOptions(Options):
     method: str = "Nelder-Mead"
-    tol: float = 1e-3
+    tol: float = 1e-2
     mu: OptimizeMuOptions = field(default_factory=OptimizeMuOptions)
 
 
