@@ -23,7 +23,7 @@ params = SimpleNamespace(
     kbar=10,  # Average degree
     nrep=10,  # Number of replications
 )
-n_jobs = min(os.environ.get("GRGG_N_JOBS", 10), max(cpu_count() - 2, 1))
+n_jobs = min(int(os.environ.get("GRGG_N_JOBS", 10)), max(cpu_count() - 2, 1))
 seed = 421765311
 
 # %% Simulation function -------------------------------------------------------------
