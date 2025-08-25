@@ -23,7 +23,7 @@ dependencies = [
     "networkx>=3.5",
     "matplotlib>=3.10.3",
     "seaborn>=0.13.2",
-    "pathcensus>=0.1",
+    "pathcensus>=1.0",
     "tqdm>=4.65",
     "pqdm>=0.2.0",
     "ipykernel",

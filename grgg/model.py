@@ -1,9 +1,11 @@
 from collections.abc import Iterator, Mapping
-from functools import singledispatchmethod
-from typing import Any, NamedTuple, Self
+from dataclasses import dataclass
+from functools import cached_property, singledispatchmethod
+from typing import Any, Self
 
 import igraph as ig
 import numpy as np
+from pathcensus import PathCensus
 from scipy.sparse import csr_array, sparray
 from scipy.special import expit
 
@@ -14,7 +16,8 @@ from .manifolds import CompactManifold, Manifold, Sphere
 from .optimize import GRGGOptimization
 
 
-class GRGGSample(NamedTuple):
+@dataclass(frozen=True)
+class GRGGSample:
     """Sample from the GRGG model.
 
     Attributes
@@ -25,18 +28,27 @@ class GRGGSample(NamedTuple):
         Coordinates of the sampled points on the sphere.
     G
         :mod:`igraph` representation of the sampled graph.
+    census
+        Path census of the sampled graph (see :mod:`pathcensus`).
+        It allows for efficient computation of comprehensive structural
+        similarity and complementarity coefficients.
     """
 
     A: sparray
     X: np.ndarray
 
-    @property
+    @cached_property
     def G(self) -> ig.Graph:
         """Return the :mod:`igraph` representation of the sampled graph."""
         # Make igraph graph from sparse adjacency matrix
         edges = np.column_stack(self.A.nonzero())
         G = ig.Graph(edges, directed=False, n=self.A.shape[0])
         return G.simplify()
+
+    @cached_property
+    def census(self) -> PathCensus:
+        """Return the path census of the sampled graph."""
+        return PathCensus(self.A)
 
 
 class GRGG:
