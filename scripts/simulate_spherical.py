@@ -1,6 +1,5 @@
 # %% ---------------------------------------------------------------------------------
 
-import os
 from itertools import product
 from multiprocessing import cpu_count
 from types import SimpleNamespace
@@ -8,23 +7,15 @@ from types import SimpleNamespace
 import joblib
 import numpy as np
 import pandas as pd
+from omegaconf import DictConfig
 from pathcensus import PathCensus
 from pqdm.processes import pqdm
 
-from grgg import GRGG, make_paths
+from grgg import GRGG
 from grgg.kernels import AbstractGeometricKernel, Complementarity, Similarity
+from grgg.project import config, paths
 
-paths = make_paths()
-params = SimpleNamespace(
-    n=10 ** np.arange(2, 6),  # Number of nodes
-    k=2 ** np.arange(1, 5),  # Surface dimensions of the sphere
-    beta=[0.0, 0.5, 1.5, 2.5, 5.0, 10.0, np.inf],  # kernel 'beta' values
-    logspace=[True, False],
-    kbar=10,  # Average degree
-    nrep=10,  # Number of replications
-)
-n_jobs = min(int(os.environ.get("GRGG_N_JOBS", 10)), max(cpu_count() - 2, 1))
-seed = 421765311
+config = config.simulate.spherical
 
 # %% Simulation function -------------------------------------------------------------
 
@@ -62,9 +53,9 @@ def simulate_one(args: ParamsT) -> list[dict[str, float | int]]:
 
 def simulate(
     kernel: type[AbstractGeometricKernel],
-    params: SimpleNamespace,
-    seed: int = seed,
-    n_jobs: int = n_jobs,
+    params: DictConfig,
+    seed: int = config.seed,
+    n_jobs: int = min(config.n_jobs, max(cpu_count() - 2, 1)),
 ) -> pd.DataFrame:
     kbar = params.kbar
     nrep = params.nrep
@@ -88,15 +79,15 @@ def simulate(
 
 # %% Similarity ----------------------------------------------------------------------
 
-sim = simulate(Similarity, params)
+sim = simulate(Similarity, config.params)
 
 # %% Complementarity -----------------------------------------------------------------
 
-comp = simulate(Complementarity, params)
+comp = simulate(Complementarity, config.params)
 
 # %% Save results --------------------------------------------------------------------
 
-results = SimpleNamespace(params=params, sim=sim, comp=comp)
-joblib.dump(results, paths.proc / "regimes-spherical.pkl", compress=9)
+results = SimpleNamespace(params=SimpleNamespace(**config.params), sim=sim, comp=comp)
+joblib.dump(results, paths.proc / "spherical.pkl", compress=9)
 
 # %% ---------------------------------------------------------------------------------

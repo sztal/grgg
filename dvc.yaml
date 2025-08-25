@@ -1,0 +1,11 @@
+stages:
+
+  simulate-spherical:
+    cmd: python scripts/simulate_spherical.py
+    deps:
+    - scripts/simulate_spherical.py
+    params:
+    - simulate.spherical
+    outs:
+    - data/proc/spherical.pkl:
+        persist: true

@@ -17,6 +17,12 @@ init:
 	git init
 	pip install -e .[dev]
 	pre-commit install
+	mkdir -p data/raw
+	mkdir -p data/proc
+	mkdir -p scripts
+	mkdir -p data/remote
+	dvc init --force
+	dvc remote add --default grgg ${PWD}/data/remote --local --force
 
 clean: clean-build clean-misc
 

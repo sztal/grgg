@@ -29,6 +29,8 @@ dependencies = [
     "ipykernel",
     "ipywidgets",
     "jupyterlab",
+    "omegaconf>=2.3.0",
+    "python-dotenv>=1.1.1",
 ]
 dynamic = ["version"]
 classifiers = [
@@ -46,6 +48,7 @@ dev = [
     "pre-commit>=2.16.0",
     "pre-commit-hooks>=4.1.0",
     "nox>=2024.3.2",
+    "dvc>=3.59.1",
     "grgg[test,lint,mypy]",
 ]
 lint = ["ruff>=0.1.9"]

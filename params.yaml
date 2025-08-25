@@ -1,0 +1,14 @@
+simulate:
+  params: &default_simulate_params
+    n: [100, 1000, 10000, 100000]
+    k: [2, 4, 8, 16]
+    beta: [0.0, 0.5, 1.5, 2.5, 5.0, 10.0, !!float .inf]
+    logspace: [True, False]
+    kbar: 10
+    nrep: 10
+  n_jobs: &default_n_jobs "${oc.decode:${oc.env:GRGG_N_JOBS,10}}"
+  spherical:
+    seed: 421765311
+    n_jobs: *default_n_jobs
+    params:
+      <<: *default_simulate_params
