@@ -1,5 +1,6 @@
 # %% ---------------------------------------------------------------------------------
 
+import os
 from itertools import product
 from multiprocessing import cpu_count
 from types import SimpleNamespace
@@ -16,6 +17,11 @@ from grgg.kernels import AbstractGeometricKernel, Complementarity, Similarity
 from grgg.project import config, paths
 
 config = config.simulate.spherical
+
+if config.n_jobs > 1:
+    os.environ["MKL_NUM_THREADS"] = "1"
+    os.environ["OMP_NUM_THREADS"] = "1"
+    os.environ["OPENBLAS_NUM_THREADS"] = "1"
 
 # %% Simulation function -------------------------------------------------------------
 
