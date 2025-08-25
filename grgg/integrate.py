@@ -32,7 +32,6 @@ class GRGGIntegral(ABC):
 
     def __init__(self, model: "GRGG") -> None:
         self.model = model
-        self.integrand = self.make_integrand()
 
     def __call__(self) -> float:
         return self.integrate()
@@ -47,7 +46,8 @@ class GRGGIntegral(ABC):
             "epsrel": 1e-6,
             **kwargs,
         }
-        value, _ = quad(self.integrand, lo, up, **kwargs)
+        integrand = self.make_integrand()
+        value, _ = quad(integrand, lo, up, **kwargs)
         return value
 
     def make_integrand(self) -> Callable[[float], float]:
