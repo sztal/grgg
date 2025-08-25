@@ -23,9 +23,6 @@ class Options:
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> bool | None:
-        self._restore()
-
-    def _restore(self) -> None:
         if self.__original__ is not None:
             for slot_name in self.__slots__:
                 obj = getattr(self.__original__, slot_name)
@@ -34,7 +31,7 @@ class Options:
 
 @dataclass(slots=True)
 class KernelOptions(Options):
-    logspace: bool = True
+    logspace: bool = False
     eps: float = 1e-6
 
 

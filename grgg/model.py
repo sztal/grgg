@@ -88,28 +88,28 @@ class GRGG:
     default parameters. The kernel is added in place, but the method also returns the
     reference to the model itself, so multiple invocations can be chained.
     >>> model.add_kernel(Similarity)
-    GRGG(100, Sphere(...), Similarity(..., logspace=True))
+    GRGG(100, Sphere(...), Similarity(..., logspace=False))
 
-    Note the 'logspace=True' parameter, which is the default for all kernels.
-    This means that the kernel will use logarithmic distance-relations to allow for
-    small-world effects. If you want to disable this behavior, you can pass
-    'logspace=False' to the kernel constructor, or set it globally using the `options`
+    Note the 'logspace=False' parameter, which is the default for all kernels.
+    This means that the kernel will NOT USE logarithmic distance-relations to allow for
+    small-world effects. If you want to change this behavior, you can pass
+    'logspace=True' to the kernel constructor, or set it globally using the `options`
     module.
 
     >>> from grgg import options
-    >>> options.kernel.logspace = False  # disable logarithmic distance for all kernels
+    >>> options.kernel.logspace = True  # enable logarithmic distance for all kernels
     >>> model.add_kernel(Similarity)
-    GRGG(100, Sphere(2, r=...), Similarity(mu=..., beta=3.0, logspace=False))
-    >>> options.kernel.logspace = True  # restore default behavior
+    GRGG(100, Sphere(2, r=...), Similarity(mu=..., beta=3.0, logspace=True))
+    >>> options.kernel.logspace = False  # restore default behavior
 
     Temporary options handling can be done more conveniently using the context manager.
     >>> with options:
-    ...     options.kernel.logspace = False
+    ...     options.kernel.logspace = True
     ...     model.add_kernel(Similarity)
-    GRGG(100, Sphere(2, r=...), Similarity(mu=..., beta=3.0, logspace=False))
+    GRGG(100, Sphere(2, r=...), Similarity(mu=..., beta=3.0, logspace=True))
 
     >>> options.kernel.logspace
-    True
+    False
 
     Now, it is typically more useful to add kernels with specific average degrees.
     This is done by passing the desired average degree as the first argument to the
