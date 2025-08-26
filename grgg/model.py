@@ -316,7 +316,7 @@ class GRGG:
         >>> from math import isclose
         >>> from grgg import GRGG, Similarity, Complementarity
         >>> from grgg.utils import random_generator
-        >>> rng = random_generator(17)
+        >>> rng = random_generator(17089)
         >>> model = (
         ...     GRGG(100, 2)
         ...     .add_kernel(Similarity)
@@ -371,8 +371,13 @@ class GRGG:
                     )
                 P = self.edgeprobs(D)
                 if i == j:
-                    P = np.tril(P, k=-1)
-                ai, aj = np.nonzero(random_state.random(P.shape) < P)
+                    idx = np.tril_indices_from(P, k=-1)
+                    p = P[idx]  # type: ignore
+                    a = np.zeros_like(P, dtype=bool)
+                    a[idx] = random_state.random(p.shape) < p
+                    ai, aj = np.nonzero(a)
+                else:
+                    ai, aj = np.nonzero(random_state.random(P.shape) < P)
                 ai += i
                 aj += j
                 Ai.append(ai)

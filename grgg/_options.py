@@ -37,7 +37,7 @@ class KernelOptions(Options):
 
 @dataclass(slots=True)
 class SampleOptions(Options):
-    batch_size: int = 1000
+    batch_size: int = 100
 
 
 @dataclass(slots=True)
