@@ -1,0 +1,43 @@
+schema: '2.0'
+stages:
+  simulate-spherical:
+    cmd: python scripts/simulate_spherical.py
+    deps:
+    - path: scripts/simulate_spherical.py
+      hash: md5
+      md5: 4d292a7b70c1d07e2f96f097576706ce
+      size: 2951
+    params:
+      params.yaml:
+        simulate.spherical:
+          seed: 421765311
+          n_jobs: ${oc.decode:${oc.env:GRGG_N_JOBS,10}}
+          params:
+            n:
+            - 100
+            - 1000
+            - 10000
+            - 100000
+            k:
+            - 2
+            - 4
+            - 8
+            - 16
+            beta:
+            - 0.0
+            - 0.5
+            - 1.5
+            - 2.5
+            - 5.0
+            - 10.0
+            - .inf
+            logspace:
+            - true
+            - false
+            kbar: 10
+            n_rep: 10
+    outs:
+    - path: data/proc/spherical.pkl
+      hash: md5
+      md5: 55da3f77086b12e72e12a65a9882b6bf
+      size: 14002

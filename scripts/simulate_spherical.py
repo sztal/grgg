@@ -30,7 +30,7 @@ def sample_stats(args: tuple[GRGG, int, int]) -> list[dict[str, float | int]]:
     model, seed, idx = args
     local_seed = np.random.SeedSequence([seed, idx])
     G = model.sample(random_state=local_seed).G
-    coefs = PathCensus(G, parellel=False).coefs("global")
+    coefs = PathCensus(G, parallel=False).coefs("global")
     density = G.density()
     output = {
         "n": model.n_nodes,
@@ -70,6 +70,8 @@ def simulate(
     args = product(models, [seed], range(params.n_rep))
     args = [(*a[:2], i) for i, a in enumerate(args)]
     results = pqdm(args, sample_stats, n_jobs=n_jobs)
+    for result in results:
+        result["kbar"] = params.kbar
     results = pd.DataFrame(results)
     return results
 
