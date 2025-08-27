@@ -7,16 +7,15 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 import seaborn.objects as so
 
-from grgg import make_paths, plotting
+from grgg.project import paths, plotting
 
 warnings.filterwarnings("ignore", message="last has more values", category=UserWarning)
 
 # Paths
-paths = make_paths()
 paths.figures /= "spherical"
 paths.figures.mkdir(parents=True, exist_ok=True)
 
-simulation = joblib.load(paths.proc / "regimes-spherical.pkl")
+simulation = joblib.load(paths.proc / "spherical.pkl")
 params = simulation.params
 
 # Plotting settings
