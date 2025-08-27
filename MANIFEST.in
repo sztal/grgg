@@ -1,0 +1,19 @@
+recursive-exclude .git *
+exclude .gitattributes
+exclude .gitignore
+exclude .dvcignore
+recursive-exclude .dvc *
+exclude dvc.yaml
+exclude dvc.lock
+exclude params.yaml
+recursive-exclude data *
+recursive-exclude figures *
+recursive-exclude analyses *
+recursive-exclude scripts *
+recursive-exclude tests *
+recursive-exclude grgg/project *
+exclude Makefile
+exclude noxfile.py
+exclude .pre-commit-config.yaml
+exclude .cookiecutter.json
+exclude environment.yaml
