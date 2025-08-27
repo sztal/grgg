@@ -1,6 +1,6 @@
 simulate:
   params: &default_simulate_params
-    n: [100, 1000, 10_000]
+    n: [100, 1000, 10_000, 100_000]
     k: [2, 4, 8, 16]
     beta: [0.0, 0.5, 1.5, 2.5, 5.0, 10.0, !!float .inf]
     logspace: [True, False]
