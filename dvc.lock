@@ -5,8 +5,8 @@ stages:
     deps:
     - path: scripts/simulate_spherical.py
       hash: md5
-      md5: 4d292a7b70c1d07e2f96f097576706ce
-      size: 2951
+      md5: e2224f2d2c1f568b3e15c8b25973cd83
+      size: 3016
     params:
       params.yaml:
         simulate.spherical:
@@ -17,7 +17,6 @@ stages:
             - 100
             - 1000
             - 10000
-            - 100000
             k:
             - 2
             - 4
@@ -39,5 +38,5 @@ stages:
     outs:
     - path: data/proc/spherical.pkl
       hash: md5
-      md5: 55da3f77086b12e72e12a65a9882b6bf
-      size: 14002
+      md5: 783aae8c5f0e8f2d27d974771486c7b7
+      size: 102294
