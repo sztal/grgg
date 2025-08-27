@@ -25,13 +25,10 @@ PLOT_HEIGHT = 2.5  # Height of the plots in inches
 COLORS = mpl.rcParams["axes.prop_cycle"].by_key()["color"]
 MARKERS = mpl.rcParams["axes.prop_cycle"].by_key()["marker"]
 
-# %%
-# ====================================================================================
-# SIMILARITY
-# ====================================================================================
+# %% SIMILARITY ----------------------------------------------------------------------
 
 results = simulation.sim
-simdata = results.drop(columns=["idx"]).groupby(["n", "k", "beta"]).mean().reset_index()
+simdata = results.groupby(["n", "k", "beta", "logspace"]).mean()
 
 # %% Plot | Clustering ---------------------------------------------------------------
 
@@ -40,7 +37,8 @@ fig, axes = plt.subplots(
     ncols=(ncols := len(params.k)), figsize=(h * ncols, h), sharex=True, sharey=True
 )
 
-for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
+data = simdata.xs(True, level="logspace").reset_index()
+for ax, gdf in zip(axes.flat, data.groupby("k"), strict=True):
     k, gdf = gdf
     y = "clustering"
     (
@@ -57,13 +55,13 @@ for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
     ax.set_xlabel(None)
     ax.set_ylabel(None)
     ax.set_xscale("log")
-    ax.set_yscale("log")
+    # ax.set_yscale("log")
     ax.set_title(f"k={k}")
     ax.set_ylim(top=1.0)
 
 fig.supylabel(r"clustering", x=0.02)
 fig.tight_layout()
-fig.savefig(paths.figures / "regimes-sim-clust.pdf")
+fig.savefig(paths.figures / "spherical-sim-clust.pdf")
 
 # %% Plot | Q-Clustering -------------------------------------------------------------
 
@@ -72,6 +70,7 @@ fig, axes = plt.subplots(
     ncols=(ncols := len(params.k)), figsize=(h * ncols, h), sharex=True, sharey=True
 )
 
+data = simdata.xs(True, level="logspace").reset_index()
 for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
     k, gdf = gdf
     y = "qclustering"
@@ -89,13 +88,13 @@ for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
     ax.set_xlabel(None)
     ax.set_ylabel(None)
     ax.set_xscale("log")
-    ax.set_yscale("log")
+    # ax.set_yscale("log")
     ax.set_title(f"k={k}")
     ax.set_ylim(top=1.0)
 
 fig.supylabel(r"$q$-clustering", x=0.02)
 fig.tight_layout()
-fig.savefig(paths.figures / "regimes-sim-qclust.pdf")
+fig.savefig(paths.figures / "spherical-sim-qclust.pdf")
 
 # %% Plot | Average Path Length ------------------------------------------------------
 
@@ -104,7 +103,8 @@ fig, axes = plt.subplots(
     ncols=(ncols := len(params.k)), figsize=(h * ncols, h), sharex=True, sharey=True
 )
 
-for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
+data = simdata.xs(True, level="logspace").reset_index()
+for ax, gdf in zip(axes.flat, data.groupby("k"), strict=True):
     k, gdf = gdf
     y = "average_path_length"
     (
@@ -121,12 +121,12 @@ for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
     ax.set_xlabel(None)
     ax.set_ylabel(None)
     ax.set_xscale("log")
-    ax.set_yscale("log")
+    # ax.set_yscale("log")
     ax.set_title(f"k={k}")
 
 fig.supylabel(r"Avg. path length (L)", x=0.02)
 fig.tight_layout()
-fig.savefig(paths.figures / "regimes-sim-paths.pdf")
+fig.savefig(paths.figures / "spherical-sim-paths.pdf")
 
 # %% Shared legend -------------------------------------------------------------------
 
@@ -135,11 +135,11 @@ handles = [
         [],
         [],
         color=color,
-        marker="o",
+        marker=marker,
         linestyle="--",
-        label=f"β'={beta:.2f}",
+        label=f"β={beta:.2f}",
     )
-    for color, beta in zip(COLORS, params.beta, strict=False)
+    for color, marker, beta in zip(COLORS, MARKERS, params.beta, strict=False)
 ]
 fig, ax = plt.subplots(figsize=(h / 10, h * 3))
 ax.axis("off")
@@ -150,15 +150,12 @@ fig.legend(
     frameon=False,
     labelspacing=3,
 )
-fig.savefig(paths.figures / "regimes-legend.pdf")
+fig.savefig(paths.figures / "spherical-legend.pdf")
 
-# %%
-# ====================================================================================
-# COMPLEMENTARITY
-# ====================================================================================
+# %% COMPLEMENTARITY -----------------------------------------------------------------
 
 results = simulation.comp
-simdata = results.drop(columns=["idx"]).groupby(["n", "k", "beta"]).mean().reset_index()
+compdata = results.groupby(["n", "k", "beta", "logspace"]).mean()
 
 # %% Plot | Clustering ---------------------------------------------------------------
 
@@ -167,7 +164,8 @@ fig, axes = plt.subplots(
     ncols=(ncols := len(params.k)), figsize=(h * ncols, h), sharex=True, sharey=True
 )
 
-for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
+data = compdata.xs(True, level="logspace").reset_index()
+for ax, gdf in zip(axes.flat, data.groupby("k"), strict=True):
     k, gdf = gdf
     gdf["clustering"] += 1e-16  # Avoid log(0) issues
     y = "clustering"
@@ -185,13 +183,13 @@ for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
     ax.set_xlabel(None)
     ax.set_ylabel(None)
     ax.set_xscale("log")
-    ax.set_yscale("log")
+    # ax.set_yscale("log")
     ax.set_title(f"k={k}")
     ax.set_ylim(top=1.0)
 
 fig.supylabel(r"clustering", x=0.02)
 fig.tight_layout()
-fig.savefig(paths.figures / "regimes-comp-clust.pdf")
+fig.savefig(paths.figures / "spherical-comp-clust.pdf")
 
 # %% Plot | Q-Clustering -------------------------------------------------------------
 
@@ -200,7 +198,8 @@ fig, axes = plt.subplots(
     ncols=(ncols := len(params.k)), figsize=(h * ncols, h), sharex=True, sharey=True
 )
 
-for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
+data = compdata.xs(True, level="logspace").reset_index()
+for ax, gdf in zip(axes.flat, data.groupby("k"), strict=True):
     k, gdf = gdf
     y = "qclustering"
     (
@@ -217,13 +216,13 @@ for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
     ax.set_xlabel(None)
     ax.set_ylabel(None)
     ax.set_xscale("log")
-    ax.set_yscale("log")
+    # ax.set_yscale("log")
     ax.set_title(f"k={k}")
     ax.set_ylim(top=1.0)
 
 fig.supylabel(r"$q$-clustering", x=0.02)
 fig.tight_layout()
-fig.savefig(paths.figures / "regimes-comp-qclust.pdf")
+fig.savefig(paths.figures / "spherical-comp-qclust.pdf")
 
 # %% Plot | Average Path Length ------------------------------------------------------
 
@@ -232,7 +231,8 @@ fig, axes = plt.subplots(
     ncols=(ncols := len(params.k)), figsize=(h * ncols, h), sharex=True, sharey=True
 )
 
-for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
+data = compdata.xs(True, level="logspace").reset_index()
+for ax, gdf in zip(axes.flat, data.groupby("k"), strict=True):
     k, gdf = gdf
     y = "average_path_length"
     (
@@ -249,11 +249,11 @@ for ax, gdf in zip(axes.flat, simdata.groupby("k"), strict=True):
     ax.set_xlabel(None)
     ax.set_ylabel(None)
     ax.set_xscale("log")
-    ax.set_yscale("log")
+    # ax.set_yscale("log")
     ax.set_title(f"k={k}")
 
 fig.supylabel(r"Avg. path length (L)", x=0.02)
 fig.tight_layout()
-fig.savefig(paths.figures / "regimes-comp-paths.pdf")
+fig.savefig(paths.figures / "spherical-comp-paths.pdf")
 
 # %% ---------------------------------------------------------------------------------

@@ -8,7 +8,7 @@ import seaborn as sns
 def theme(
     params: Mapping[str, Any] | None = None,
     *,
-    markers: Iterable[str] = ("o", "s", "X", "D", "^", "v"),
+    markers: Iterable[str] = ("o", "s", "X", "D", "^", "v", "P"),
     colors: Iterable | None = None,
 ) -> dict[str, Any]:
     """
