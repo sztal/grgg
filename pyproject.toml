@@ -63,6 +63,7 @@ test = [
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["grgg", "grgg.*"]
+exclude = ["grgg.project", "grgg.project.*"]
 namespaces = false
 
 [tool.mypy]

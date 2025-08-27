@@ -17,3 +17,4 @@ exclude noxfile.py
 exclude .pre-commit-config.yaml
 exclude .cookiecutter.json
 exclude environment.yaml
+recursive-exclude .ruff_cache *
