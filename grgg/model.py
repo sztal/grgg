@@ -46,8 +46,11 @@ class GRGGSample:
         return G.simplify()
 
     @cached_property
-    def census(self) -> PathCensus:
-        """Return the path census of the sampled graph."""
+    def struct(self) -> PathCensus:
+        """Return the path census for calculating structural coefficients.
+
+        See :mod:`pathcensus` for details.
+        """
         return PathCensus(self.A)
 
 
