@@ -17,24 +17,29 @@ class Manifold(ABC):
     """
 
     def __init__(self, dim: int) -> None:
-        self.dim = dim
+        if dim < 0:
+            errmsg = "'dim' must be a non-negative integer"
+            raise ValueError(errmsg)
+        self.dim = int(dim)
 
     def __repr__(self) -> str:
         cn = self.__class__.__name__
+        params = self.params
+        dim = params.pop("dim")
         params = [
             f"{k}={v:.2f}" if isinstance(v, float) else f"{k}={v}"
-            for k, v in self.params.items()
+            for k, v in params.items()
         ]
-        params = [str(self.dim), *params]
+        params = [str(dim), *params]
         return f"{cn}({", ".join(params)})"
 
     def __copy__(self) -> Self:
-        return self.__class__(self.dim, **self.params)
+        return self.__class__(**self.params)
 
     @property
     @abstractmethod
     def params(self) -> dict[str, float]:
-        return {}
+        return {"dim": self.dim}
 
     @property
     def embedding_dim(self) -> int:
@@ -42,16 +47,11 @@ class Manifold(ABC):
 
     @property
     @abstractmethod
-    def surface_area(self) -> float:
-        pass
-
-    @property
-    @abstractmethod
     def volume(self) -> float:
-        pass
+        """Volume of the manfiold surface."""
 
     def pdist(self, X: np.ndarray, *, full: bool = False) -> np.ndarray:
-        """Compute pairwise distances between points on the manifold."""
+        """Compute pairwise geodesic distances between points on the manifold."""
         dist = self._pdist(X)
         if full:
             dist = squareform(dist)
@@ -96,12 +96,9 @@ class Manifold(ABC):
         """Create a copy of the manifold."""
         return self.__copy__()
 
-    @classmethod
     @abstractmethod
-    def from_surface_area(
-        cls, dim: int, area: float, *args: Any, **kwargs: Any
-    ) -> Self:
-        """Create a manifold instance from its surface area."""
+    def with_volume(cls, volume: float, *args: Any, **kwargs: Any) -> Self:
+        """Create a manifold instance from a target volume."""
 
 
 class CompactManifold(Manifold):
@@ -114,5 +111,5 @@ class CompactManifold(Manifold):
 
     @property
     @abstractmethod
-    def max_distance(self) -> float:
-        """Maximum distance between any two points on the manifold."""
+    def diameter(self) -> float:
+        """Maximum geodesic distance between any two points on the manifold."""

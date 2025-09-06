@@ -30,14 +30,17 @@ class Options:
 
 
 @dataclass(slots=True)
-class KernelOptions(Options):
-    logspace: bool = False
+class LayerOptions(Options):
+    beta: float = 1.5
+    mu: float = 0.0
+    log: bool = True
     eps: float = 1e-6
 
 
 @dataclass(slots=True)
 class SampleOptions(Options):
     batch_size: int = 100
+    auto_progress: int = 5000
 
 
 @dataclass(slots=True)
@@ -54,7 +57,7 @@ class OptimizeOptions(Options):
 
 @dataclass(slots=True)
 class TopOptions(Options):
-    kernel: KernelOptions = field(default_factory=KernelOptions)
+    layer: LayerOptions = field(default_factory=LayerOptions)
     sample: SampleOptions = field(default_factory=SampleOptions)
     optimize: OptimizeOptions = field(default_factory=OptimizeOptions)
 
