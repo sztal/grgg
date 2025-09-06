@@ -95,12 +95,29 @@ class CouplingParameter:
         Whether the parameter is heterogeneous (varies across nodes).
     """
 
-    def __init__(self, value: float, *, heterogeneous: bool = False) -> None:
+    def __init__(
+        self,
+        value: float | np.ndarray,
+        *,
+        heterogeneous: bool | None = None,
+    ) -> None:
         self._value = None
-        self.value = value
         self._fitness = None
         self._layer = None
-        self.heterogeneous = heterogeneous
+        if np.isscalar(value):
+            self.heterogeneous = False if heterogeneous is None else heterogeneous
+            self.value = value
+        else:
+            value = np.asarray(value)
+            if value.ndim != 1:
+                errmsg = "parameter value must be a scalar or 1D array"
+                raise ValueError(errmsg)
+            if heterogeneous is False:
+                errmsg = "parameter value cannot be an array if not heterogeneous"
+                raise ValueError(errmsg)
+            self.heterogeneous = True
+            self.value = value.mean()
+            self._fitness = value - self.value / 2
 
     def __repr__(self) -> str:
         params = f"{self.value:.2f}"
@@ -109,7 +126,7 @@ class CouplingParameter:
         return f"{self.__class__.__name__}({params})"
 
     def __copy__(self) -> Self:
-        obj = self.__class__(self.value, hterogeneous=self.heterogeneous)
+        obj = self.__class__(self.value, heterogeneous=self.heterogeneous)
         if self._fitness is not None:
             obj._fitness = self._fitness.copy()
         obj.layer = self.layer
@@ -160,10 +177,12 @@ class CouplingParameter:
     @layer.setter
     def layer(self, layer: "AbstractGRGGLayer") -> None:
         self._layer = weakref.ref(layer)
-        if self.heterogeneous and (
-            self._fitness is None or self.model.n_nodes != len(self._fitness)
-        ):
-            self._fitness = np.zeros(layer.model.n_nodes)
+        if self.heterogeneous:
+            if self._fitness is None:
+                self._fitness = np.zeros(layer.model.n_nodes)
+            elif self.model.n_nodes != len(self._fitness):
+                errmsg = "fitness array length does not match the number of nodes"
+                raise ValueError(errmsg)
 
     @property
     def heterogeneous(self) -> bool:
