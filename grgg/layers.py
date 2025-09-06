@@ -1,13 +1,14 @@
 import weakref
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Self
 
 import numpy as np
 from scipy.special import expit
 
+from grgg.manifolds import CompactManifold
+from grgg.parameters import Beta, Mu
+
 from . import options
-from .manifolds import CompactManifold
-from .parameters import Beta, Mu
 
 if TYPE_CHECKING:
     from . import GRGG
@@ -17,7 +18,37 @@ __all__ = ("Similarity", "Complementarity")
 
 
 class AbstractGRGGLayer(ABC):
-    """Abstract base class for GRGG layers."""
+    """Abstract base class for GRGG layers.
+
+    Examples
+    --------
+    Check coupling broadcasting in the homogeneous case.
+    >>> from grgg import GRGG, Similarity
+    >>> model = GRGG(100, 2, Similarity())
+    >>> L = model.layers[0]
+    >>> float(L.coupling(1))
+    0.0
+    >>> float(L.coupling(1, [1, 2], [3, 5, 7]))
+    0.0
+    >>> L.coupling([1, 1], [1, 2], [3, 5, 7])
+    array([0., 0.])
+
+    Check coupling broadcasting in the heterogeneous case.
+    >>> model = GRGG(100, 2, Similarity(Mu(heterogeneous=True), log=True))
+    >>> L = model.layers[0]
+    >>> float(L.coupling(1, 1, 3))
+    0.0
+    >>> L.coupling(1, [1, 2], [3, 5])
+    array([[0., 0.],
+           [0., 0.]])
+    >>> L.coupling(1, 3, [1, 2])
+    array([0., 0.])
+    >>> L.coupling(1, [1, 2], 3)
+    array([[0.],
+           [0.]])
+    >>> L.coupling([1, 1], [[1, 2], [3, 4]])
+    array([0., 0.])
+    """
 
     def __init__(
         self,
@@ -27,23 +58,15 @@ class AbstractGRGGLayer(ABC):
         log: bool | None = None,
         eps: float | None = None,
     ) -> None:
-        if beta is None:
-            beta = Beta(options.layer.beta)
-        elif not isinstance(beta, Beta):
-            beta = Beta(beta)
-        if mu is None:
-            mu = Mu(options.layer.mu)
-        elif not isinstance(mu, Mu):
-            mu = Mu(mu)
-        if log is None:
-            log = options.layer.log
-        if eps is None:
-            eps = options.layer.eps
+        if isinstance(beta, Mu) or isinstance(mu, Beta):
+            beta, mu = mu, beta  # type: ignore
+        self._model = None
+        self._mu = None
+        self._beta = None
         self.beta = beta
         self.mu = mu
-        self.log = bool(log)
-        self.eps = float(eps)
-        self._model = None
+        self.log = bool(log if log is not None else options.layer.log)
+        self.eps = float(eps if eps is not None else options.layer.eps)
 
     def __repr__(self) -> str:
         cn = self.__class__.__name__
@@ -52,14 +75,48 @@ class AbstractGRGGLayer(ABC):
     def __copy__(self) -> Self:
         return self.__class__(self.beta.copy(), self.mu.copy())
 
-    def __call__(self, g: np.ndarray, *args: Any, **kwargs: Any) -> np.ndarray:
-        coupling = self.coupling(g, *args, **kwargs)
+    def __call__(self, coupling: np.ndarray) -> np.ndarray:
         return expit(-coupling)
 
     @property
     def manifold(self) -> CompactManifold:
         """The parent model's manifold."""
         return self.model.manifold
+
+    @property
+    def is_heterogeneous(self) -> bool:
+        """Whether the layer is heterogeneous."""
+        return self.beta.heterogeneous or self.mu.heterogeneous
+
+    @property
+    def beta(self) -> Beta:
+        """Coupling parameter :math:`\\beta`."""
+        return self._beta
+
+    @beta.setter
+    def beta(self, beta: Beta | float | None) -> None:
+        if beta is None:
+            beta = Beta()
+        elif not isinstance(beta, Beta):
+            beta = Beta(beta)
+        self._beta = beta
+        if self._model is not None:
+            self.beta.layer = self
+
+    @property
+    def mu(self) -> Mu:
+        """Coupling parameter :math:`\\mu`."""
+        return self._mu
+
+    @mu.setter
+    def mu(self, mu: Mu | float | None) -> None:
+        if mu is None:
+            mu = Mu()
+        elif not isinstance(mu, Mu):
+            mu = Mu(mu)
+        self._mu = mu
+        if self._model is not None:
+            self.mu.layer = self
 
     @property
     def model(self) -> "GRGG":
@@ -75,45 +132,31 @@ class AbstractGRGGLayer(ABC):
 
     @model.setter
     def model(self, model: "GRGG") -> None:
-        from grgg import GRGG
-
-        if not isinstance(model, GRGG):
-            errmsg = "'model' must be a 'GRGG' instance"
-            raise TypeError(errmsg)
         self._model = weakref.ref(model)
+        self.beta.layer = self
+        self.mu.layer = self
 
     @property
     def max_energy(self) -> float:
         return float(self.energy(self.manifold.diameter))
 
+    @property
     def copy(self) -> Self:
         return self.__copy__()
+
+    def coupling(self, g: np.ndarray, *idx: slice | np.ndarray) -> np.ndarray:
+        """Evaluate the coupling function for geodesic distances `g`."""
+        d = self.manifold.dim
+        idx = self.model.make_idx(g, *idx)  # type: ignore
+        energy = self._energy(g)
+        beta = self.beta.outer[idx] if self.beta.heterogeneous else self.beta.value
+        mu = self.mu.outer[idx] if self.mu.heterogeneous else self.mu.value
+        coupling = beta * d * (energy - mu) + np.exp(-beta) * mu * (beta + 1)
+        return coupling
 
     @abstractmethod
     def energy(self, g: np.ndarray) -> np.ndarray:
         """Evaluate the energy function for geodesic distances `g`."""
-
-    def coupling(self, g: np.ndarray, *args: Any, **kwargs: Any) -> np.ndarray:
-        """Evaluate the coupling function for geodesic distances `g`."""
-        d = self.manifold.dim
-        beta, mu = self._get_params(*args, **kwargs)
-        energy = self._energy(g)
-        coupling = beta * d * (energy - mu) + np.exp(-beta) * mu * (beta + 1)
-        return coupling
-
-    def _get_params(
-        self,
-        idx: np.ndarray | tuple[np.ndarray, np.ndarray] | None = None,
-        **kwargs: Any,
-    ) -> tuple[np.ndarray, np.ndarray]:
-        """Get coupling function parameters, handling heterogeneity where necessary."""
-        beta = (
-            self.beta.outer(idx, **kwargs)
-            if self.beta.heterogeneous
-            else self.beta.value
-        )
-        mu = self.mu.outer(idx, **kwargs) if self.mu.heterogeneous else self.mu.value
-        return beta, mu
 
     def _energy(self, g: np.ndarray) -> np.ndarray:
         """Evaluate the energy function for geodesic distances `g`."""

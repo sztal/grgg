@@ -44,6 +44,11 @@ class SampleOptions(Options):
 
 
 @dataclass(slots=True)
+class IntegrateOptions(Options):
+    batch_size: int = 1000
+
+
+@dataclass(slots=True)
 class OptimizeMuOptions(Options):
     beta_max: float = 1e2
 
@@ -59,6 +64,7 @@ class OptimizeOptions(Options):
 class TopOptions(Options):
     layer: LayerOptions = field(default_factory=LayerOptions)
     sample: SampleOptions = field(default_factory=SampleOptions)
+    integrate: IntegrateOptions = field(default_factory=IntegrateOptions)
     optimize: OptimizeOptions = field(default_factory=OptimizeOptions)
 
 

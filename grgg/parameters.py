@@ -1,12 +1,87 @@
 import weakref
+from collections.abc import Callable
 from functools import singledispatchmethod
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import numpy as np
+
+from . import options
 
 if TYPE_CHECKING:
     from . import GRGG
     from .layers import AbstractGRGGLayer
+
+
+IndexT = int | slice | np.ndarray
+
+
+__all__ = ("Beta", "Mu")
+
+
+class Outer:
+    """Indexable outer operation.
+
+    Attributes
+    ----------
+    v1
+        First vector.
+    v2
+        Second vector.
+    op
+        Vectorized operation to apply.
+    """
+
+    def __init__(
+        self,
+        v1: np.ndarray,
+        v2: np.ndarray | None = None,
+        *,
+        op: Callable[[np.ndarray, np.ndarray], np.ndarray] = np.multiply,
+    ) -> None:
+        self.v1 = np.asarray(v1)
+        self.v2 = np.asarray(v2) if v2 is not None else self.v1
+        self.op = op
+
+    @singledispatchmethod
+    def __getitem__(self, i: IndexT) -> np.ndarray:
+        if isinstance(i, list):
+            i = np.asarray(i)
+            return self[i]
+        out = self[i, i]
+        if not np.isscalar(out):
+            out = out[np.tril_indices_from(out, k=-1)]  # type: ignore
+        return out
+
+    @__getitem__.register
+    def _(self, i: np.ndarray) -> np.ndarray:
+        if i.ndim == 1:
+            return self[i, i]
+        if i.ndim == 2:
+            vi = self.v1[i[:, 0]]
+            vj = self.v2[i[:, 1]]
+            return self.op(vi, vj)
+        errmsg = "index array must be 1D or 2D"
+        raise IndexError(errmsg)
+
+    @__getitem__.register
+    def _(self, i: tuple) -> np.ndarray | float:
+        if not i:
+            i = (slice(None), slice(None))
+        if len(i) == 1:
+            return self[i[0]]
+        try:
+            i, j = i
+        except ValueError:
+            errmsg = "wrong number indices"
+            raise IndexError(errmsg) from None
+        vi = self.v1[i]
+        vj = self.v2[j]
+        if not np.isscalar(vi):
+            vi = vi[:, None]
+        out = self.op(vi, vj)
+        if out.size == 1:
+            out = float(out.item())
+        return out
 
 
 class CouplingParameter:
@@ -21,10 +96,11 @@ class CouplingParameter:
     """
 
     def __init__(self, value: float, *, heterogeneous: bool = False) -> None:
-        self.value = float(value)
-        self._heterogeneous = heterogeneous
+        self._value = None
+        self.value = value
         self._fitness = None
         self._layer = None
+        self.heterogeneous = heterogeneous
 
     def __repr__(self) -> str:
         params = f"{self.value:.2f}"
@@ -40,19 +116,34 @@ class CouplingParameter:
         return obj
 
     @property
+    def dtype(self) -> np.dtype:
+        """The data type of the parameter values."""
+        return self.value.dtype
+
+    @property
+    def value(self) -> np.number:
+        """Parameter value."""
+        return self._value
+
+    @value.setter
+    def value(self, value: float) -> None:
+        value = float(value)
+        self._value = np.dtype(type(value)).type(value)
+
+    @property
     def values(self) -> np.ndarray:
         """Node-specific parameters allowing for heterogeneity."""
         if self.heterogeneous:
             if self._fitness is None:
                 errmsg = "node fitnesses are not initialized"
                 raise AttributeError(errmsg)
-            return self.value + self._fitness
-        return np.fill(self.model.n_nodes, self.value)
+            return (self.value / 2 + self._fitness).astype(self.dtype)
+        return np.fill(self.model.n_nodes, self.value / 2, dtype=self.dtype)
 
     @property
     def model(self) -> "GRGG":
         """The parent :class:`grgg.GRGG` instance."""
-        return self.coupling.model
+        return self.layer.model
 
     @property
     def layer(self) -> "AbstractGRGGLayer":
@@ -68,14 +159,9 @@ class CouplingParameter:
 
     @layer.setter
     def layer(self, layer: "AbstractGRGGLayer") -> None:
-        if not isinstance(layer, AbstractGRGGLayer):
-            errmsg = "'layer' must be an 'AbstractGRGGLayer' instance"
-            raise TypeError(errmsg)
         self._layer = weakref.ref(layer)
-        if (
-            self.heterogeneous
-            and self._fitness is None
-            or self.model.n_nodes != len(self._fitness)
+        if self.heterogeneous and (
+            self._fitness is None or self.model.n_nodes != len(self._fitness)
         ):
             self._fitness = np.zeros(layer.model.n_nodes)
 
@@ -90,37 +176,10 @@ class CouplingParameter:
         if self.heterogeneous and self._layer is not None:
             self.layer = self.layer
 
-    @singledispatchmethod
-    def outer(
-        self, i: np.ndarray | slice | None = None, *, full: bool = False
-    ) -> np.ndarray:
-        """Compute the outer sum of parameter values for node pairs `(i, j)`.
-
-        Parameters
-        ----------
-        i
-            Node indices.
-        full
-            Whether to return a full matrix or only the lower triangular part.
-        """
-        values = self.values[i] if i is not None else self.values
-        outer = values[:, None] + values
-        if not full:
-            outer = outer[np.tril_indices_from(outer, k=-1)]
-        return outer
-
-    @outer.register
-    def _(self, ij: tuple) -> np.ndarray:
-        """Compute the outer sum of parameter values for node pairs `(i, j)`.
-
-        Parameters
-        ----------
-        ij
-            Tuple of node index arrays `(i, j)`.
-        """
-        i, j = ij
-        values = self.values
-        return values[i, None] + values[j]
+    @property
+    def outer(self) -> Outer:
+        """Outer sum of parameter values for node pairs."""
+        return Outer(self.values, op=np.add)
 
 
 class Beta(CouplingParameter):
@@ -137,6 +196,11 @@ class Beta(CouplingParameter):
         Whether the parameter is heterogeneous (varies across nodes).
     """
 
+    def __init__(self, value: float | None = None, *args: Any, **kwargs: Any) -> None:
+        if value is None:
+            value = options.layer.beta
+        super().__init__(value, *args, **kwargs)
+
 
 class Mu(CouplingParameter):
     """Mu parameter (chemical potential).
@@ -150,3 +214,8 @@ class Mu(CouplingParameter):
     heterogeneous
         Whether the parameter is heterogeneous (varies across nodes).
     """
+
+    def __init__(self, value: float | None = None, *args: Any, **kwargs: Any) -> None:
+        if value is None:
+            value = options.layer.mu
+        super().__init__(value, *args, **kwargs)

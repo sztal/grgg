@@ -68,7 +68,7 @@ class GRGG:
         as the surface dimension of a sphere with surface area equal to `n_nodes`.
     kernels
         List of kernel functions defining the edge probabilities.
-    rho
+    delta
         Sampling density, which is the ratio of the number of nodes
         to the surface area of the manifold.
 
@@ -82,8 +82,8 @@ class GRGG:
     >>> sphere = Sphere(2)  # unit sphere with 2-dimensional surface
     >>> model = GRGG(100, sphere)
 
-    Note that in this case the sampling density, `rho`, is not equal to 1.
-    >>> model.rho != 1
+    Note that in this case the sampling density, `delta`, is not equal to 1.
+    >>> model.delta != 1
     True
 
     Alternatively, a model can be initialized by passing an integer
@@ -92,7 +92,7 @@ class GRGG:
     has a surface area equal to the number of nodes, so the sampling density
     is always 1. This is the most typical way to initialize the model.
     >>> model = GRGG(100, 2)
-    >>> model.rho
+    >>> model.
     1.0
 
     For the model to be useful, we need to add kernel functions that define the edge

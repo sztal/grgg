@@ -65,7 +65,7 @@ class GRGG:
         Sphere(2, r=2.82)
         >>> model.manifold.volume
         100.0
-        >>> model.rho  # unitary sampling density
+        >>> model.delta  # unitary sampling density
         1.0
 
         However, a model can be initialized also more explicitly from a sphere with
@@ -75,7 +75,7 @@ class GRGG:
         Sphere(2, r=10.00)
         >>> model.manifold.volume
         1256.637061
-        >>> model.rho
+        >>> model.delta
         0.0795774715
 
         In order to pass an arbitrary manifold in `d` dimensions
@@ -125,7 +125,7 @@ class GRGG:
         return self.__class__(self.n_nodes, self.manifold, *layers)
 
     @property
-    def rho(self) -> float:
+    def delta(self) -> float:
         """Sampling density."""
         return self.n_nodes / self.manifold.volume
 
@@ -149,25 +149,38 @@ class GRGG:
             yield self[i]
 
     @property
+    def is_heterogeneous(self) -> bool:
+        """Whether the model is heterogeneous."""
+        return any(layer.is_heterogeneous for layer in self.layers)
+
+    @property
+    def degree(self) -> np.ndarray:
+        if self.is_heterogeneous:
+            return np.array([self.integrate.degree(i)[0] for i in range(self.n_nodes)])
+        return np.full(self.n_nodes, self.kbar)
+
+    @property
     def kbar(self) -> float:
         r"""Average degree :math:`\bar{k}` of the GRGG model."""
-        return self.integrate.kbar()[0]
+        if self.is_heterogeneous:
+            return self.degree.mean()
+        return self.integrate.degree()[0]
 
     @property
     def density(self) -> float:
         """Expected density of the GRGG model."""
         return self.kbar / (self.n_nodes - 1)
 
-    def dist2prob(self, g: float | np.ndarray, *args: Any, **kwargs: Any) -> np.ndarray:
+    def dist2prob(self, g: np.ndarray, *args: Any) -> np.ndarray:
         """Convert distances to connection probabilities.
 
         Parameters
         ----------
         g
             Geodesic distances.
-        *args, **kwargs
-            Passed to :meth:`~grgg.parameters.CouplingParameter.outer`
-            to align distances with node-heterogeneous parameters if necessary.
+        *args
+            Optional indices of the nodes corresponding to the distances `g`.
+            If not provided it is assumed that `g` contains all pairwise distances.
 
         Examples
         --------
@@ -182,7 +195,7 @@ class GRGG:
         >>> model.dist2prob(model.manifold.diameter)
         1.0
 
-        Check maximal probaiblities in the joint similarity-complementarity model.
+        Check maximal probabilities in the joint similarity-complementarity model.
         >>> model = GRGG(100, 2, Similarity(), Complementarity())
         >>> model.dist2prob([0, model.manifold.diameter])
         array([1., 1.])
@@ -197,17 +210,18 @@ class GRGG:
         if not self.layers:
             errmsg = "the model has no layers"
             raise AttributeError(errmsg)
+        if not np.isscalar(g):
+            g = np.asarray(g)
         P = None
         for layer in self.layers:
-            if P is None:
-                P = 1 - layer(g, *args, **kwargs)
-            else:
-                P *= 1 - layer(g, *args, **kwargs)
-        if np.isscalar(g):
+            couplings = layer.coupling(g, *args)
+            p = layer(couplings)
+            P = 1 - p if P is None else P * (1 - p)
+        if np.isscalar(P) or P.size == 1:
             P = P.item()
         return 1 - P  # type: ignore
 
-    def pmatrix(self, *, full: bool = True, **kwargs: Any) -> np.ndarray:
+    def pmatrix(self, full: bool = True, **kwargs: Any) -> np.ndarray:
         """Compute the full matrix of connection probabilities.
 
         Parameters
@@ -366,6 +380,19 @@ class GRGG:
     def copy(self) -> Self:
         return self.__copy__()
 
+    def make_idx(
+        self, g: np.ndarray, *idx: slice | np.ndarray
+    ) -> np.ndarray | tuple[np.ndarray, ...]:
+        """Make index tuple for array indexing."""
+        if not idx and not np.isscalar(g):
+            if g.ndim == 1:
+                n = self.n_nodes
+                A = np.tril(np.ones((n, n), dtype=bool), k=-1)
+                idx = np.column_stack(np.nonzero(A))  # type: ignore
+            else:
+                idx = (slice(None), slice(None))
+        return idx
+
     # Internals ----------------------------------------------------------------------
 
     def _sample_diag(
@@ -387,7 +414,7 @@ class GRGG:
     ) -> np.ndarray:
         """Sample edges from an off-diagonal batch of the probability matrix."""
         D = self.manifold.cdist(X[xi], X[yi])
-        P = self.dist2prob(D, (xi, yi))
+        P = self.dist2prob(D, xi, yi)
         M = random_state.random(P.shape) < P
         ai, aj = np.nonzero(M)
         return ai, aj
