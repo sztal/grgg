@@ -15,22 +15,27 @@ class ArrayQuantizer:
     ----------
     discretizer
         The discretizer used for quantization.
+    lossy
+        Whether the quantization is lossy.
+        If `False`, then a copy of tge original array is stored,
+        so it is returned exactly by `dequantize()`.
+        Otherwise, the origina array is reconstructed from the bins,
+        which may introduce some information loss.
     """
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, *, lossy: bool = False, **kwargs: Any) -> None:
         """Initialization method.
 
         `**kwargs` are passed to the `AdaptiveBinsDiscretizer`.
         """
+        self.clear()
         kwargs = {
             "n_bins": options.quantize.n_bins,
             "average_std_per_bin": options.quantize.average_std_per_bin,
             **kwargs,
         }
         self.discretizer = AdaptiveBinsDiscretizer(**kwargs)
-        self._bins = None
-        self._inverse = None
-        self._counts = None
+        self.lossy = lossy
 
     @property
     def bins(self) -> np.ndarray:
@@ -77,6 +82,8 @@ class ArrayQuantizer:
         self._bins = B
         self._inverse = Inv
         self._counts = C
+        if not self.lossy:
+            self._array = X.copy()
         return self.discretizer.inverse_transform(B)
 
     def dequantize(
@@ -99,6 +106,11 @@ class ArrayQuantizer:
             errmsg = "the quantizer is empty; call 'quantize()' first"
             raise RuntimeError(errmsg)
         if X is None:
+            if not self.lossy:
+                dequantized = self._array.copy()
+                if clear:
+                    self.clear()
+                return dequantized
             X = self.discretizer.inverse_transform(self.bins)
         if len(X) != len(self.bins):
             errmsg = "input array length does not match the quantizer state"
@@ -113,4 +125,15 @@ class ArrayQuantizer:
         self._bins = None
         self._inverse = None
         self._counts = None
+        self._array = None
+        return self
+
+    def set_params(self, **kwargs: Any) -> Self:
+        """Set parameters of the discretizer.
+
+        `**kwargs` are passed to the `AdaptiveBinsDiscretizer`.
+        """
+        if (loss := kwargs.pop("lossy", None)) is not None:
+            self.lossy = bool(loss)
+        self.discretizer.set_params(**kwargs)
         return self

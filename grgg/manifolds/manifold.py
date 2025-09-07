@@ -4,8 +4,6 @@ from typing import Any, Self
 import numpy as np
 from scipy.spatial.distance import squareform
 
-from grgg.utils import random_generator
-
 
 class Manifold(ABC):
     """Abstract base class for manifolds.
@@ -93,8 +91,8 @@ class Manifold(ABC):
         if n <= 0:
             errmsg = "'n' must be positive"
             raise ValueError(errmsg)
-        rng = random_generator(random_state)
-        return self._sample_points(n, rng)
+        random_state = np.random.default_rng(random_state)
+        return self._sample_points(n, random_state)
 
     @abstractmethod
     def _sample_points(self, n: int, rng: np.random.Generator) -> np.ndarray:

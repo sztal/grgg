@@ -50,8 +50,9 @@ class IntegrateOptions(Options):
 
 @dataclass(slots=True)
 class QuantizeOptions(Options):
-    n_bins: int = 50
-    average_std_per_bin: float = 0.2
+    auto: bool = True
+    n_bins: int = 100
+    average_std_per_bin: float = 0.05
 
 
 @dataclass(slots=True)

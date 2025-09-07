@@ -1,5 +1,5 @@
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from functools import cached_property, singledispatchmethod
 from typing import Any, Self
@@ -8,13 +8,14 @@ import igraph as ig
 import numpy as np
 from pathcensus import PathCensus
 from scipy.sparse import csr_array, sparray
-from tqdm.auto import tqdm
+from tqdm.auto import tqdm, trange
 
 from . import options
 from .integrate import Integration
 from .layers import AbstractGRGGLayer
 from .manifolds import CompactManifold, Sphere
 from .quantize import ArrayQuantizer
+from .utils import parse_switch_flag
 
 __all__ = ("GRGG",)
 
@@ -178,24 +179,6 @@ class GRGG:
     def is_heterogeneous(self) -> bool:
         """Whether the model is heterogeneous."""
         return any(layer.is_heterogeneous for layer in self.layers)
-
-    @property
-    def degree(self) -> np.ndarray:
-        if self.is_heterogeneous:
-            return np.array([self.integrate.degree(i)[0] for i in range(self.n_nodes)])
-        return np.full(self.n_nodes, self.kbar)
-
-    @property
-    def kbar(self) -> float:
-        r"""Average degree :math:`\bar{k}` of the GRGG model."""
-        if self.is_heterogeneous:
-            return self.degree.mean()
-        return self.integrate.degree()[0]
-
-    @property
-    def density(self) -> float:
-        """Expected density of the GRGG model."""
-        return self.kbar / (self.n_nodes - 1)
 
     def dist2prob(self, g: np.ndarray, *args: Any) -> np.ndarray:
         """Convert distances to connection probabilities.
@@ -426,7 +409,7 @@ class GRGG:
         """
         if self.is_quantized:
             return self
-        self.quantizer.discretizer.set_params(**kwargs)
+        self.quantizer.set_params(**kwargs)
         # Collect parameters
         params = []
         for layer in self.layers:
@@ -457,6 +440,46 @@ class GRGG:
                         param.value = params[:, i]
                         i += 1
         return self
+
+    # Methods for computing model properties -----------------------------------------
+
+    def degree(
+        self,
+        *args: Any,
+        quantize: bool | Mapping | None = None,
+        progress: bool | Mapping = False,
+        **kwargs: Any,
+    ) -> np.ndarray:
+        """Compute expected degree of nodes in the GRGG model."""
+        quantize, qopts = parse_switch_flag(quantize, default=options.quantize.auto)
+        progress, popts = parse_switch_flag(progress)
+        if self.is_heterogeneous:
+            was_quantized = self.is_quantized
+            if quantize:
+                self.quantize(**qopts)
+            degseq = np.array(
+                [
+                    self.integrate.degree(i, *args, **kwargs)[0]
+                    for i in trange(self.n_nodes, disable=not progress, **popts)
+                ]
+            )
+            if quantize and not was_quantized:
+                degseq = self.quantizer.dequantize(degseq)
+                self.dequantize()
+            return degseq
+        return np.full(self.n_nodes, self.kbar)
+
+    @property
+    def kbar(self) -> float:
+        r"""Average degree :math:`\bar{k}` of the GRGG model."""
+        if self.is_heterogeneous:
+            return self.degree.mean()
+        return self.integrate.degree()[0]
+
+    @property
+    def density(self) -> float:
+        """Expected density of the GRGG model."""
+        return self.kbar / (self.n_nodes - 1)
 
     # Internals ----------------------------------------------------------------------
 

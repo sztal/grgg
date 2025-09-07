@@ -1,18 +1,54 @@
+from collections.abc import Mapping
 from itertools import product
+from typing import Any
 
 import numpy as np
 
 
-def random_generator(
-    random_state: np.random.Generator | int | None = None,
-) -> np.random.Generator:
-    """Create a :class:`numpy.random.Generator` instance."""
-    if not isinstance(random_state, np.random.Generator):
-        random_state = np.random.default_rng(random_state)
-    if not isinstance(random_state, np.random.Generator):
-        errmsg = "'random_state' must be an integer seed or numpy generator."
-        raise TypeError(errmsg)
-    return random_state
+def parse_switch_flag(
+    value: bool | Mapping | None,
+    default: bool | None = None,
+) -> tuple[bool, Mapping[str, Any]]:
+    """Get option `value`.
+
+    Parameters
+    ----------
+    value
+        Option value.
+    default
+        Default value to fill in when `value` is `None`.
+
+    Returns
+    -------
+    value
+        The resulting value.
+    options
+        A empty dict or `value` if it was passed as a mapping.
+
+    Examples
+    --------
+    >>> parse_switch_flag(None)
+    (False, {})
+    >>> parse_switch_flag(None, default=True)
+    (True, {})
+    >>> parse_switch_flag(True)
+    (True, {})
+    >>> parse_switch_flag(False)
+    (False, {})
+    >>> parse_switch_flag({"a": 1, "b": 2})
+    (True, {'a': 1, 'b': 2})
+    >>> parse_switch_flag({}, default=True)
+    (True, {})
+    >>> parse_switch_flag({})
+    (True, {})
+    """
+    if value is None:
+        value = default
+    if isinstance(value, Mapping):
+        value, options = True, value
+    else:
+        value, options = bool(value), {}
+    return value, options
 
 
 def batch_arrays(
