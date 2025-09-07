@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 from scipy.integrate import quad
 
+from . import options
 from .manifolds import Manifold, Sphere
 from .utils import batch_arrays
 
@@ -102,10 +103,11 @@ class DegreeIntegral(Integral):
 
     def postprocess(self, integral: NumericT) -> NumericT:
         """Postprocess the integral result."""
+        n_nodes = self.model._n_nodes  # always use the actual number of nodes
         if self.model.is_heterogeneous:
-            C = self.scale / self.model.n_nodes
+            C = self.scale / n_nodes
         else:
-            C = (1 - 1 / self.model.n_nodes) * self.scale  # exclude self-loops
+            C = (1 - 1 / n_nodes) * self.scale  # exclude self-loops
         return C * integral
 
     @singledispatchmethod
@@ -146,7 +148,7 @@ class DegreeIntegral(Integral):
 
         return integrand
 
-    def inner_sum(self, g: NumericT, i: int, **kwargs: Any) -> float:
+    def inner_sum(self, g: NumericT, i: int, batch_size: int | None = None) -> float:
         """Iterate over parameter values.
 
         Parameters
@@ -156,15 +158,28 @@ class DegreeIntegral(Integral):
         **kwargs
             Passeed to :func:`~grgg.utils.batch_arrays`.
         """
-        return self._inner_sum(g, i, **kwargs)
-
-    def _inner_sum(self, g: NumericT, i: int, batch_size: int | None = None) -> float:
-        batch_size = batch_size if batch_size is not None else 1000
+        if batch_size is None:
+            batch_size = int(options.integrate.batch_size)
         if batch_size <= 0:
             batch_size = self.model.n_nodes
-        out = 0.0
+        if self.model.is_quantized:
+            return self._inner_sum_quantized(g, i, batch_size)
+        return self._inner_sum(g, i, batch_size)
+
+    def _inner_sum(self, g: NumericT, i: int, batch_size: int) -> float:
         indices = np.arange(self.model.n_nodes)
         indices = indices[indices != i]
+        out = 0.0
         for j in batch_arrays(indices, batch_size=batch_size):
             out += self.model.dist2prob(g, i, *j).sum()
+        return out
+
+    def _inner_sum_quantized(self, g: NumericT, i: int, batch_size: int) -> float:
+        indices = np.arange(self.model.n_nodes)
+        counts = self.model.quantstore["counts"]
+        counts[i] -= 1
+        out = 0.0
+        for j in batch_arrays(indices, batch_size=batch_size):
+            probs = self.model.dist2prob(g, i, *j)
+            out += (probs * counts[j]).sum()
         return out

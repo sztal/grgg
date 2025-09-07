@@ -63,8 +63,8 @@ class AbstractGRGGLayer(ABC):
         self._model = None
         self._mu = None
         self._beta = None
-        self.beta = beta
-        self.mu = mu
+        self.beta = beta if beta is not None else Beta()
+        self.mu = mu if mu is not None else Mu()
         self.log = bool(log if log is not None else options.layer.log)
         self.eps = float(eps if eps is not None else options.layer.eps)
 
@@ -94,10 +94,8 @@ class AbstractGRGGLayer(ABC):
         return self._beta
 
     @beta.setter
-    def beta(self, beta: Beta | float | None) -> None:
-        if beta is None:
-            beta = Beta()
-        elif not isinstance(beta, Beta):
+    def beta(self, beta: Beta | float) -> None:
+        if not isinstance(beta, Beta):
             beta = Beta(beta)
         self._beta = beta
         if self._model is not None:
@@ -109,10 +107,8 @@ class AbstractGRGGLayer(ABC):
         return self._mu
 
     @mu.setter
-    def mu(self, mu: Mu | float | None) -> None:
-        if mu is None:
-            mu = Mu()
-        elif not isinstance(mu, Mu):
+    def mu(self, mu: Mu | float) -> None:
+        if not isinstance(mu, Mu):
             mu = Mu(mu)
         self._mu = mu
         if self._model is not None:

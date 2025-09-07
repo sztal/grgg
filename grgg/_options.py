@@ -49,6 +49,12 @@ class IntegrateOptions(Options):
 
 
 @dataclass(slots=True)
+class QuantizeOptions(Options):
+    n_bins: int = 50
+    average_std_per_bin: float = 0.2
+
+
+@dataclass(slots=True)
 class OptimizeMuOptions(Options):
     beta_max: float = 1e2
 
@@ -65,6 +71,7 @@ class TopOptions(Options):
     layer: LayerOptions = field(default_factory=LayerOptions)
     sample: SampleOptions = field(default_factory=SampleOptions)
     integrate: IntegrateOptions = field(default_factory=IntegrateOptions)
+    quantize: QuantizeOptions = field(default_factory=QuantizeOptions)
     optimize: OptimizeOptions = field(default_factory=OptimizeOptions)
 
 

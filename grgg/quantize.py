@@ -34,7 +34,7 @@ class KMeansQuantizer(KBinsDiscretizer):
         if self.average_std_per_bin is not None and self.average_std_per_bin > 0:
             stdev = X.std(axis=0).mean()
             self.n_bins = min(
-                max(1, round(stdev / self.average_std_per_bin)), self.n_bins
+                max(2, round(stdev / self.average_std_per_bin)), self.n_bins
             )
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", category=UserWarning)

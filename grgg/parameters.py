@@ -104,20 +104,10 @@ class CouplingParameter:
         self._value = None
         self._fitness = None
         self._layer = None
-        if np.isscalar(value):
-            self.heterogeneous = False if heterogeneous is None else heterogeneous
-            self.value = value
-        else:
-            value = np.asarray(value)
-            if value.ndim != 1:
-                errmsg = "parameter value must be a scalar or 1D array"
-                raise ValueError(errmsg)
-            if heterogeneous is False:
-                errmsg = "parameter value cannot be an array if not heterogeneous"
-                raise ValueError(errmsg)
-            self.heterogeneous = True
-            self.value = value.mean()
-            self._fitness = value - self.value / 2
+        self.heterogeneous = (
+            np.isscalar(value) if heterogeneous is None else heterogeneous
+        )
+        self.value = value
 
     def __repr__(self) -> str:
         params = f"{self.value:.2f}"
@@ -143,9 +133,22 @@ class CouplingParameter:
         return self._value
 
     @value.setter
-    def value(self, value: float) -> None:
-        value = float(value)
-        self._value = np.dtype(type(value)).type(value)
+    def value(self, value: float | np.ndarray) -> None:
+        self.check_value(value)
+        if np.isscalar(value):
+            value = float(value)
+            self._value = np.dtype(type(value)).type(value)
+        else:
+            value = np.asarray(value)
+            if value.ndim != 1:
+                errmsg = "parameter values must be a scalar or 1D array"
+                raise ValueError(errmsg)
+            if self._layer is not None and len(value) != self.model.n_nodes:
+                errmsg = "parameter values length does not match the number of nodes"
+                raise ValueError(errmsg)
+            self.value = value.mean()
+            self._fitness = value - self.value / 2
+            self.heterogeneous = True
 
     @property
     def values(self) -> np.ndarray:
@@ -155,7 +158,7 @@ class CouplingParameter:
                 errmsg = "node fitnesses are not initialized"
                 raise AttributeError(errmsg)
             return (self.value / 2 + self._fitness).astype(self.dtype)
-        return np.fill(self.model.n_nodes, self.value / 2, dtype=self.dtype)
+        return np.full(self.model.n_nodes, self.value / 2, dtype=self.dtype)
 
     @property
     def model(self) -> "GRGG":
@@ -183,6 +186,8 @@ class CouplingParameter:
             elif self.model.n_nodes != len(self._fitness):
                 errmsg = "fitness array length does not match the number of nodes"
                 raise ValueError(errmsg)
+        else:
+            self._fitness = None
 
     @property
     def heterogeneous(self) -> bool:
@@ -199,6 +204,30 @@ class CouplingParameter:
     def outer(self) -> Outer:
         """Outer sum of parameter values for node pairs."""
         return Outer(self.values, op=np.add)
+
+    def update(
+        self,
+        value: float | np.ndarray | None,
+        *,
+        heterogeneous: bool | None = None,
+    ) -> None:
+        """Update parameter value and heterogeneity.
+
+        Parameters
+        ----------
+        value
+            New parameter value. If `None`, the current value is kept.
+        heterogeneous
+            Whether the parameter is heterogeneous (varies across nodes).
+            If `None`, the current setting is kept.
+        """
+        if value is not None:
+            self.value = value
+        if heterogeneous is not None:
+            self.heterogeneous = heterogeneous
+
+    def check_value(self, value: float | np.ndarray) -> None:
+        """Check if the parameter value is valid."""
 
 
 class Beta(CouplingParameter):
@@ -219,6 +248,11 @@ class Beta(CouplingParameter):
         if value is None:
             value = options.layer.beta
         super().__init__(value, *args, **kwargs)
+
+    def check_value(self, value: float | np.ndarray) -> None:
+        if np.any(value < 0):
+            errmsg = "beta must be non-negative"
+            raise ValueError(errmsg)
 
 
 class Mu(CouplingParameter):
