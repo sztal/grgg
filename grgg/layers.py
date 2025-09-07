@@ -34,7 +34,7 @@ class AbstractGRGGLayer(ABC):
     array([0., 0.])
 
     Check coupling broadcasting in the heterogeneous case.
-    >>> model = GRGG(100, 2, Similarity(Mu(heterogeneous=True), log=True))
+    >>> model = GRGG(100, 2, Similarity(Mu([0]*100), log=True))
     >>> L = model.layers[0]
     >>> float(L.coupling(1, 1, 3))
     0.0

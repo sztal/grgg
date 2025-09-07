@@ -1,7 +1,8 @@
 import weakref
+from abc import ABC, abstractmethod
 from collections.abc import Callable
 from functools import singledispatchmethod
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Self
 
 import numpy as np
 
@@ -16,6 +17,185 @@ IndexT = int | slice | np.ndarray
 
 
 __all__ = ("Beta", "Mu")
+
+
+class CouplingParameter(ABC):
+    """Base class for coupling parameters.
+
+    Attributes
+    ----------
+    value
+        Parameter value.
+    heterogeneous
+        Whether the parameter is heterogeneous (varies across nodes).
+    """
+
+    def __init__(self, value: float | np.ndarray | None = None) -> None:
+        self._value = None
+        self._fitness = None
+        self._layer = None
+        self.value = value
+
+    def __repr__(self) -> str:
+        params = f"{self.value:.2f}"
+        if self.heterogeneous:
+            params += f", heterogeneous={self.heterogeneous}"
+        return f"{self.__class__.__name__}({params})"
+
+    def __copy__(self) -> Self:
+        obj = self.__class__(self.value, heterogeneous=self.heterogeneous)
+        if self._fitness is not None:
+            obj._fitness = self._fitness.copy()
+        obj.layer = self.layer
+        return obj
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, CouplingParameter):
+            return NotImplemented
+        if self.heterogeneous != other.heterogeneous:
+            return False
+        if self.heterogeneous:
+            return np.array_equal(self.values, other.values)
+        return self.value == other.value
+
+    def __hash__(self) -> int:
+        return hash((self.value, self._fitness))
+
+    @property
+    @abstractmethod
+    def default_value(self) -> float | np.ndarray:
+        """The default parameter value."""
+
+    @property
+    def heterogeneous(self) -> bool:
+        """Whether the parameter is heterogeneous (varies across nodes)."""
+        return self._fitness is not None
+
+    @property
+    def value(self) -> np.number:
+        """Parameter value."""
+        return self._value
+
+    @value.setter
+    def value(self, value: float | np.ndarray | None) -> None:
+        value = self.check_value(value)
+        if np.isscalar(value):
+            self._value = value
+        else:
+            self._value = value.mean()
+            self._fitness = value - self._value / 2
+
+    @property
+    def values(self) -> np.ndarray:
+        """Node-specific parameters allowing for heterogeneity."""
+        if self.heterogeneous:
+            return self.value / 2 + self._fitness
+        return np.full(self.model.n_nodes, self.value / 2)
+
+    @property
+    def model(self) -> "GRGG":
+        """The parent :class:`grgg.GRGG` instance."""
+        return self.layer.model
+
+    @property
+    def layer(self) -> "AbstractGRGGLayer":
+        """The parent GRGG layer."""
+        if self._layer is None:
+            errmsg = "parameter is not attached to a GRGG layer"
+            raise AttributeError(errmsg)
+        layer = self._layer()
+        if layer is None:
+            errmsg = "the parent GRGG layer has been deleted"
+            raise ReferenceError(errmsg)
+        return layer
+
+    @layer.setter
+    def layer(self, layer: "AbstractGRGGLayer") -> None:
+        self._layer = weakref.ref(layer)
+        if self.heterogeneous:
+            if self._fitness is None:
+                self._fitness = np.zeros(layer.model.n_nodes)
+            elif self.model.n_nodes != len(self._fitness):
+                errmsg = "fitness array length does not match the number of nodes"
+                raise ValueError(errmsg)
+        else:
+            self._fitness = None
+
+    @property
+    def outer(self) -> "Outer":
+        """Outer sum of parameter values for node pairs."""
+        return Outer(self.values, op=np.add)
+
+    @abstractmethod
+    def check_value(self, value: float | np.ndarray | None) -> float | np.ndarray:
+        """Check if the parameter value is valid."""
+        if value is None:
+            value = self.default_value
+        if np.isscalar(value):
+            value = float(value)
+            return np.dtype(type(value)).type(value)
+        value = np.asarray(value)
+        if value.ndim != 1:
+            errmsg = "parameter values must be a scalar or 1D array"
+            raise ValueError(errmsg)
+        if self._layer is not None and len(value) != self.model.n_nodes:
+            errmsg = "parameter values length does not match the number of nodes"
+            raise ValueError(errmsg)
+        if not np.isreal(value).all():
+            errmsg = "parameter values must be real"
+            raise ValueError(errmsg)
+        return value
+
+    def copy(self) -> Self:
+        """Create a copy of the parameter."""
+        return self.__copy__()
+
+
+class Beta(CouplingParameter):
+    """Beta parameter (inverse temperature).
+
+    It controls the strength of the coupling between the network topology
+    and the underlying geometry.
+
+    Attributes
+    ----------
+    value
+        Parameter value.
+    heterogeneous
+        Whether the parameter is heterogeneous (varies across nodes).
+    """
+
+    @property
+    def default_value(self) -> float:
+        return options.layer.beta
+
+    def check_value(self, value: float | np.ndarray) -> float | np.ndarray:
+        value = super().check_value(value)
+        if np.any(value < 0):
+            errmsg = "beta must be non-negative"
+            raise ValueError(errmsg)
+        return value
+
+
+class Mu(CouplingParameter):
+    """Mu parameter (chemical potential).
+
+    It controls the overall density of the network.
+
+    Attributes
+    ----------
+    value
+        Parameter value.
+    heterogeneous
+        Whether the parameter is heterogeneous (varies across nodes).
+    """
+
+    @property
+    def default_value(self) -> float:
+        return options.layer.mu
+
+    def check_value(self, value: float | np.ndarray) -> float | np.ndarray:
+        return super().check_value(value)
 
 
 class Outer:
@@ -82,209 +262,3 @@ class Outer:
         if out.size == 1:
             out = float(out.item())
         return out
-
-
-class CouplingParameter:
-    """Base class for coupling parameters.
-
-    Attributes
-    ----------
-    value
-        Parameter value.
-    heterogeneous
-        Whether the parameter is heterogeneous (varies across nodes).
-    """
-
-    def __init__(
-        self,
-        value: float | np.ndarray,
-        *,
-        heterogeneous: bool | None = None,
-    ) -> None:
-        self._value = None
-        self._fitness = None
-        self._layer = None
-        self.heterogeneous = (
-            not np.isscalar(value) if heterogeneous is None else heterogeneous
-        )
-        self.value = value
-
-    def __repr__(self) -> str:
-        params = f"{self.value:.2f}"
-        if self.heterogeneous:
-            params += f", heterogeneous={self.heterogeneous}"
-        return f"{self.__class__.__name__}({params})"
-
-    def __copy__(self) -> Self:
-        obj = self.__class__(self.value, heterogeneous=self.heterogeneous)
-        if self._fitness is not None:
-            obj._fitness = self._fitness.copy()
-        obj.layer = self.layer
-        return obj
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, CouplingParameter):
-            return NotImplemented
-        if self.heterogeneous != other.heterogeneous:
-            return False
-        if self.heterogeneous:
-            return np.array_equal(self.values, other.values)
-        return self.value == other.value
-
-    def __hash__(self) -> int:
-        return hash((self.value, self.heterogeneous, self._fitness))
-
-    @property
-    def dtype(self) -> np.dtype:
-        """The data type of the parameter values."""
-        return self.value.dtype
-
-    @property
-    def value(self) -> np.number:
-        """Parameter value."""
-        return self._value
-
-    @value.setter
-    def value(self, value: float | np.ndarray) -> None:
-        self.check_value(value)
-        if np.isscalar(value):
-            value = float(value)
-            self._value = np.dtype(type(value)).type(value)
-        else:
-            value = np.asarray(value)
-            if value.ndim != 1:
-                errmsg = "parameter values must be a scalar or 1D array"
-                raise ValueError(errmsg)
-            if self._layer is not None and len(value) != self.model.n_nodes:
-                errmsg = "parameter values length does not match the number of nodes"
-                raise ValueError(errmsg)
-            self.value = value.mean()
-            self._fitness = value - self.value / 2
-            self.heterogeneous = True
-
-    @property
-    def values(self) -> np.ndarray:
-        """Node-specific parameters allowing for heterogeneity."""
-        if self.heterogeneous:
-            if self._fitness is None:
-                errmsg = "node fitnesses are not initialized"
-                raise AttributeError(errmsg)
-            return (self.value / 2 + self._fitness).astype(self.dtype)
-        return np.full(self.model.n_nodes, self.value / 2, dtype=self.dtype)
-
-    @property
-    def model(self) -> "GRGG":
-        """The parent :class:`grgg.GRGG` instance."""
-        return self.layer.model
-
-    @property
-    def layer(self) -> "AbstractGRGGLayer":
-        """The parent GRGG layer."""
-        if self._layer is None:
-            errmsg = "parameter is not attached to a GRGG layer"
-            raise AttributeError(errmsg)
-        layer = self._layer()
-        if layer is None:
-            errmsg = "the parent GRGG layer has been deleted"
-            raise ReferenceError(errmsg)
-        return layer
-
-    @layer.setter
-    def layer(self, layer: "AbstractGRGGLayer") -> None:
-        self._layer = weakref.ref(layer)
-        if self.heterogeneous:
-            if self._fitness is None:
-                self._fitness = np.zeros(layer.model.n_nodes)
-            elif self.model.n_nodes != len(self._fitness):
-                errmsg = "fitness array length does not match the number of nodes"
-                raise ValueError(errmsg)
-        else:
-            self._fitness = None
-
-    @property
-    def heterogeneous(self) -> bool:
-        """Whether the parameter is heterogeneous (varies across nodes)."""
-        return self._heterogeneous
-
-    @heterogeneous.setter
-    def heterogeneous(self, heterogeneous: bool) -> None:
-        self._heterogeneous = bool(heterogeneous)
-        if self.heterogeneous and self._layer is not None:
-            self.layer = self.layer
-
-    @property
-    def outer(self) -> Outer:
-        """Outer sum of parameter values for node pairs."""
-        return Outer(self.values, op=np.add)
-
-    def update(
-        self,
-        value: float | np.ndarray | None,
-        *,
-        heterogeneous: bool | None = None,
-    ) -> None:
-        """Update parameter value and heterogeneity.
-
-        Parameters
-        ----------
-        value
-            New parameter value. If `None`, the current value is kept.
-        heterogeneous
-            Whether the parameter is heterogeneous (varies across nodes).
-            If `None`, the current setting is kept.
-        """
-        if value is not None:
-            self.value = value
-        if heterogeneous is not None:
-            self.heterogeneous = heterogeneous
-
-    def check_value(self, value: float | np.ndarray) -> None:
-        """Check if the parameter value is valid."""
-
-    def copy(self) -> Self:
-        """Create a copy of the parameter."""
-        return self.__copy__()
-
-
-class Beta(CouplingParameter):
-    """Beta parameter (inverse temperature).
-
-    It controls the strength of the coupling between the network topology
-    and the underlying geometry.
-
-    Attributes
-    ----------
-    value
-        Parameter value.
-    heterogeneous
-        Whether the parameter is heterogeneous (varies across nodes).
-    """
-
-    def __init__(self, value: float | None = None, *args: Any, **kwargs: Any) -> None:
-        if value is None:
-            value = options.layer.beta
-        super().__init__(value, *args, **kwargs)
-
-    def check_value(self, value: float | np.ndarray) -> None:
-        if np.any(value < 0):
-            errmsg = "beta must be non-negative"
-            raise ValueError(errmsg)
-
-
-class Mu(CouplingParameter):
-    """Mu parameter (chemical potential).
-
-    It controls the overall density of the network.
-
-    Attributes
-    ----------
-    value
-        Parameter value.
-    heterogeneous
-        Whether the parameter is heterogeneous (varies across nodes).
-    """
-
-    def __init__(self, value: float | None = None, *args: Any, **kwargs: Any) -> None:
-        if value is None:
-            value = options.layer.mu
-        super().__init__(value, *args, **kwargs)
