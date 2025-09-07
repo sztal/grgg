@@ -145,11 +145,6 @@ class AbstractGRGGLayer(ABC):
         self.beta.layer = self
         self.mu.layer = self
 
-    @property
-    def max_energy(self) -> float:
-        return float(self.energy(self.manifold.diameter))
-
-    @property
     def copy(self) -> Self:
         return self.__copy__()
 

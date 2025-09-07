@@ -176,7 +176,7 @@ class DegreeIntegral(Integral):
 
     def _inner_sum_quantized(self, g: NumericT, i: int, batch_size: int) -> float:
         indices = np.arange(self.model.n_nodes)
-        counts = self.model.quantstore["counts"]
+        counts = self.model.quantizer.counts.copy()
         counts[i] -= 1
         out = 0.0
         for j in batch_arrays(indices, batch_size=batch_size):

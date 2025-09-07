@@ -14,7 +14,7 @@ from . import options
 from .integrate import Integration
 from .layers import AbstractGRGGLayer
 from .manifolds import CompactManifold, Sphere
-from .quantize import KMeansQuantizer
+from .quantize import ArrayQuantizer
 
 __all__ = ("GRGG",)
 
@@ -92,10 +92,7 @@ class GRGG:
         GRGG(100, Sphere(...), Similarity(...), Complementarity(Beta(10.00), ...))
         """
         self._n_nodes = int(n_nodes)
-        # Quantization attributes
-        self.is_quantized = False
-        self.quantizer = None
-        self.quantstore = {}
+        self.quantizer = ArrayQuantizer()
         # Handle manifold initialization
         if layers and (
             isinstance(layers[0], int)
@@ -145,8 +142,13 @@ class GRGG:
     def n_nodes(self) -> int:
         """Number of nodes in the ensemble."""
         if self.is_quantized:
-            return len(self.quantstore["counts"])
+            return len(self.quantizer.bins)
         return self._n_nodes
+
+    @property
+    def is_quantized(self) -> bool:
+        """Whether the model parameters are quantized."""
+        return not self.quantizer.is_empty
 
     @property
     def delta(self) -> float:
@@ -424,7 +426,7 @@ class GRGG:
         """
         if self.is_quantized:
             return self
-        self._init_quantizer(**kwargs)
+        self.quantizer.discretizer.set_params(**kwargs)
         # Collect parameters
         params = []
         for layer in self.layers:
@@ -435,47 +437,28 @@ class GRGG:
             return self
         params = np.column_stack(params)
         # Fit quantizer and quantize parameters
-        self.is_quantized = True
-        quantized = self.quantizer.fit_transform(params)
-        bins, counts = np.unique(quantized, axis=0, return_counts=True)
-        self.quantstore["quantized"] = quantized
-        self.quantstore["counts"] = counts
-        # Assign coarse-grained parameters
-        coarse_grained = self.quantizer.inverse_transform(bins)
+        quantized = self.quantizer.quantize(params)
         i = 0
         for layer in self.layers:
             for param in (layer.beta, layer.mu):
                 if param.heterogeneous:
-                    param.value = coarse_grained[:, i]
+                    param.value = quantized[:, i]
                     i += 1
         return self
 
     def dequantize(self) -> Self:
         """Remove quantization of node parameters."""
         if self.is_quantized:
-            self.is_quantized = False
-            quantized = self.quantstore["quantized"]
-            params = self.quantizer.inverse_transform(quantized)
+            params = self.quantizer.dequantize(clear=True)
             i = 0
             for layer in self.layers:
                 for param in (layer.beta, layer.mu):
                     if param.heterogeneous:
                         param.value = params[:, i]
                         i += 1
-            self.quantstore.clear()
         return self
 
     # Internals ----------------------------------------------------------------------
-
-    def _init_quantizer(self, **kwargs: Any) -> Self:
-        # Set up or update quantizer
-        if self.quantizer is None:
-            for field in ("n_bins", "average_std_per_bin"):
-                if field not in kwargs:
-                    kwargs[field] = getattr(options.quantize, field)
-            self.quantizer = KMeansQuantizer(**kwargs)
-        else:
-            self.quantizer.set_params(**kwargs)
 
     def _sample_diag(
         self, X: np.ndarray, xi: slice, random_state: np.random.Generator

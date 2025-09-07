@@ -241,6 +241,10 @@ class CouplingParameter:
     def check_value(self, value: float | np.ndarray) -> None:
         """Check if the parameter value is valid."""
 
+    def copy(self) -> Self:
+        """Create a copy of the parameter."""
+        return self.__copy__()
+
 
 class Beta(CouplingParameter):
     """Beta parameter (inverse temperature).

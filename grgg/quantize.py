@@ -1,55 +1,116 @@
-import warnings
+from typing import Any, Self
 
 import numpy as np
-from sklearn.preprocessing import KBinsDiscretizer
+
+from . import options
+from .utils.discretizer import AdaptiveBinsDiscretizer
+
+__all__ = ("ArrayQuantizer",)
 
 
-class KMeansQuantizer(KBinsDiscretizer):
-    def __init__(
-        self,
-        n_bins=100,
-        *,
-        encode="ordinal",
-        strategy="kmeans",
-        quantile_method="warn",
-        dtype=None,
-        subsample=200000,
-        random_state=None,
-        average_std_per_bin=0.1,
-    ) -> None:
-        super().__init__(
-            n_bins=n_bins,
-            encode=encode,
-            strategy=strategy,
-            quantile_method=quantile_method,
-            dtype=dtype,
-            subsample=subsample,
-            random_state=random_state,
-        )
-        self.average_std_per_bin = average_std_per_bin
+class ArrayQuantizer:
+    """Quantizer for numerical arrays.
 
-    def fit(self, X, y=None, sample_weight=None):
-        if X.ndim == 1:
-            X = X[:, np.newaxis]
-        if self.average_std_per_bin is not None and self.average_std_per_bin > 0:
-            stdev = X.std(axis=0).mean()
-            self.n_bins = min(
-                max(2, round(stdev / self.average_std_per_bin)), self.n_bins
-            )
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore", category=UserWarning)
-            super().fit(X, y, sample_weight)
-        for i, edge in enumerate(self.bin_edges_):
-            if np.isinf(edge).all():
-                edge[:] = [X[:, i].min(), X[:, i].max()]
+    Attributes
+    ----------
+    discretizer
+        The discretizer used for quantization.
+    """
+
+    def __init__(self, **kwargs: Any) -> None:
+        """Initialization method.
+
+        `**kwargs` are passed to the `AdaptiveBinsDiscretizer`.
+        """
+        kwargs = {
+            "n_bins": options.quantize.n_bins,
+            "average_std_per_bin": options.quantize.average_std_per_bin,
+            **kwargs,
+        }
+        self.discretizer = AdaptiveBinsDiscretizer(**kwargs)
+        self._bins = None
+        self._inverse = None
+        self._counts = None
+
+    @property
+    def bins(self) -> np.ndarray:
+        """The most recent quantized array."""
+        if self.is_empty:
+            errmsg = "the quantizer is empty"
+            raise ValueError(errmsg)
+        return self._bins
+
+    @property
+    def inverse(self) -> np.ndarray:
+        """The inverse mapping of the most recent quantized array."""
+        if self.is_empty:
+            errmsg = "the quantizer is empty"
+            raise ValueError(errmsg)
+        return self._inverse
+
+    @property
+    def counts(self) -> np.ndarray:
+        """The counts of each unique bin in the most recent quantized array."""
+        if self.is_empty:
+            errmsg = "the quantizer is empty"
+            raise ValueError(errmsg)
+        return self._counts
+
+    @property
+    def is_empty(self) -> bool:
+        """Check if the quantizer has been used."""
+        return self._bins is None
+
+    def quantize(self, X: np.ndarray) -> np.ndarray:
+        """Quantize the input array.
+
+        Parameters
+        ----------
+        X
+            Input array to be quantized.
+        """
+        if not self.is_empty:
+            errmsg = "the quantizer has already been used; call 'clear()' to reset"
+            raise RuntimeError(errmsg)
+        bins = self.discretizer.fit_transform(X)
+        B, Inv, C = np.unique(bins, axis=0, return_inverse=True, return_counts=True)
+        self._bins = B
+        self._inverse = Inv
+        self._counts = C
+        return self.discretizer.inverse_transform(B)
+
+    def dequantize(
+        self, X: np.ndarray | None = None, *, clear: bool = False
+    ) -> np.ndarray:
+        """Dequantize an array to the length and order of the mos quantized array.
+
+        `X` may be whatever was returned by `quantize()`, or computed on its output
+        while retaining the same length of the first axis.
+
+        Parameters
+        ----------
+        X
+            Input array to be dequantized.
+            If `None`, then the original array is dequantized.
+        clear
+            Set to `True` to clear the quantizer state after dequantization.
+        """
+        if self.is_empty:
+            errmsg = "the quantizer is empty; call 'quantize()' first"
+            raise RuntimeError(errmsg)
+        if X is None:
+            X = self.discretizer.inverse_transform(self.bins)
+        if len(X) != len(self.bins):
+            errmsg = "input array length does not match the quantizer state"
+            raise ValueError(errmsg)
+        dequantized = X[self.inverse]
+        if clear:
+            self.clear()
+        return dequantized
+
+    def clear(self) -> Self:
+        """Clear the quantizer state."""
+        self._bins = None
+        self._inverse = None
+        self._counts = None
         return self
-
-    def transform(self, X):
-        if isinstance(X, np.ndarray) and X.ndim == 1:
-            X = X[:, np.newaxis]
-        return super().transform(X)
-
-    def inverse_transform(self, Xt):
-        if isinstance(Xt, np.ndarray) and Xt.ndim == 1:
-            Xt = Xt[:, np.newaxis]
-        return super().inverse_transform(Xt)
