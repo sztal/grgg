@@ -129,6 +129,18 @@ class GRGG:
             layers = [layers]
         return self.__class__(self.n_nodes, self.manifold, *layers)
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, GRGG):
+            return NotImplemented
+        return (
+            self.n_nodes == other.n_nodes
+            and self.manifold == other.manifold
+            and self.layers == other.layers
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.n_nodes, self.manifold, self.layers))
+
     @property
     def n_nodes(self) -> int:
         """Number of nodes in the ensemble."""

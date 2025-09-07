@@ -36,6 +36,14 @@ class Manifold(ABC):
     def __copy__(self) -> Self:
         return self.__class__(**self.params)
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Manifold):
+            return NotImplemented
+        return self.dim == other.dim and self.params == other.params
+
+    def __hash__(self) -> int:
+        return hash((self.dim, frozenset(self.params.items())))
+
     @property
     @abstractmethod
     def params(self) -> dict[str, float]:

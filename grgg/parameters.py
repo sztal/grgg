@@ -105,7 +105,7 @@ class CouplingParameter:
         self._fitness = None
         self._layer = None
         self.heterogeneous = (
-            np.isscalar(value) if heterogeneous is None else heterogeneous
+            not np.isscalar(value) if heterogeneous is None else heterogeneous
         )
         self.value = value
 
@@ -121,6 +121,18 @@ class CouplingParameter:
             obj._fitness = self._fitness.copy()
         obj.layer = self.layer
         return obj
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, CouplingParameter):
+            return NotImplemented
+        if self.heterogeneous != other.heterogeneous:
+            return False
+        if self.heterogeneous:
+            return np.array_equal(self.values, other.values)
+        return self.value == other.value
+
+    def __hash__(self) -> int:
+        return hash((self.value, self.heterogeneous, self._fitness))
 
     @property
     def dtype(self) -> np.dtype:

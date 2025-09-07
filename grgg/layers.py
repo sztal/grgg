@@ -78,6 +78,19 @@ class AbstractGRGGLayer(ABC):
     def __call__(self, coupling: np.ndarray) -> np.ndarray:
         return expit(-coupling)
 
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, AbstractGRGGLayer):
+            return NotImplemented
+        return (
+            self.beta == other.beta
+            and self.mu == other.mu
+            and self.log == other.log
+            and self.eps == other.eps
+        )
+
+    def __hash__(self) -> int:
+        return hash((self.beta, self.mu, self.log, self.eps))
+
     @property
     def manifold(self) -> CompactManifold:
         """The parent model's manifold."""
