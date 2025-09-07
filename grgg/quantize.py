@@ -3,7 +3,7 @@ from typing import Any, Self
 import numpy as np
 
 from . import options
-from .utils.discretizer import AdaptiveBinsDiscretizer
+from .utils.discretizers import KMeansDiscretizer
 
 __all__ = ("ArrayQuantizer",)
 
@@ -26,15 +26,15 @@ class ArrayQuantizer:
     def __init__(self, *, lossy: bool = False, **kwargs: Any) -> None:
         """Initialization method.
 
-        `**kwargs` are passed to the `AdaptiveBinsDiscretizer`.
+        `**kwargs` are passed to :class:`grgg.utils.discretizers.KMeansDiscretizer`.
         """
         self.clear()
         kwargs = {
-            "n_bins": options.quantize.n_bins,
-            "average_std_per_bin": options.quantize.average_std_per_bin,
+            "std_per_bin": options.quantize.std_per_bin,
+            "strategy": options.quantize.strategy,
             **kwargs,
         }
-        self.discretizer = AdaptiveBinsDiscretizer(**kwargs)
+        self.discretizer = KMeansDiscretizer(**kwargs)
         self.lossy = lossy
 
     @property
