@@ -43,7 +43,7 @@ class CouplingParameter(ABC):
         return f"{self.__class__.__name__}({params})"
 
     def __copy__(self) -> Self:
-        obj = self.__class__(self.value, heterogeneous=self.heterogeneous)
+        obj = self.__class__(self.value)
         if self._fitness is not None:
             obj._fitness = self._fitness.copy()
         obj.layer = self.layer

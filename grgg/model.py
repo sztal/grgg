@@ -406,6 +406,29 @@ class GRGG:
         """Quantize node parameters.
 
         `**kwargs` are passed to :class:`~grgg.quantize.KMeansQuantizer`.
+
+        Examples
+        --------
+        >>> from grgg import GRGG, Similarity, Complementarity
+        >>> import numpy as np
+        >>> n = 1000
+        >>> model = GRGG(n, 3, Similarity(mu=[0]*n), Complementarity(mu=[0]*n))
+
+        Model is equal to its copy.
+        >>> model == model.copy()
+        True
+
+        The same holds after quantization.
+        >>> model.copy().quantize() == model.copy().quantize()
+        True
+
+        Quantization is also idempotent.
+        >>> model.copy().quantize() == model.copy().quantize().quantize()
+        True
+
+        And, by default, reversible.
+        >>> model == model.copy().quantize().dequantize()
+        True
         """
         if self.is_quantized:
             return self
@@ -450,7 +473,26 @@ class GRGG:
         progress: bool | Mapping = False,
         **kwargs: Any,
     ) -> np.ndarray:
-        """Compute expected degree of nodes in the GRGG model."""
+        """Compute expected degree of nodes in the GRGG model.
+
+        Parameters
+        ----------
+        i
+            Indices of the nodes for which to compute the expected degree.
+            If `None`, compute for all nodes.
+        *args
+            Passed to :func:`~grgg.integrate.Integration.degree`.
+        quantize
+            Whether to quantize the model parameters before computing the expected
+            degree. If a mapping, it is passed to :meth:`~grgg.GRGG.quantize`.
+            If `None`, the default value from :mod:`~grgg.options` is used.
+        progress
+            Whether to display a progress bar. If a mapping is provided, it is passed
+            to :func:`tqdm.tqdm`. By default, a progress bar is shown only for large
+            graphs.
+        **kwargs
+            Passed to :func:`~grgg.integrate.Integration.degree`.
+        """
         quantize, qopts = parse_switch_flag(quantize, default=options.quantize.auto)
         progress, popts = parse_switch_flag(progress)
         if self.is_heterogeneous:
@@ -567,3 +609,34 @@ class GRGGSample:
         See :mod:`pathcensus` for details.
         """
         return PathCensus(self.A)
+
+
+# class QuantizedGRGG(GRGG):
+#     """GRGG model with quantized parameters.
+
+#     It can be used as a context manager to temporarily quantize a model.
+#     See :class:`~GRGG` for details about the model.
+#     """
+#     @classmethod
+#     def from_model(cls, model: GRGG, **kwargs: Any) -> Self:
+#         """Create a quantized GRGG model from a base model.
+
+#         Parameters
+#         ----------
+#         model
+#             Base GRGG model to quantize.
+#         **kwargs
+#             Passed to :meth:`~grgg.GRGG.quantize`.
+
+#         Examples
+#         --------
+#         >>> from grgg import GRGG, Similarity
+#         >>> model = GRGG(100, 2, Similarity(mu=[0]*100))
+#         >>> qmodel = QuantizedGRGG.from_model(model)
+#         >>> qmodel.is_quantized
+#         True
+#         """
+#         qmodel = cls(model.n_nodes, model.manifold, *model.layers)
+#         qmodel.quantizer = model.quantizer
+#         qmodel.quantize(**kwargs)
+#         return qmodel
