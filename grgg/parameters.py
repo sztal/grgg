@@ -163,6 +163,15 @@ class Beta(CouplingParameter):
         Parameter value.
     heterogeneous
         Whether the parameter is heterogeneous (varies across nodes).
+
+    Examples
+    --------
+    >>> Beta()  # default value
+    Beta(1.50)
+    >>> Beta(2.0)  # homogeneous value
+    Beta(2.00)
+    >>> Beta([1,2,3])  # heterogeneous value
+    Beta(2.00, heterogeneous=True)
     """
 
     @property
@@ -188,6 +197,15 @@ class Mu(CouplingParameter):
         Parameter value.
     heterogeneous
         Whether the parameter is heterogeneous (varies across nodes).
+
+    Examples
+    --------
+    >>> Mu()  # default value
+    Mu(0.00)
+    >>> Mu(-1.0)  # homogeneous value
+    Mu(-1.00)
+    >>> Mu([-1,0,1])  # heterogeneous value
+    Mu(0.00, heterogeneous=True)
     """
 
     @property
@@ -209,6 +227,28 @@ class Outer:
         Second vector.
     op
         Vectorized operation to apply.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> v = np.array([1, 2, 3])
+    >>> outer = Outer(v)
+    >>> float(outer[0, 1])  # op(v[0], v[1])
+    2.0
+    >>> float(outer[1, 2])  # op(v[1], v[2])
+    6.0
+    >>> outer[0]  # op(v, v) lower triangle without diagonal
+    Traceback (most recent call last):
+    ...
+    IndexError: outer requires two indexers
+    >>> outer[[0, 2]]
+    array([3])
+    >>> outer[[[0, 1], [1, 2]]]
+    array([2, 6])
+    >>> outer[:, :1]
+    array([[1],
+           [2],
+           [3]])
     """
 
     def __init__(
@@ -227,15 +267,16 @@ class Outer:
         if isinstance(i, list):
             i = np.asarray(i)
             return self[i]
-        out = self[i, i]
-        if not np.isscalar(out):
-            out = out[np.tril_indices_from(out, k=-1)]  # type: ignore
-        return out
+        errmsg = "outer requires two indexers"
+        raise IndexError(errmsg)
 
     @__getitem__.register
     def _(self, i: np.ndarray) -> np.ndarray:
         if i.ndim == 1:
-            return self[i, i]
+            out = self[i, i]
+            if not np.isscalar(out):
+                out = out[np.tril_indices_from(out, k=-1)]  # type: ignore
+            return out
         if i.ndim == 2:
             vi = self.v1[i[:, 0]]
             vj = self.v2[i[:, 1]]
@@ -252,13 +293,11 @@ class Outer:
         try:
             i, j = i
         except ValueError:
-            errmsg = "wrong number indices"
+            errmsg = "wrong number of indices"
             raise IndexError(errmsg) from None
         vi = self.v1[i]
         vj = self.v2[j]
         if not np.isscalar(vi):
             vi = vi[:, None]
         out = self.op(vi, vj)
-        if out.size == 1:
-            out = float(out.item())
         return out
