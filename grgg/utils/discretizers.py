@@ -32,6 +32,49 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
         Number of features seen during `fit`.
     names_features_in_
         Names of features seen during `fit` (if available).
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> X = np.array([[0.1, 1.0],
+    ...               [0.4, 1.2],
+    ...               [0.35, 1.4],
+    ...               [0.9, 1.8],
+    ...               [1.0, 2.0]])
+    >>> discretizer = KMeansDiscretizer(std_per_bin=0.2, strategy='independent')
+    >>> discretizer.fit(X)
+    KMeansDiscretizer(std_per_bin=0.2)
+    >>> Y = discretizer.transform(X)
+    >>> Y
+    array([[0, 0],
+           [0, 0],
+           [0, 0],
+           [1, 1],
+           [1, 1]], dtype=int32)
+    >>> discretizer.inverse_transform(Y)
+    array([[0.28333333, 1.2       ],
+           [0.28333333, 1.2       ],
+           [0.28333333, 1.2       ],
+           [0.95      , 1.9       ],
+           [0.95      , 1.9       ]])
+    >>> discretizer = KMeansDiscretizer(
+    ...     std_per_bin=0.2, strategy='joint', random_state=17
+    ... )
+    >>> discretizer.fit(X)
+    KMeansDiscretizer(random_state=17, std_per_bin=0.2, strategy='joint')
+    >>> Y = discretizer.transform(X)
+    >>> Y
+    array([[0],
+           [0],
+           [0],
+           [2],
+           [1]], dtype=int32)
+    >>> discretizer.inverse_transform(Y)
+    array([[0.28333333, 1.2       ],
+           [0.28333333, 1.2       ],
+           [0.28333333, 1.2       ],
+           [0.9       , 1.8       ],
+           [1.        , 2.        ]])
     """
 
     _parameter_constraints: ClassVar[dict] = {
@@ -45,6 +88,7 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
         std_per_bin: float = 0.05,
         max_bins: int = 512,
         strategy: str = "independent",
+        random_state: np.random.Generator | int | None = None,
     ) -> None:
         """
         Parameters
@@ -62,6 +106,7 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
             "std_per_bin": std_per_bin,
             "max_bins": max_bins,
             "strategy": strategy,
+            "random_state": random_state,
         }
         validate_parameter_constraints(
             self._parameter_constraints, params, self.__class__.__name__
@@ -114,7 +159,12 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
     def __fit_joint(self, X: np.ndarray) -> list[KMeans]:
         std = X.var(axis=0).sum() ** 0.5
         n_bins = min(max(1, round(std / self.std_per_bin)), self.max_bins)
-        km = KMeans(n_clusters=n_bins, algorithm="lloyd", init="k-means++")
+        km = KMeans(
+            n_clusters=n_bins,
+            algorithm="lloyd",
+            init="k-means++",
+            random_state=self.random_state,
+        )
         km.fit(X)
         return [km]
 
