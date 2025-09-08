@@ -147,8 +147,7 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
     def __fit_independent(self, X: np.ndarray) -> list[KMeans]:
         kmeans = []
         for feature in X.T:
-            std = feature.std()
-            n_bins = min(max(1, round(std / self.std_per_bin)), self.max_bins)
+            n_bins = self.__get_n_bins(feature)
             x0, x1 = feature.min(), feature.max()
             init_centers = np.linspace(x0, x1, n_bins).reshape(-1, 1)
             km = KMeans(n_clusters=n_bins, init=init_centers, algorithm="lloyd")
@@ -157,16 +156,20 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
         return kmeans
 
     def __fit_joint(self, X: np.ndarray) -> list[KMeans]:
-        std = X.var(axis=0).sum() ** 0.5
-        n_bins = min(max(1, round(std / self.std_per_bin)), self.max_bins)
+        n_bins = self.__get_n_bins(X)
         km = KMeans(
-            n_clusters=n_bins,
+            n_clusters=min(n_bins, len(X)),
             algorithm="lloyd",
             init="k-means++",
             random_state=self.random_state,
         )
         km.fit(X)
         return [km]
+
+    def __get_n_bins(self, X: np.ndarray) -> int:
+        std = X.var(axis=0).sum() ** 0.5
+        n_bins = min(max(1, round(std / self.std_per_bin)), self.max_bins)
+        return min(n_bins, len(X))
 
     def transform(self, X):
         check_is_fitted(self)

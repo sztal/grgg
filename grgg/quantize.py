@@ -17,10 +17,20 @@ class ArrayQuantizer:
         The discretizer used for quantization.
     lossy
         Whether the quantization is lossy.
-        If `False`, then a copy of tge original array is stored,
+        If `False`, then a copy of the original array is stored,
         so it is returned exactly by `dequantize()`.
-        Otherwise, the origina array is reconstructed from the bins,
+        Otherwise, the original array is reconstructed from the bins,
         which may introduce some information loss.
+
+    Examples
+    --------
+    >>> import numpy as np
+    >>> rng = np.random.default_rng(0)
+    >>> X = rng.standard_normal((10, 2))
+    >>> quantizer = ArrayQuantizer(lossy=False)
+    >>> X_quantized = quantizer.quantize(X)
+    >>> bool(np.array_equal(quantizer.dequantize(), X))
+    True
     """
 
     def __init__(self, *, lossy: bool = False, **kwargs: Any) -> None:
