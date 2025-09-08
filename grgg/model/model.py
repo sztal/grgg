@@ -11,12 +11,12 @@ from pathcensus import PathCensus
 from scipy.sparse import csr_array, sparray
 from tqdm.auto import tqdm
 
-from . import options
-from .integrate import Integration
-from .layers import AbstractGRGGLayer
-from .manifolds import CompactManifold, Sphere
-from .quantize import ArrayQuantizer
-from .utils import parse_switch_flag
+from grgg import options
+from grgg.integrate import Integration
+from grgg.layers import AbstractGRGGLayer
+from grgg.manifolds import CompactManifold, Sphere
+from grgg.quantize import ArrayQuantizer
+from grgg.utils import parse_switch_flag
 
 __all__ = ("GRGG",)
 
