@@ -1,5 +1,4 @@
 from collections.abc import Iterable
-from functools import singledispatchmethod
 from typing import Any, Self
 
 import numpy as np
@@ -12,6 +11,8 @@ __all__ = ("ArrayQuantizer",)
 
 class ArrayQuantizer:
     """Quantizer for numerical arrays.
+
+    Currently only supports 2D arrays.
 
     Attributes
     ----------
@@ -26,26 +27,51 @@ class ArrayQuantizer:
 
     Examples
     --------
-    >>> import numpy as np
-    >>> rng = np.random.default_rng(0)
-    >>> X = rng.standard_normal((10, 2))
+    Quantization is used to represent a larger array by a smaller
+    array with rows representing clusters of similar rows in the original array.
+    >>> rng = np.random.default_rng(412)
+    >>> X = np.asarray([[0,0]]*3 + [[2,2]]*4 + [[4,4]]*2 + [[6,6]]*5)
+    >>> rng.shuffle(X)
     >>> quantizer = ArrayQuantizer(std_per_bin=0.3)
     >>> X_quantized = quantizer.quantize(X)
-    >>> bool(np.array_equal(quantizer.dequantize(), X))
+    >>> X_quantized
+    array([[0., 0.],
+           [2., 2.],
+           [4., 4.],
+           [6., 6.]])
+
+    In the lossless case, the quantizer just stores the copy of the original array,
+    so whenever necessary it can be exactly reconstructed.
+    >>> X_dequantized = quantizer.dequantize()
+    >>> np.array_equal(X, X_dequantized)
     True
 
-    Quantizer can also remap indices according to the quantization:
-    >>> Y = quantizer.dequantize(X_quantized)
-    >>> idx = [1, 9]
-    >>> bool(np.array_equal(Y[idx], X_quantized[quantizer.map_ids(idx)]))
+    However, in the simple case considered here, even the lossy quantization
+    is exact.
+    >>> quantizer = ArrayQuantizer(lossy=True, std_per_bin=0.3)
+    >>> X_quantized = quantizer.quantize(X)
+    >>> X_dequantized = quantizer.dequantize()
+    >>> bool(np.array_equal(X, X_dequantized))
     True
 
-    The same can be done directly using the 'dequantize' method:
-    >>> bool(np.array_equal(Y[idx], quantizer.dequantize(X_quantized, idx)))
+    But in the general case, the dequantized array may differ from the original one.
+    >>> X = rng.standard_normal((10, 2))
+    >>> quantizer = ArrayQuantizer(lossy=True, std_per_bin=0.3)
+    >>> X_quantized = quantizer.quantize(X)
+    >>> X_dequantized = quantizer.dequantize()
+    >>> bool(np.array_equal(X, X_dequantized))
+    False
+
+    Dequantized array is obtained by permuting the rows of the quantized
+    array based on the inverse mapping defined by the quantizer.
+    >>> X_quantized_inv = X_quantized[quantizer.inverse]
+    >>> bool(np.array_equal(X_dequantized, X_quantized_inv))
     True
 
-    >>> idx = 7
-    >>> bool(np.array_equal(Y[idx], quantizer.dequantize(X_quantized, idx)))
+    The quantizer can also dequantize computations performed on the quantized array.
+    >>> U = quantizer.dequantize(X_quantized * 2)
+    >>> U_dequantized = X_dequantized * 2
+    >>> bool(np.array_equal(U_dequantized, U))
     True
     """
 
@@ -86,7 +112,6 @@ class ArrayQuantizer:
         """Check if the quantizer has been used."""
         return self._bins is None
 
-    @singledispatchmethod
     def map_ids(self, ids: int | Iterable) -> np.ndarray:
         """Remap a list of indices according to the most recent quantization.
 
@@ -97,7 +122,6 @@ class ArrayQuantizer:
 
         Examples
         --------
-        >>> import warnings
         >>> X = [[0, 0]]*3 + [[2, 2]]*4
         >>> quantizer = ArrayQuantizer()
         >>> quantizer.quantize(X)
@@ -105,6 +129,8 @@ class ArrayQuantizer:
                [2., 2.]])
         >>> int(quantizer.map_ids(1))
         0
+        >>> int(quantizer.map_ids(len(X)-1))
+        1
         >>> quantizer.map_ids([0, 1, 2, 3])
         array([0, 0, 0, 1])
         """
@@ -113,12 +139,6 @@ class ArrayQuantizer:
             ids = np.asarray(ids)
         return self.inverse[ids]
 
-    @map_ids.register
-    def _(self, ids: slice) -> np.ndarray:
-        ids = np.arange(ids.start, ids.stop, ids.step)
-        return self.map_ids(ids)
-
-    @singledispatchmethod
     def invmap_ids(self, ids: int | Iterable) -> np.ndarray:
         """Inverse remap a list of indices according to the most recent quantization.
 
@@ -129,32 +149,42 @@ class ArrayQuantizer:
 
         Examples
         --------
-        >>> X = [[0,0]]*3 + [[2,2]]*4 + [[4,4]]*2 + [[6,6]] * 5
+        >>> rng = np.random.default_rng(17)
+        >>> X = np.array([[0,0]]*3 + [[2,2]]*4 + [[4,4]]*2 + [[6,6]] * 5)
+        >>> rng.shuffle(X)
         >>> quantizer = ArrayQuantizer()
-        >>> quantizer.quantize(X)
+        >>> X_quantized = quantizer.quantize(X)
+        >>> X_dequantized = quantizer.dequantize()
+        >>> X_quantized
         array([[0., 0.],
-               [6., 6.],
                [2., 2.],
-               [4., 4.]])
+               [4., 4.],
+               [6., 6.]])
         >>> quantizer.invmap_ids(3)
-        array([3, 3])
+        array([ 0,  2,  4,  9, 11])
+
+        For inverting a single id, the folowing invariant holds:
+        >>> id = 2  # example
+        >>> bool(len(quantizer.invmap_ids(id)) == quantizer.counts[id])
+        True
+
         >>> quantizer.invmap_ids([0, 1, 2])
-        array([0, 0, 0, 2, 2, 2, 2, 1, 1, 1, 1, 1])
+        array([ 1,  3,  5,  6,  7,  8, 10, 12, 13])
         """
         self.check_if_ready()
-        return self.inverse[np.isin(self.inverse, ids)]
-
-    @invmap_ids.register
-    def _(self, ids: slice) -> np.ndarray:
-        ids = np.arange(ids.start, ids.stop, ids.step)
-        return self.invmap_ids(ids)
+        return np.where(np.isin(self.inverse, ids))[0]
 
     def encode(self, X: np.ndarray) -> np.ndarray:
         """Encode to bin indices."""
-        return self.discretizer.transform(X)
+        codes = self.discretizer.transform(X)
+        return codes
 
     def quantize(self, X: np.ndarray) -> np.ndarray:
         """Quantize the input array.
+
+        Quantization is guaranteed to be sort-stable, i.e. the order of the rows
+        in the quantized array corresponds to the order of their first appearance
+        of a representative of a given quantization bin in the original array.
 
         Parameters
         ----------
@@ -166,8 +196,11 @@ class ArrayQuantizer:
             raise RuntimeError(errmsg)
         self.discretizer.fit(X)
         bins = self.encode(X)
-        B, Inv, C = np.unique(bins, axis=0, return_inverse=True, return_counts=True)
+        B, Ind, Inv, C = np.unique(
+            bins, axis=0, return_index=True, return_inverse=True, return_counts=True
+        )
         self._bins = B
+        self._index = Ind
         self._inverse = Inv
         self._counts = C
         if not self.lossy:
@@ -177,7 +210,7 @@ class ArrayQuantizer:
     def dequantize(
         self,
         X: np.ndarray | None = None,
-        idx: Iterable | slice | None = None,
+        i: int | Iterable | None = None,
         *,
         clear: bool = False,
     ) -> np.ndarray:
@@ -191,29 +224,80 @@ class ArrayQuantizer:
         X
             Input array to be dequantized.
             If `None`, then the original array is dequantized.
-        idx
-            Optional indices used to align `X`.
-            Must match the length of `X` if provided.
-            Ignored if `X` is `None`.
+        i
+            Indices of rows in the quantized array to be dequantized.
+            It is assumed that the quantized `X` is on order implied by `i`.
+            If `None`, then the full dequantized array is returned.
         clear
             Set to `True` to clear the quantizer state after dequantization.
+
+        Examples
+        --------
+        >>> X = np.array([[0, 0]]*3 + [[2, 2]]*4 + [[4, 4]]*2 + [[6, 6]] * 5)
+        >>> quantizer = ArrayQuantizer(lossy=True)
+        >>> X_quantized = quantizer.quantize(X)
+
+        In this simple case even the lossy quantization is exact.
+        >>> X_dequantized = quantizer.dequantize()
+        >>> bool(np.array_equal(X_dequantized, X))
+        True
+
+        Dequantization is implemented as an inversion of the index mapping.
+        >>> Inv = X_quantized[quantizer.inverse]
+        >>> bool(np.array_equal(X_dequantized, Inv))
+        True
+
+        Quantizer can be also used to dequantize computations performed
+        on the quantized array:
+        >>> U = quantizer.dequantize(X_quantized * 2)
+        >>> U_dequantized = X_dequantized * 2
+        >>> bool(np.array_equal(U_dequantized, U))
+        True
+
+        Computations performed on a subset of the quantized array
+        can be also dequantized by passing the corresponding indices:
+        >>> qids = [1, 3]  # row ids in the quantized array
+        >>> U = quantizer.dequantize(X_quantized[qids] * 5, qids)
+
+        Is equivalent to:
+        >>> ids = quantizer.invmap_ids(qids) # get row ids in the original array
+        >>> U_dequantized = (X_dequantized * 5)[ids]
+        >>> bool(np.array_equal(U_dequantized, U))
+        True
+
+        Check that in this case it matches with the result on the original array.
+        >>> U_original = (X * 5)[ids]
+        >>> bool(np.array_equal(U_original, U))
+        True
         """
         self.check_if_ready()
         if X is None:
-            dequantized = (
-                self.discretizer.inverse_transform(self.bins)
-                if self.lossy
-                else self._array.copy()
-            )
-        else:
-            if idx is None:
-                if len(X) != len(self.bins):
-                    errmsg = "input array length does not match the quantizer state"
-                    raise ValueError(errmsg)
-                idx = self.inverse
+            if self.lossy:
+                X = self.discretizer.inverse_transform(self.bins)
             else:
-                idx = self.map_ids(idx)
-            dequantized = X[idx]
+                X = self._array.copy()
+        if X.ndim != 2:
+            errmsg = "only 2D arrays are supported"
+            raise ValueError(errmsg)
+        if i is None:
+            if self.lossy:
+                if len(X) != len(self.bins):
+                    errmsg = "array length does not match the number of quantizer bins"
+                    raise ValueError(errmsg)
+                ids = self.inverse
+            else:
+                ids = slice(None)
+        else:
+            if len(X) != (ilen := len(i) if isinstance(i, Iterable) else 1):
+                errmsg = (
+                    "array length does not match the number of provided indices "
+                    f"({len(X)} != {ilen})"
+                )
+                raise ValueError(errmsg)
+            idmap = {v: i for i, v in enumerate(dict.fromkeys(i))}
+            ids = self.inverse[self.invmap_ids(i)]
+            ids = np.array([idmap[v] for v in ids])
+        dequantized = X[ids]  # type: ignore[index]
         if clear:
             self.clear()
         return dequantized

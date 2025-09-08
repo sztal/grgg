@@ -9,7 +9,7 @@ import igraph as ig
 import numpy as np
 from pathcensus import PathCensus
 from scipy.sparse import csr_array, sparray
-from tqdm.auto import tqdm, trange
+from tqdm.auto import tqdm
 
 from . import options
 from .integrate import Integration
@@ -403,14 +403,10 @@ class GRGG:
                 idx = (slice(None), slice(None))
         return idx
 
-    @singledispatchmethod
     def quantize(self, **kwargs: Any) -> Self:
         """Quantize node parameters.
 
         `**kwargs` are passed to :class:`~grgg.quantize.KMeansQuantizer`.
-
-        Can also be called with node indices as the first argument to quantize
-        them by mapping to the corresponding ids unique nodes in the quantized model.
 
         Examples
         --------
@@ -435,8 +431,12 @@ class GRGG:
         >>> model == model.copy().quantize().dequantize()
         True
         """
-        if self.is_quantized:
+        if not self.is_heterogeneous or (self.is_quantized and not kwargs):
             return self
+        if self.is_quantized and kwargs:
+            # Allow for requantization with different parameters
+            self.dequantize()
+
         self.quantizer.set_params(**kwargs)
         # Collect parameters
         params = []
@@ -457,17 +457,17 @@ class GRGG:
                     i += 1
         return self
 
-    @quantize.register
+    @singledispatchmethod
+    def quantize_ids(self, i: Iterable) -> int:
+        """Quantize node indices."""
+        return self.quantizer.map_ids(i) if self.is_quantized else i
+
+    @quantize_ids.register
     def _(self, i: int) -> int:
         if self.is_quantized:
             return self.quantizer.map_ids(i).item()
         return i
 
-    @quantize.register
-    def _(self, i: Iterable) -> Iterable:
-        return self.quantizer.map_ids(i) if self.is_quantized else i
-
-    @singledispatchmethod
     def dequantize(self) -> Self:
         """Remove quantization of node parameters.
 
@@ -484,13 +484,17 @@ class GRGG:
                         i += 1
         return self
 
-    @dequantize.register
-    def _(self, i: int) -> np.ndarray:
-        pass
+    def dequantize_ids(self, i: int | Iterable) -> np.ndarray:
+        """Dequantize node indices."""
+        return self.quantizer.invmap_ids(i) if self.is_quantized else i
 
     @contextmanager
     def quantization(self, enabled: bool = True, **kwargs: Any) -> None:
         """Quantization context manager.
+
+        The dequantizes the model upon exiting the context if it was not
+        quantized before entering it. The analogous holds for temporary
+        dequantization.
 
         Parameters
         ----------
@@ -518,30 +522,70 @@ class GRGG:
         >>> model.is_quantized
         False
         """
+        was_quantized = self.is_quantized
         if enabled:
             self.quantize(**kwargs)
-        yield
-        if enabled:
+        else:
             self.dequantize()
+        yield
+        if enabled and not was_quantized:
+            self.dequantize()
+        elif not enabled and was_quantized:
+            self.quantize()
 
-    def quantize_ids(self, ids: int | Iterable) -> np.ndarray:
-        """Quantize an array of node IDs according to the current quantization.
+    def make_ids(
+        self,
+        i: int | Iterable | None = None,
+        *,
+        return_original: bool = False,
+    ) -> np.ndarray | range | tuple[np.ndarray | range, np.ndarray | range]:
+        """Make iterable of node indices.
+
+        If `return_original` is `True`, return also the original indices
+        are returned, which can be useful when the model is quantized.
+        """
+
+        def _make_ids(i: int | Iterable | None) -> np.ndarray | range:
+            if isinstance(i, Iterable):
+                return np.asarray(i)
+            return np.array([i])
+
+        if i is None:
+            ids = range(self.n_nodes)
+            if return_original:
+                return ids, range(self._n_nodes)
+            return ids
+        ids = _make_ids(self.quantize_ids(i))
+        if return_original:
+            return ids, _make_ids(i)
+        return ids
+
+    def iter_ids(
+        self,
+        i: int | Iterable | None = None,
+        *,
+        progress: bool | None = None,
+    ) -> Iterator[int]:
+        """Iterate over node indices.
 
         Parameters
         ----------
-        ids
-            Node ids to map to unique ids in the quantized model.
+        i
+            Indices of the nodes to iterate over.
+            If `None`, iterate over all nodes.
+        progress
+            Whether to display a progress bar.
+            If a mapping is provided, it is passed to :func:`tqdm.tqdm`.
         """
-        self.quantizer.check_if_ready()
-        qids = np.unique(self.quantizer.map_ids(ids))
-        if qids.size == 1 and not isinstance(ids, Iterable):
-            qids = qids.item()
-        return qids
+        progress, popts = parse_switch_flag(progress)
+        i = self.make_ids(i)
+        return tqdm(i, disable=not progress, **popts)
 
     # Methods for computing model properties -----------------------------------------
 
     def degree(
         self,
+        i: int | Iterable | None = None,
         *args: Any,
         quantize: bool | Mapping | None = None,
         progress: bool | Mapping = False,
@@ -561,29 +605,23 @@ class GRGG:
             degree. If a mapping, it is passed to :meth:`~grgg.GRGG.quantize`.
             If `None`, the default value from :mod:`~grgg.options` is used.
         progress
-            Whether to display a progress bar. If a mapping is provided, it is passed
-            to :func:`tqdm.tqdm`. By default, a progress bar is shown only for large
-            graphs.
+            Passed to :meth:`~grgg.GRGG.iter_ids`.
         **kwargs
             Passed to :func:`~grgg.integrate.Integration.degree`.
         """
         quantize, qopts = parse_switch_flag(quantize, default=options.quantize.auto)
-        progress, popts = parse_switch_flag(progress)
-        if self.is_heterogeneous:
-            was_quantized = self.is_quantized
-            if quantize:
-                self.quantize(**qopts)
-            degseq = np.array(
-                [
-                    self.integrate.degree(i, *args, **kwargs)[0]
-                    for i in trange(self.n_nodes, disable=not progress, **popts)
-                ]
-            )
-            if quantize and not was_quantized:
-                degseq = self.quantizer.dequantize(degseq)
-                self.dequantize()
-            return degseq
-        return np.full(self.n_nodes, self.kbar)
+        with self.quantization(enable=quantize, **qopts):
+            ids, orig_ids = self.make_ids(i, return_original=True)
+            iterator = self.iter_ids(ids, progress=progress)
+            D = np.array([self.integrate.degree(i, *args, **kwargs) for i in iterator])
+            if self.is_quantized:
+                self.quantizer.dequantize(D, ids)
+
+        #     if quantize and not was_quantized:
+        #         degseq = self.quantizer.dequantize(degseq)
+        #         self.dequantize()
+        #     return degseq
+        # return np.full(self.n_nodes, self.kbar)
 
     @property
     def kbar(self) -> float:

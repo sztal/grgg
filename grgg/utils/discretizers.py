@@ -103,6 +103,8 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
             Strategy to fit the KMeans models. If 'independent', a separate KMeans
             model is fitted for each feature. If 'joint', a single KMeans model is
             fitted to all features jointly.
+        random_state
+            Random state for KMeans initialization when `strategy` is 'joint'.
         """
         params = {
             "std_per_bin": std_per_bin,
@@ -149,25 +151,35 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
         return self
 
     def __fit_independent(self, X: np.ndarray) -> list[KMeans]:
+        def fit(n_clusters: int, feature: np.ndarray) -> KMeans:
+            x0, x1 = feature.min(), feature.max()
+            n_clusters = min(n_clusters, len(feature))
+            init_centers = np.linspace(x0, x1, n_clusters).reshape(-1, 1)
+            km = KMeans(n_clusters=n_clusters, init=init_centers, algorithm="lloyd")
+            km.fit(feature[:, None])
+            return km
+
         kmeans = []
         for feature in X.T:
             n_bins = self.__get_n_bins(feature)
-            x0, x1 = feature.min(), feature.max()
-            init_centers = np.linspace(x0, x1, n_bins).reshape(-1, 1)
-            km = KMeans(n_clusters=n_bins, init=init_centers, algorithm="lloyd")
-            km.fit(feature[:, None])
+            km = fit(n_bins, feature)
+            n_clusters = len(np.unique(km.labels_))
+            if max(km.labels_) >= n_clusters:
+                km = fit(n_clusters, feature)
             kmeans.append(km)
         return kmeans
 
     def __fit_joint(self, X: np.ndarray) -> list[KMeans]:
         n_bins = self.__get_n_bins(X)
-        km = KMeans(
-            n_clusters=min(n_bins, len(X)),
-            algorithm="lloyd",
-            init="k-means++",
-            random_state=self.random_state,
-        )
-        km.fit(X)
+        opts = {
+            "init": "k-means++",
+            "algorithm": "lloyd",
+            "random_state": self.random_state,
+        }
+        km = KMeans(n_clusters=min(n_bins, len(X)), **opts).fit(X)
+        n_clusters = len(np.unique(km.labels_))
+        if max(km.labels_) >= n_clusters:
+            km = KMeans(n_clusters=n_clusters, **opts).fit(X)
         return [km]
 
     def __get_n_bins(self, X: np.ndarray) -> int:
@@ -184,7 +196,8 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
             ]
         else:
             Y = [self.kmeans_[0].predict(X)]
-        return np.column_stack(Y)
+        codes = np.column_stack(Y)
+        return codes
 
     def inverse_transform(self, X):
         check_is_fitted(self)
@@ -205,3 +218,8 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
         else:
             Y = [self.kmeans_[0].cluster_centers_[X.flatten()]]
         return np.column_stack(Y)
+
+    def __normalize_codes(self, codes: np.ndarray) -> np.ndarray:
+        """Normalize codes to start from 0 and be consecutive."""
+        code_map = {v: j for j, v in enumerate(dict.fromkeys(codes))}
+        return np.array([code_map[v] for v in codes])
