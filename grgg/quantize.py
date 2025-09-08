@@ -37,7 +37,7 @@ class ArrayQuantizer:
     Quantizer can also remap indices according to the quantization:
     >>> Y = quantizer.dequantize(X_quantized)
     >>> idx = [1, 9]
-    >>> bool(np.array_equal(Y[idx], X_quantized[quantizer.remap_ids(idx)]))
+    >>> bool(np.array_equal(Y[idx], X_quantized[quantizer.map_ids(idx)]))
     True
 
     The same can be done directly using the 'dequantize' method:
@@ -66,19 +66,19 @@ class ArrayQuantizer:
     @property
     def bins(self) -> np.ndarray:
         """The most recent quantized array."""
-        self._check_if_ready()
+        self.check_if_ready()
         return self._bins
 
     @property
     def inverse(self) -> np.ndarray:
         """The inverse mapping of the most recent quantized array."""
-        self._check_if_ready()
+        self.check_if_ready()
         return self._inverse
 
     @property
     def counts(self) -> np.ndarray:
         """The counts of each unique bin in the most recent quantized array."""
-        self._check_if_ready()
+        self.check_if_ready()
         return self._counts
 
     @property
@@ -86,28 +86,72 @@ class ArrayQuantizer:
         """Check if the quantizer has been used."""
         return self._bins is None
 
-    def encode(self, X: np.ndarray) -> np.ndarray:
-        """Encode to bin indices."""
-        return self.discretizer.transform(X)
-
     @singledispatchmethod
-    def remap_ids(self, ids: int | Iterable) -> np.ndarray:
+    def map_ids(self, ids: int | Iterable) -> np.ndarray:
         """Remap a list of indices according to the most recent quantization.
 
         Parameters
         ----------
         ids
             Iterable of indices to be remapped.
+
+        Examples
+        --------
+        >>> import warnings
+        >>> X = [[0, 0]]*3 + [[2, 2]]*4
+        >>> quantizer = ArrayQuantizer()
+        >>> quantizer.quantize(X)
+        array([[0., 0.],
+               [2., 2.]])
+        >>> int(quantizer.map_ids(1))
+        0
+        >>> quantizer.map_ids([0, 1, 2, 3])
+        array([0, 0, 0, 1])
         """
-        self._check_if_ready()
+        self.check_if_ready()
         if isinstance(ids, Iterable):
             ids = np.asarray(ids)
         return self.inverse[ids]
 
-    @remap_ids.register
+    @map_ids.register
     def _(self, ids: slice) -> np.ndarray:
         ids = np.arange(ids.start, ids.stop, ids.step)
-        return self.remap_ids(ids)
+        return self.map_ids(ids)
+
+    @singledispatchmethod
+    def invmap_ids(self, ids: int | Iterable) -> np.ndarray:
+        """Inverse remap a list of indices according to the most recent quantization.
+
+        Parameters
+        ----------
+        ids
+            Iterable of indices to be inverse remapped.
+
+        Examples
+        --------
+        >>> X = [[0,0]]*3 + [[2,2]]*4 + [[4,4]]*2 + [[6,6]] * 5
+        >>> quantizer = ArrayQuantizer()
+        >>> quantizer.quantize(X)
+        array([[0., 0.],
+               [6., 6.],
+               [2., 2.],
+               [4., 4.]])
+        >>> quantizer.invmap_ids(3)
+        array([3, 3])
+        >>> quantizer.invmap_ids([0, 1, 2])
+        array([0, 0, 0, 2, 2, 2, 2, 1, 1, 1, 1, 1])
+        """
+        self.check_if_ready()
+        return self.inverse[np.isin(self.inverse, ids)]
+
+    @invmap_ids.register
+    def _(self, ids: slice) -> np.ndarray:
+        ids = np.arange(ids.start, ids.stop, ids.step)
+        return self.invmap_ids(ids)
+
+    def encode(self, X: np.ndarray) -> np.ndarray:
+        """Encode to bin indices."""
+        return self.discretizer.transform(X)
 
     def quantize(self, X: np.ndarray) -> np.ndarray:
         """Quantize the input array.
@@ -154,7 +198,7 @@ class ArrayQuantizer:
         clear
             Set to `True` to clear the quantizer state after dequantization.
         """
-        self._check_if_ready()
+        self.check_if_ready()
         if X is None:
             dequantized = (
                 self.discretizer.inverse_transform(self.bins)
@@ -168,7 +212,7 @@ class ArrayQuantizer:
                     raise ValueError(errmsg)
                 idx = self.inverse
             else:
-                idx = self.remap_ids(idx)
+                idx = self.map_ids(idx)
             dequantized = X[idx]
         if clear:
             self.clear()
@@ -192,7 +236,13 @@ class ArrayQuantizer:
         self.discretizer.set_params(**kwargs)
         return self
 
-    def _check_if_ready(self) -> None:
+    def check_if_ready(self) -> None:
         if self.is_empty:
             errmsg = "the quantizer is empty; call 'quantize()' first"
             raise RuntimeError(errmsg)
+
+
+__test__ = {
+    "ArrayQuantizer.map_ids": ArrayQuantizer.map_ids.__doc__,
+    "ArrayQuantizer.invmap_ids": ArrayQuantizer.invmap_ids.__doc__,
+}

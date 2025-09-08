@@ -1,8 +1,10 @@
+import warnings
 from typing import ClassVar
 
 import numpy as np
 from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.cluster import KMeans
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils._param_validation import (
     Integral,
     Interval,
@@ -127,7 +129,9 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
             if self.strategy == "independent"
             else self.__fit_joint
         )
-        self.kmeans_ = np.array(fit(X), dtype=object)
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", ConvergenceWarning)
+            self.kmeans_ = np.array(fit(X), dtype=object)
         self.std_ = np.array(
             [
                 np.sqrt(km.inertia_ / len(km.labels_) / km.cluster_centers_.shape[1])

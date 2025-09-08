@@ -1,5 +1,6 @@
 import math
-from collections.abc import Iterator, Mapping
+from collections.abc import Iterable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from functools import cached_property, singledispatchmethod
 from typing import Any, Self
@@ -402,10 +403,14 @@ class GRGG:
                 idx = (slice(None), slice(None))
         return idx
 
+    @singledispatchmethod
     def quantize(self, **kwargs: Any) -> Self:
         """Quantize node parameters.
 
         `**kwargs` are passed to :class:`~grgg.quantize.KMeansQuantizer`.
+
+        Can also be called with node indices as the first argument to quantize
+        them by mapping to the corresponding ids unique nodes in the quantized model.
 
         Examples
         --------
@@ -452,8 +457,23 @@ class GRGG:
                     i += 1
         return self
 
+    @quantize.register
+    def _(self, i: int) -> int:
+        if self.is_quantized:
+            return self.quantizer.map_ids(i).item()
+        return i
+
+    @quantize.register
+    def _(self, i: Iterable) -> Iterable:
+        return self.quantizer.map_ids(i) if self.is_quantized else i
+
+    @singledispatchmethod
     def dequantize(self) -> Self:
-        """Remove quantization of node parameters."""
+        """Remove quantization of node parameters.
+
+        Can also be called with node indices as the first argument to dequantize
+        them by mapping to the corresponding ids in the original model.
+        """
         if self.is_quantized:
             params = self.quantizer.dequantize(clear=True)
             i = 0
@@ -463,6 +483,60 @@ class GRGG:
                         param.value = params[:, i]
                         i += 1
         return self
+
+    @dequantize.register
+    def _(self, i: int) -> np.ndarray:
+        pass
+
+    @contextmanager
+    def quantization(self, enabled: bool = True, **kwargs: Any) -> None:
+        """Quantization context manager.
+
+        Parameters
+        ----------
+        enable
+            Whether to enable quantization.
+            If `False`, the context manager does nothing.
+        **kwargs
+            Passed to :meth:`~grgg.GRGG.quantize`.
+
+        Examples
+        --------
+        >>> from grgg import GRGG, Similarity
+        >>> import numpy as np
+        >>> model = GRGG(100, 2, Similarity(mu=np.random.randn(100)))
+        >>> model.is_quantized
+        False
+        >>> with model.quantization():
+        ...     model.is_quantized
+        True
+        >>> model.is_quantized
+        False
+        >>> with model.quantization(enabled=False):
+        ...     model.is_quantized
+        False
+        >>> model.is_quantized
+        False
+        """
+        if enabled:
+            self.quantize(**kwargs)
+        yield
+        if enabled:
+            self.dequantize()
+
+    def quantize_ids(self, ids: int | Iterable) -> np.ndarray:
+        """Quantize an array of node IDs according to the current quantization.
+
+        Parameters
+        ----------
+        ids
+            Node ids to map to unique ids in the quantized model.
+        """
+        self.quantizer.check_if_ready()
+        qids = np.unique(self.quantizer.map_ids(ids))
+        if qids.size == 1 and not isinstance(ids, Iterable):
+            qids = qids.item()
+        return qids
 
     # Methods for computing model properties -----------------------------------------
 
@@ -609,34 +683,3 @@ class GRGGSample:
         See :mod:`pathcensus` for details.
         """
         return PathCensus(self.A)
-
-
-# class QuantizedGRGG(GRGG):
-#     """GRGG model with quantized parameters.
-
-#     It can be used as a context manager to temporarily quantize a model.
-#     See :class:`~GRGG` for details about the model.
-#     """
-#     @classmethod
-#     def from_model(cls, model: GRGG, **kwargs: Any) -> Self:
-#         """Create a quantized GRGG model from a base model.
-
-#         Parameters
-#         ----------
-#         model
-#             Base GRGG model to quantize.
-#         **kwargs
-#             Passed to :meth:`~grgg.GRGG.quantize`.
-
-#         Examples
-#         --------
-#         >>> from grgg import GRGG, Similarity
-#         >>> model = GRGG(100, 2, Similarity(mu=[0]*100))
-#         >>> qmodel = QuantizedGRGG.from_model(model)
-#         >>> qmodel.is_quantized
-#         True
-#         """
-#         qmodel = cls(model.n_nodes, model.manifold, *model.layers)
-#         qmodel.quantizer = model.quantizer
-#         qmodel.quantize(**kwargs)
-#         return qmodel
