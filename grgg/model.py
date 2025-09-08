@@ -475,7 +475,8 @@ class GRGG:
         them by mapping to the corresponding ids in the original model.
         """
         if self.is_quantized:
-            params = self.quantizer.dequantize(clear=True)
+            params = self.quantizer.dequantize()
+            self.quantizer.clear()
             i = 0
             for layer in self.layers:
                 for param in (layer.beta, layer.mu):
@@ -535,30 +536,21 @@ class GRGG:
 
     def make_ids(
         self,
-        i: int | Iterable | None = None,
-        *,
-        return_original: bool = False,
+        i: int | Iterable | None,
     ) -> np.ndarray | range | tuple[np.ndarray | range, np.ndarray | range]:
         """Make iterable of node indices.
 
         If `return_original` is `True`, return also the original indices
         are returned, which can be useful when the model is quantized.
         """
-
-        def _make_ids(i: int | Iterable | None) -> np.ndarray | range:
-            if isinstance(i, Iterable):
-                return np.asarray(i)
-            return np.array([i])
-
         if i is None:
-            ids = range(self.n_nodes)
-            if return_original:
-                return ids, range(self._n_nodes)
-            return ids
-        ids = _make_ids(self.quantize_ids(i))
-        if return_original:
-            return ids, _make_ids(i)
-        return ids
+            return None
+        i = np.unique(self.quantize_ids(i))
+        if isinstance(i, range):
+            return i
+        if isinstance(i, Iterable):
+            return np.asarray(i)
+        return np.array([i])
 
     def iter_ids(
         self,
@@ -578,7 +570,8 @@ class GRGG:
             If a mapping is provided, it is passed to :func:`tqdm.tqdm`.
         """
         progress, popts = parse_switch_flag(progress)
-        i = self.make_ids(i)
+        if i is None:
+            i = range(self.n_nodes)
         return tqdm(i, disable=not progress, **popts)
 
     # Methods for computing model properties -----------------------------------------
@@ -608,26 +601,70 @@ class GRGG:
             Passed to :meth:`~grgg.GRGG.iter_ids`.
         **kwargs
             Passed to :func:`~grgg.integrate.Integration.degree`.
-        """
-        quantize, qopts = parse_switch_flag(quantize, default=options.quantize.auto)
-        with self.quantization(enable=quantize, **qopts):
-            ids, orig_ids = self.make_ids(i, return_original=True)
-            iterator = self.iter_ids(ids, progress=progress)
-            D = np.array([self.integrate.degree(i, *args, **kwargs) for i in iterator])
-            if self.is_quantized:
-                self.quantizer.dequantize(D, ids)
 
-        #     if quantize and not was_quantized:
-        #         degseq = self.quantizer.dequantize(degseq)
-        #         self.dequantize()
-        #     return degseq
-        # return np.full(self.n_nodes, self.kbar)
+        Examples
+        --------
+        >>> from grgg import GRGG, Similarity
+        >>> model = GRGG(100, 2, Similarity())
+        >>> D = model.degree()
+        >>> D.shape
+        (100,)
+        >>> bool(np.allclose(D.mean(), model.kbar))
+        True
+        >>> bool(np.all(D) >= 0)
+        True
+
+        Heterogeneous case with constant zero fitness.
+        Should be equivalent to the homogeneous case.
+        >>> model_h0 = GRGG(100, 2, Similarity(mu=[0]*100))
+        >>> D = model_h0.degree()
+        >>> D.shape
+        (100,)
+        >>> bool(np.allclose(D.mean(), model.kbar))
+        True
+        >>> bool(np.all(D) >= 0)
+        True
+        >>> bool(np.allclose(D[:3], model_h0.degree(range(3))))
+        True
+        >>> bool(D[7] == model_h0.degree(7))
+        True
+
+        Heterogeneous case with non-constant fitness.
+        Should not be equivalent to the homogeneous case.
+        >>> model_h1 = GRGG(100, 2, Similarity(mu=np.linspace(-3, 3, 100)))
+        >>> D = model_h1.degree()
+        >>> D.shape
+        (100,)
+        >>> bool(np.allclose(D.mean(), model.kbar))
+        False
+        >>> bool(np.all(D) >= 0)
+        True
+        >>> bool(np.allclose(D[:3], model_h1.degree(range(3))))
+        True
+        >>> bool(D[7] == model_h1.degree(7))
+        True
+        """
+        if not self.is_heterogeneous:
+            if i is None:
+                i = range(self.n_nodes)
+            return np.full(len(self.make_ids(i)), self.kbar)
+        quantize, qopts = parse_switch_flag(quantize, default=options.quantize.auto)
+        orig_ids = self.make_ids(i)  # save before quantization
+        with self.quantization(enabled=quantize, **qopts):
+            ids = self.make_ids(i)
+            vids = self.iter_ids(ids, progress=progress)
+            D = np.array([self.integrate.degree(vi, *args, **kwargs)[0] for vi in vids])
+            if self.is_quantized:
+                D = self.quantizer.dequantize(D, ids)
+                if orig_ids is not None:
+                    D = D[self.quantizer.align_ids(orig_ids, ids)]
+        return D
 
     @property
     def kbar(self) -> float:
         r"""Average degree :math:`\bar{k}` of the GRGG model."""
         if self.is_heterogeneous:
-            return self.degree.mean()
+            return self.degree().mean()
         return self.integrate.degree()[0]
 
     @property

@@ -137,6 +137,11 @@ class ArrayQuantizer:
         self.check_if_ready()
         if isinstance(ids, Iterable):
             ids = np.asarray(ids)
+        elif isinstance(ids, int | np.integer):
+            pass
+        else:
+            errmsg = "ids must be an int or an iterable of ints"
+            raise TypeError(errmsg)
         return self.inverse[ids]
 
     def invmap_ids(self, ids: int | Iterable) -> np.ndarray:
@@ -172,6 +177,9 @@ class ArrayQuantizer:
         array([ 1,  3,  5,  6,  7,  8, 10, 12, 13])
         """
         self.check_if_ready()
+        if not isinstance(ids, int | np.integer | Iterable):
+            errmsg = "ids must be an int or an iterable of ints"
+            raise TypeError(errmsg)
         return np.where(np.isin(self.inverse, ids))[0]
 
     def encode(self, X: np.ndarray) -> np.ndarray:
@@ -196,11 +204,8 @@ class ArrayQuantizer:
             raise RuntimeError(errmsg)
         self.discretizer.fit(X)
         bins = self.encode(X)
-        B, Ind, Inv, C = np.unique(
-            bins, axis=0, return_index=True, return_inverse=True, return_counts=True
-        )
+        B, Inv, C = np.unique(bins, axis=0, return_inverse=True, return_counts=True)
         self._bins = B
-        self._index = Ind
         self._inverse = Inv
         self._counts = C
         if not self.lossy:
@@ -211,10 +216,8 @@ class ArrayQuantizer:
         self,
         X: np.ndarray | None = None,
         i: int | Iterable | None = None,
-        *,
-        clear: bool = False,
     ) -> np.ndarray:
-        """Dequantize an array to the length and order of the mos quantized array.
+        """Dequantize an array to the length and order of the most quantized array.
 
         `X` may be whatever was returned by `quantize()`, or computed on its output
         while retaining the same length of the first axis.
@@ -228,8 +231,6 @@ class ArrayQuantizer:
             Indices of rows in the quantized array to be dequantized.
             It is assumed that the quantized `X` is on order implied by `i`.
             If `None`, then the full dequantized array is returned.
-        clear
-            Set to `True` to clear the quantizer state after dequantization.
 
         Examples
         --------
@@ -276,30 +277,33 @@ class ArrayQuantizer:
                 X = self.discretizer.inverse_transform(self.bins)
             else:
                 X = self._array.copy()
+                if i is not None:
+                    X = X[self.invmap_ids(i)]
+                return X
+        X = np.asarray(X)
+        X_ndim = X.ndim
+        if X.ndim == 1:
+            X = X[:, None]
         if X.ndim != 2:
             errmsg = "only 2D arrays are supported"
             raise ValueError(errmsg)
         if i is None:
-            if self.lossy:
-                if len(X) != len(self.bins):
-                    errmsg = "array length does not match the number of quantizer bins"
-                    raise ValueError(errmsg)
-                ids = self.inverse
-            else:
-                ids = slice(None)
-        else:
-            if len(X) != (ilen := len(i) if isinstance(i, Iterable) else 1):
-                errmsg = (
-                    "array length does not match the number of provided indices "
-                    f"({len(X)} != {ilen})"
-                )
+            if len(X) != len(self.bins):
+                errmsg = "array length does not match the number of quantizer bins"
                 raise ValueError(errmsg)
-            idmap = {v: i for i, v in enumerate(dict.fromkeys(i))}
-            ids = self.inverse[self.invmap_ids(i)]
-            ids = np.array([idmap[v] for v in ids])
+            i = range(len(self.bins))
+        if len(X) != (ilen := len(i) if isinstance(i, Iterable) else 1):
+            errmsg = (
+                "array length does not match the number of provided indices "
+                f"({len(X)} != {ilen})"
+            )
+            raise ValueError(errmsg)
+        idmap = {v: i for i, v in enumerate(dict.fromkeys(i))}
+        ids = self.inverse[self.invmap_ids(i)]
+        ids = np.array([idmap[v] for v in ids])
         dequantized = X[ids]  # type: ignore[index]
-        if clear:
-            self.clear()
+        if X_ndim == 1:
+            dequantized = dequantized.ravel()
         return dequantized
 
     def clear(self) -> Self:
@@ -325,8 +329,29 @@ class ArrayQuantizer:
             errmsg = "the quantizer is empty; call 'quantize()' first"
             raise RuntimeError(errmsg)
 
+    def align_ids(self, ids: int | Iterable, qids: int | Iterable) -> np.ndarray:
+        """Align raw indices `ids` to the span of quantized indices `qids`.
 
-__test__ = {
-    "ArrayQuantizer.map_ids": ArrayQuantizer.map_ids.__doc__,
-    "ArrayQuantizer.invmap_ids": ArrayQuantizer.invmap_ids.__doc__,
-}
+        Raises
+        ------
+        ValueError
+            If some of the `ids` are not in the span of `qids`.
+
+        Examples
+        --------
+        >>> X = np.array([[0, 0]]*3 + [[2, 2]]*4 + [[4, 4]]*2 + [[6, 6]] * 5)
+        >>> quantizer = ArrayQuantizer(lossy=True)
+        >>> X_quantized = quantizer.quantize(X)
+        >>> qids = [1, 2]  # row ids in the quantized array
+        >>> invids = quantizer.invmap_ids(qids) # get row ids in the
+        >>> select = [0, 3]
+        >>> ids = invids[select]  # select some of them
+        >>> aligned = quantizer.align_ids(ids, qids)
+        >>> bool(set(aligned) == set(select))
+        True
+        """
+        span = self.invmap_ids(qids)
+        if not np.all(np.isin(ids, span)):
+            errmsg = "some of the ids are not in the span of the quantized ids"
+            raise ValueError(errmsg)
+        return np.where(np.isin(span, ids))[0]
