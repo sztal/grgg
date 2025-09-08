@@ -70,6 +70,20 @@ class DegreeIntegral(Integral):
     ----------
     model
         A GRGG model instance.
+
+    Examples
+    --------
+    >>> from grgg import GRGG, Similarity, Complementarity
+    >>> model = GRGG(1000, 2, Similarity, Complementarity)  # homogeneous
+    >>> kbar, _ = model.integrate.degree()
+    >>> kbar == model.kbar
+    True
+    >>> kbar
+    14.131789555753901
+    >>> model = GRGG(1000, 2, Similarity(mu=[0]*1000))  # heterogeneous
+    >>> k, _ = model.integrate.degree(144)
+    >>> k
+    7.0663310274575375
     """
 
     @property
