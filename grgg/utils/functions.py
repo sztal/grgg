@@ -1,4 +1,5 @@
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
+from inspect import signature
 from itertools import product
 from typing import Any
 
@@ -133,3 +134,29 @@ def make_grid(n: int, k: int, ranges: list[tuple[float, float]]) -> np.ndarray:
     mesh = np.meshgrid(*linspaces, indexing="ij")
     grid_points = np.stack(mesh, axis=-1).reshape(-1, k)
     return grid_points
+
+
+def split_kwargs_by_signatures(
+    kwargs: Mapping,
+    *callables: Callable,
+) -> tuple[dict, ...]:
+    """Split keyword arguments by the signatures of multiple callables.
+
+    Returns
+    -------
+    tuple of dict
+        A tuple of dictionaries, each containing the keyword arguments
+        relevant to the corresponding callable.
+        The last element contains any remaining keyword arguments
+        that do not match any callable's signature.
+    """
+    kwargs = kwargs.copy()
+    splitted = []
+    for clb in callables:
+        sig = signature(clb)
+        keys = set(sig.parameters) & set(kwargs)
+        part = {}
+        for k in keys:
+            part[k] = kwargs.pop(k)
+        splitted.append(part)
+    return (*splitted, kwargs)
