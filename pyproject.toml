@@ -19,6 +19,8 @@ dependencies = [
     "scipy>=1.16.0",
     "python-igraph>=0.11.9",
     "pathcensus>=1.0",
+    "scikit-learn>=1.7.1",
+    "tqdm>=4.65",
 ]
 dynamic = ["version"]
 classifiers = [
@@ -39,7 +41,6 @@ dev = [
     "dvc>=3.59.1",
     "omegaconf>=2.3.0",
     "python-dotenv>=1.1.1",
-    "tqdm>=4.65",
     "pqdm>=0.2.0",
     "ipykernel",
     "ipywidgets",
@@ -47,7 +48,6 @@ dev = [
     "networkx>=3.5",
     "matplotlib>=3.10.3",
     "seaborn>=0.13.2",
-    "scikit-learn>=1.7.1",
     "grgg[test,lint,mypy]",
 ]
 lint = ["ruff>=0.1.9"]
