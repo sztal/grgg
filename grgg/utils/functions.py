@@ -95,3 +95,41 @@ def batch_arrays(
             batch.append(arr[start:end])
         if batch:
             yield tuple(batch)
+
+
+def make_grid(n: int, k: int, ranges: list[tuple[float, float]]) -> np.ndarray:
+    """Create a regular grid of `n` points in `k` dimensions.
+
+    Parameters
+    ----------
+    n : int
+        Number of points. The total number of points may be a bit less than `n`,
+        since the number of points per dimension is rounded down to the nearest integer.
+    k : int
+        Number of dimensions.
+    ranges : list of tuples
+        List of (min, max) tuples for each dimension.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape (n**k, k), where each row is a point coordinate.
+
+    Examples
+    --------
+    >>> make_grid(9, 2, [(-1, 1), (0, 2)])
+    array([[-1.,  0.],
+           [-1.,  1.],
+           [-1.,  2.],
+           [ 0.,  0.],
+           [ 0.,  1.],
+           [ 0.,  2.],
+           [ 1.,  0.],
+           [ 1.,  1.],
+           [ 1.,  2.]])
+    """
+    n = max(1, int(np.ceil(n ** (1 / k))))
+    linspaces = [np.linspace(start, stop, n) for (start, stop) in ranges]
+    mesh = np.meshgrid(*linspaces, indexing="ij")
+    grid_points = np.stack(mesh, axis=-1).reshape(-1, k)
+    return grid_points

@@ -32,12 +32,12 @@ class ArrayQuantizer:
     >>> rng = np.random.default_rng(412)
     >>> X = np.asarray([[0,0]]*3 + [[2,2]]*4 + [[4,4]]*2 + [[6,6]]*5)
     >>> rng.shuffle(X)
-    >>> quantizer = ArrayQuantizer(std_per_bin=0.3)
+    >>> quantizer = ArrayQuantizer(n_bins=4)
     >>> X_quantized = quantizer.quantize(X)
     >>> X_quantized
-    array([[0., 0.],
-           [2., 2.],
+    array([[2., 2.],
            [4., 4.],
+           [0., 0.],
            [6., 6.]])
 
     In the lossless case, the quantizer just stores the copy of the original array,
@@ -48,7 +48,7 @@ class ArrayQuantizer:
 
     However, in the simple case considered here, even the lossy quantization
     is exact.
-    >>> quantizer = ArrayQuantizer(lossy=True, std_per_bin=0.3)
+    >>> quantizer = ArrayQuantizer(lossy=True, n_bins=4)
     >>> X_quantized = quantizer.quantize(X)
     >>> X_dequantized = quantizer.dequantize()
     >>> bool(np.array_equal(X, X_dequantized))
@@ -56,7 +56,7 @@ class ArrayQuantizer:
 
     But in the general case, the dequantized array may differ from the original one.
     >>> X = rng.standard_normal((10, 2))
-    >>> quantizer = ArrayQuantizer(lossy=True, std_per_bin=0.3)
+    >>> quantizer = ArrayQuantizer(lossy=True, n_bins=4)
     >>> X_quantized = quantizer.quantize(X)
     >>> X_dequantized = quantizer.dequantize()
     >>> bool(np.array_equal(X, X_dequantized))
@@ -82,7 +82,7 @@ class ArrayQuantizer:
         """
         self.clear()
         kwargs = {
-            "std_per_bin": options.quantize.std_per_bin,
+            "n_bins": options.quantize.n_bins,
             "strategy": options.quantize.strategy,
             **kwargs,
         }
@@ -122,7 +122,7 @@ class ArrayQuantizer:
 
         Examples
         --------
-        >>> X = [[0, 0]]*3 + [[2, 2]]*4
+        >>> X = np.array([[0, 0]]*3 + [[2, 2]]*4)
         >>> quantizer = ArrayQuantizer()
         >>> quantizer.quantize(X)
         array([[0., 0.],

@@ -8,11 +8,12 @@ from sklearn.exceptions import ConvergenceWarning
 from sklearn.utils._param_validation import (
     Integral,
     Interval,
-    Real,
     StrOptions,
     validate_parameter_constraints,
 )
 from sklearn.utils.validation import check_array, check_is_fitted, validate_data
+
+from .functions import make_grid
 
 __all__ = ("KMeansDiscretizer",)
 
@@ -43,74 +44,66 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
     ...               [0.35, 1.4],
     ...               [0.9, 1.8],
     ...               [1.0, 2.0]])
-    >>> discretizer = KMeansDiscretizer(std_per_bin=0.2, strategy='independent')
+    >>> discretizer = KMeansDiscretizer(n_bins=3, strategy="independent")
     >>> discretizer.fit(X)
-    KMeansDiscretizer(std_per_bin=0.2)
+    KMeansDiscretizer(n_bins=3, strategy='independent')
     >>> Y = discretizer.transform(X)
     >>> Y
     array([[0, 0],
-           [0, 0],
-           [0, 0],
+           [1, 0],
            [1, 1],
-           [1, 1]], dtype=int32)
+           [2, 2],
+           [2, 2]], dtype=int32)
     >>> discretizer.inverse_transform(Y)
-    array([[0.28333333, 1.2       ],
-           [0.28333333, 1.2       ],
-           [0.28333333, 1.2       ],
-           [0.95      , 1.9       ],
-           [0.95      , 1.9       ]])
-    >>> discretizer = KMeansDiscretizer(
-    ...     std_per_bin=0.2, strategy='joint', random_state=17
-    ... )
+    array([[0.1  , 1.1  ],
+           [0.375, 1.1  ],
+           [0.375, 1.4  ],
+           [0.95 , 1.9  ],
+           [0.95 , 1.9  ]])
+    >>> discretizer = KMeansDiscretizer(n_bins=3, strategy="joint")
     >>> discretizer.fit(X)
-    KMeansDiscretizer(random_state=17, std_per_bin=0.2, strategy='joint')
+    KMeansDiscretizer(n_bins=3)
     >>> Y = discretizer.transform(X)
     >>> Y
     array([[0],
-           [0],
-           [0],
            [2],
-           [1]], dtype=int32)
+           [1],
+           [3],
+           [3]], dtype=int32)
+
     >>> discretizer.inverse_transform(Y)
-    array([[0.28333333, 1.2       ],
-           [0.28333333, 1.2       ],
-           [0.28333333, 1.2       ],
-           [0.9       , 1.8       ],
-           [1.        , 2.        ]])
+    array([[0.1 , 1.  ],
+           [0.4 , 1.2 ],
+           [0.35, 1.4 ],
+           [0.95, 1.9 ],
+           [0.95, 1.9 ]])
     """
 
     _parameter_constraints: ClassVar[dict] = {
-        "std_per_bin": [Interval(Real, 0, None, closed="neither")],  # type: ignore
-        "max_bins": [Interval(Integral, 1, None, closed="left")],  # type: ignore
+        "n_bins": [Interval(Integral, 1, None, closed="left")],  # type: ignore
         "strategy": [StrOptions(frozenset(["independent", "joint"]))],  # type: ignore
     }
 
     def __init__(
         self,
-        std_per_bin: float = 0.05,
-        max_bins: int = 512,
-        strategy: str = "independent",
-        random_state: np.random.Generator | int | None = None,
+        n_bins: int = 256,
+        strategy: str = "joint",
     ) -> None:
         """
         Parameters
         ----------
-        std_per_bin
-            Target standard deviation per bin.
-        max_bins
-            Maximum number of bins (clusters) to use.
+        n_bins
+            Target number of bins (clusters). If `strategy` is 'independent',
+            the actual number of bins may be signficantly larger than `n_bins`
+            depending on the number of features and the data distribution.
         strategy
             Strategy to fit the KMeans models. If 'independent', a separate KMeans
             model is fitted for each feature. If 'joint', a single KMeans model is
             fitted to all features jointly.
-        random_state
-            Random state for KMeans initialization when `strategy` is 'joint'.
         """
         params = {
-            "std_per_bin": std_per_bin,
-            "max_bins": max_bins,
+            "n_bins": n_bins,
             "strategy": strategy,
-            "random_state": random_state,
         }
         validate_parameter_constraints(
             self._parameter_constraints, params, self.__class__.__name__
@@ -151,17 +144,16 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
         return self
 
     def __fit_independent(self, X: np.ndarray) -> list[KMeans]:
-        def fit(n_clusters: int, feature: np.ndarray) -> KMeans:
+        def fit(n_bins: int, feature: np.ndarray) -> KMeans:
             x0, x1 = feature.min(), feature.max()
-            n_clusters = min(n_clusters, len(feature))
-            init_centers = np.linspace(x0, x1, n_clusters).reshape(-1, 1)
-            km = KMeans(n_clusters=n_clusters, init=init_centers, algorithm="lloyd")
+            init_centers = np.linspace(x0, x1, n_bins).reshape(-1, 1)
+            km = KMeans(n_clusters=n_bins, init=init_centers, algorithm="lloyd")
             km.fit(feature[:, None])
             return km
 
+        n_bins = self.__get_n_bins(X)
         kmeans = []
         for feature in X.T:
-            n_bins = self.__get_n_bins(feature)
             km = fit(n_bins, feature)
             n_clusters = len(np.unique(km.labels_))
             if max(km.labels_) >= n_clusters:
@@ -170,21 +162,27 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
         return kmeans
 
     def __fit_joint(self, X: np.ndarray) -> list[KMeans]:
+        def fit(n_bins: int, X: np.ndarray) -> KMeans:
+            n_bins = min(n_bins, len(X))
+            ranges = [(x.min(), x.max()) for x in X.T]
+            init_centers = make_grid(n_bins, self.n_features_in_, ranges)
+            if len(init_centers) > len(X):
+                n_bins = int(np.ceil(len(X) ** (1 / self.n_features_in_)))
+                init_centers = make_grid(n_bins, self.n_features_in_, ranges)
+            n_bins = len(init_centers)
+            km = KMeans(n_clusters=n_bins, init=init_centers, algorithm="lloyd")
+            km.fit(X)
+            return km
+
         n_bins = self.__get_n_bins(X)
-        opts = {
-            "init": "k-means++",
-            "algorithm": "lloyd",
-            "random_state": self.random_state,
-        }
-        km = KMeans(n_clusters=min(n_bins, len(X)), **opts).fit(X)
+        km = fit(n_bins, X)
         n_clusters = len(np.unique(km.labels_))
         if max(km.labels_) >= n_clusters:
-            km = KMeans(n_clusters=n_clusters, **opts).fit(X)
+            km = fit(n_clusters, X)
         return [km]
 
     def __get_n_bins(self, X: np.ndarray) -> int:
-        std = X.var(axis=0).sum() ** 0.5
-        n_bins = min(max(1, round(std / self.std_per_bin)), self.max_bins)
+        n_bins = self.n_bins
         return min(n_bins, len(X))
 
     def transform(self, X):
@@ -218,8 +216,3 @@ class KMeansDiscretizer(BaseEstimator, TransformerMixin):
         else:
             Y = [self.kmeans_[0].cluster_centers_[X.flatten()]]
         return np.column_stack(Y)
-
-    def __normalize_codes(self, codes: np.ndarray) -> np.ndarray:
-        """Normalize codes to start from 0 and be consecutive."""
-        code_map = {v: j for j, v in enumerate(dict.fromkeys(codes))}
-        return np.array([code_map[v] for v in codes])

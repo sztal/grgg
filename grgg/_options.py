@@ -51,8 +51,8 @@ class IntegrateOptions(Options):
 @dataclass(slots=True)
 class QuantizeOptions(Options):
     auto: bool = True
-    std_per_bin: float = 0.05
-    strategy: str = "independent"
+    n_bins: int = 256
+    strategy: str = "joint"
 
 
 @dataclass(slots=True)

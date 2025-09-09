@@ -14,7 +14,7 @@ class Function(ABC):
     @property
     def domain(self) -> tuple[float, float]:
         """Return the domain of the function as a tuple `(a, b)`."""
-        return (float("-inf"), float("inf"))
+        return (-np.inf, np.inf)
 
     def gradient(self, *args: Any, **kwargs: Any) -> np.ndarray:  # noqa
         """Return the gradient of the function."""
