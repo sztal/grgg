@@ -655,9 +655,7 @@ class GRGG:
             vids = self.iter_ids(ids, progress=progress)
             D = np.array([self.integrate.degree(vi, *args, **kwargs)[0] for vi in vids])
             if self.is_quantized:
-                D = self.quantizer.dequantize(D, ids)
-                if orig_ids is not None:
-                    D = D[self.quantizer.align_ids(orig_ids, ids)]
+                D = self.quantizer.dequantize(D, ids, orig_ids)
         return D
 
     @property

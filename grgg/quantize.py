@@ -216,6 +216,7 @@ class ArrayQuantizer:
         self,
         X: np.ndarray | None = None,
         i: int | Iterable | None = None,
+        orig_i: np.ndarray | None = None,
     ) -> np.ndarray:
         """Dequantize an array to the length and order of the most quantized array.
 
@@ -231,6 +232,10 @@ class ArrayQuantizer:
             Indices of rows in the quantized array to be dequantized.
             It is assumed that the quantized `X` is on order implied by `i`.
             If `None`, then the full dequantized array is returned.
+        orig_i
+            Indices of rows in the original array to be dequantized.
+            If provided, then the dequantized result is restricted to rows
+            in the original array specified by `orig_i`.
 
         Examples
         --------
@@ -284,9 +289,6 @@ class ArrayQuantizer:
         X_ndim = X.ndim
         if X.ndim == 1:
             X = X[:, None]
-        if X.ndim != 2:
-            errmsg = "only 2D arrays are supported"
-            raise ValueError(errmsg)
         if i is None:
             if len(X) != len(self.bins):
                 errmsg = "array length does not match the number of quantizer bins"
@@ -304,6 +306,8 @@ class ArrayQuantizer:
         dequantized = X[ids]  # type: ignore[index]
         if X_ndim == 1:
             dequantized = dequantized.ravel()
+        if orig_i is not None:
+            dequantized = dequantized[self.align_ids(orig_i, i)]
         return dequantized
 
     def clear(self) -> Self:
