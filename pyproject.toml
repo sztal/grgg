@@ -20,6 +20,10 @@ dependencies = [
     "python-igraph>=0.11.9",
     "pathcensus>=1.0",
     "scikit-learn>=1.7.1",
+    "jax>=0.7.1",
+    "jaxtyping>=0.3.2",
+    "flax>=0.11.2",
+    "quadax>=0.2.9",
     "tqdm>=4.65",
 ]
 dynamic = ["version"]
