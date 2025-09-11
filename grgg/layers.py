@@ -11,7 +11,7 @@ from grgg.parameters import Beta, Mu
 from . import options
 
 if TYPE_CHECKING:
-    from . import GRGG
+    from .model import GRGG
 
 
 __all__ = ("Similarity", "Complementarity")

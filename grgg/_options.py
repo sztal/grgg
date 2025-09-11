@@ -34,7 +34,7 @@ class LayerOptions(Options):
     beta: float = 1.5
     mu: float = 0.0
     log: bool = True
-    eps: float = 1e-6
+    eps: float = 1e-9
 
 
 @dataclass(slots=True)

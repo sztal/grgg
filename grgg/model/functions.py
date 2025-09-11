@@ -7,24 +7,18 @@ import jax
 import jax.numpy as np
 from flax import nnx
 
-from grgg import options
-from grgg.manifolds import CompactManifold
-
 from ._typing import Floats, Scalar, Vector
-from .abc import AbstractModelElement
+from .abc import AbstractComponent
 
 VectorLike = Scalar | Vector
 
 __all__ = (
     "CouplingFunction",
     "ProbabilityFunction",
-    "SimilarityFunction",
-    "ComplementarityFunction",
-    "LayerFunction",
 )
 
 
-class AbstractModelFunction(AbstractModelElement):
+class AbstractModelFunction(AbstractComponent):
     """Abstract base class for model functions."""
 
     def __init__(self) -> None:
@@ -178,7 +172,7 @@ class ProbabilityFunction(AbstractModelFunction):
     By default the modified coupling function is used,
     so the model interpolates smoothly between Erdős–Rényi and hard RGGs.
     When `beta` is zero, the probability is constant, but does not have
-    to be equal to zero---it depends on `mu`, so the entire ER family is recovered.
+    to be equal to zero - it depends on `mu`, so the entire ER family is recovered.
     With `mu` set to zero, the probability is exactly 0.5.
     >>> bool(np.allclose(probability(0, 0, 0), 0.5))
     True
@@ -241,153 +235,3 @@ class ProbabilityFunction(AbstractModelFunction):
             return np.where(np.isnan(p), 0.5, p)  # Handle 0/0 case
 
         return probability
-
-
-class AbstractEnergyFunction(AbstractModelFunction):
-    """Abstract base class for energy functions."""
-
-    def __init__(
-        self,
-        *args: Any,  # noqa
-        eps: float | None = None,
-        log: bool | None = None,
-    ) -> None:
-        self.eps = float(eps if eps is not None else options.layer.eps)
-        self.log = bool(log if log is not None else options.layer.log)
-        super().__init__()
-
-    def __call__(self, g: Floats) -> Floats:
-        """Compute edge energies from geodesic distances."""
-        energy = np.maximum(self.energy(g), self.eps)
-        if self.log:
-            energy = np.log(energy)
-        return energy
-
-    def __copy__(self) -> Self:
-        return type(self)(self.manifold.copy(), eps=self.eps, log=self.log)
-
-    @property
-    def deriv_argnums(self) -> None:
-        return None
-
-    def equals(self, other: object) -> bool:
-        return (
-            super().equals(other)
-            and self.manifold == other.manifold
-            and self.eps == other.eps
-            and self.log == other.log
-        )
-
-    def define_function(self) -> Callable[[Floats], Floats]:
-        @wraps(self.energy)
-        def energy(g: Floats) -> Floats:
-            E = np.maximum(self.energy(g), self.eps)
-            if self.log:
-                E = np.log(E)
-            return E
-
-        return energy
-
-    @abstractmethod
-    def energy(self, g: Floats) -> Floats:
-        """Compute edge energies from geodesic distances."""
-
-
-class SimilarityFunction(AbstractEnergyFunction):
-    """Similarity-based energy function."""
-
-    def energy(self, g: Floats) -> Floats:
-        return g
-
-
-class ComplementarityFunction(AbstractEnergyFunction):
-    """Complementarity-based energy function.
-
-    Attributes
-    ----------
-    diameter
-        Diameter of the underlying manifold.
-        Can be passed also as a full-fledged manifold instance.
-    """
-
-    def __init__(self, diameter: float, **kwargs: Any) -> None:
-        super().__init__(**kwargs)
-        if isinstance(diameter, CompactManifold):
-            diameter = diameter.diameter
-        self.diameter = diameter
-
-    def energy(self, g: Floats) -> Floats:
-        return self.diameter - g
-
-
-class LayerFunction(AbstractModelFunction):
-    """Layer probability function.
-
-    Attributes
-    ----------
-    probability
-        Probability function.
-    energy
-        Energy function.
-
-    Examples
-    --------
-    Layer with similarity energy.
-    >>> from jax.test_util import check_grads
-    >>> geodesics = np.linspace(0, 3, 5)
-    >>> betas = np.linspace(0, 3, 5)
-    >>> mus = np.linspace(-1, 3, 5)
-    >>> coupling = CouplingFunction(2)
-    >>> energy = SimilarityFunction(log=False)
-    >>> probability = ProbabilityFunction(coupling)
-    >>> layer = LayerFunction(energy, probability)
-    >>> check_grads(layer, (geodesics, betas, mus), order=1)
-
-    Layer with complementarity log-energy.
-    >>> energy = ComplementarityFunction(diameter=np.pi, log=True)
-    >>> layer = LayerFunction(energy, probability)
-    >>> check_grads(layer, (geodesics, betas, mus), order=1)
-    """
-
-    def __init__(
-        self,
-        energy: AbstractEnergyFunction,
-        probability: ProbabilityFunction,
-    ) -> None:
-        self.energy = energy
-        self.probability = probability
-        super().__init__()
-
-    def __copy__(self) -> Self:
-        return type(self)(self.probability.__copy__(), self.energy.__copy__())
-
-    @property
-    def deriv_argnums(self) -> tuple[int, ...]:
-        return (1, 2)
-
-    def equals(self, other: object) -> bool:
-        return (
-            super().equals(other)
-            and self.probability.equals(other.probability)
-            and self.energy.equals(other.energy)
-        )
-
-    def define_function(self) -> Callable[[Floats, Floats, Floats], Floats]:
-        """Define the layer function."""
-
-        def layer(g: Floats, beta: Floats, mu: Floats) -> Floats:
-            """Compute edge probabilities from geodesic distances.
-
-            Parameters
-            ----------
-            g
-                Geodesic distances.
-            beta
-                Inverse temperature parameter(s).
-            mu
-                Chemical potential parameter(s.).
-            """
-            energy = self.energy(g)
-            return self.probability(energy, beta, mu)
-
-        return layer

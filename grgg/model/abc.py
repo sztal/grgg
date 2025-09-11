@@ -1,12 +1,18 @@
 from abc import ABC, abstractmethod
+from collections.abc import Callable
+from functools import wraps
 from typing import Self
 
+import jax.numpy as np
 from flax import nnx
 
-__all__ = ("AbstractModelElement", "AbstractModelModule")
+from ._pairs import NodePairs
+from ._typing import Floats
+
+__all__ = ("AbstractComponent", "AbstractModelModule")
 
 
-class AbstractModelElement(ABC):
+class AbstractComponent(ABC):
     """Abstract base class for model elements."""
 
     @abstractmethod
@@ -25,5 +31,33 @@ class AbstractModelElement(ABC):
         return self.__copy__()
 
 
-class AbstractModelModule(AbstractModelElement, nnx.Module):
+class AbstractModule(AbstractComponent, nnx.Module):
+    """Abstract base class for modules."""
+
+
+class AbstractModelModule(AbstractModule):
     """Abstract base class for model modules."""
+
+    @property
+    @abstractmethod
+    def n_nodes(self) -> int:
+        """Number of nodes in the model."""
+
+    @property
+    def pairs(self) -> NodePairs:
+        """Node pairs indexer."""
+        return NodePairs(self)
+
+    @abstractmethod
+    def define_function(self) -> Callable[[Floats, Floats, Floats], Floats]:
+        """Define the module function."""
+
+    def _define_function(self) -> Callable[[Floats, Floats, Floats], Floats]:
+        function = self.define_function()
+
+        @wraps(function)
+        def wrapper(*args: Floats) -> Floats:
+            args = tuple(np.asarray(a) for a in args)
+            return function(*args)
+
+        return nnx.jit(wrapper)

@@ -1,19 +1,17 @@
 import weakref
 from abc import abstractmethod
-from functools import singledispatchmethod
-from typing import TYPE_CHECKING, Any, Self
+from collections.abc import Callable
+from functools import wraps
+from typing import TYPE_CHECKING, Self
 
-from grgg.utils import split_kwargs_by_signatures
+import jax.numpy as np
 
+from grgg import options
+
+from ._typing import Floats
 from .abc import AbstractModelModule
-from .functions import (
-    AbstractEnergyFunction,
-    ComplementarityFunction,
-    CouplingFunction,
-    LayerFunction,
-    ProbabilityFunction,
-    SimilarityFunction,
-)
+from .functions import CouplingFunction, ProbabilityFunction
+from .manifolds import CompactManifold
 from .parameters import AbstractModelParameter, Beta, Mu
 
 if TYPE_CHECKING:
@@ -29,35 +27,65 @@ class AbstractLayer(AbstractModelModule):
         Inverse temperature parameter(s).
     mu
         Chemical potential parameter(s).
+    log
+        Whether log-energy should be used.
+    eps
+        Small constant added to energies for numerical stability.
+
+    Examples
+    --------
+    >>> Similarity()
+    Similarity( # Beta: 1 ..., Mu: 1 ..., Total: 2 ...
+      beta=Beta( # 1 (...)
+          value=Array(1.5, ...)
+      ),
+      mu=Mu( # 1 (...)
+          value=Array(0., ...)
+      ),
+      log=...,
+      eps=...
+    )
     """
 
-    @singledispatchmethod
     def __init__(
         self,
         beta: Beta | None = None,
         mu: Mu | None = None,
-        **kwargs: Any,
+        *,
+        log: bool | None = None,
+        eps: float | None = None,
     ) -> None:
-        """Initialization method.
-
-        `**kwargs` are stored and passed to the energy and coupling
-        functions when the layer is linked to a model.
-        """
-        self._model: weakref.ReferenceType["GRGG"]  # noqa
-        self._function_kwargs = kwargs
-        self.energy: AbstractEnergyFunction
-        self.probability: ProbabilityFunction
+        """Initialization method."""
         super().__init__()
+        self._model: weakref.ReferenceType["GRGG"]  # noqa
         self.beta = Beta(beta)
         self.mu = Mu(mu)
-
-    @__init__.register
-    def _(self, model: "GRGG", *args: Any, **kwargs: Any) -> None:
-        self.__init__(*args, **kwargs)
-        self.model = model
+        self.log = options.layer.log if log is None else log
+        self.eps = options.layer.eps if eps is None else eps
 
     def __copy__(self) -> Self:
-        return type(self)(self.model, self.beta.copy(), self.mu.copy())
+        return self.__class__(
+            self.model, self.beta.copy(), self.mu.copy(), log=self.log, eps=self.eps
+        )
+
+    def __call__(self, g: Floats, beta: Floats, mu: Floats) -> Floats:
+        """Compute layer edge probabilities.
+
+        Parameters
+        ----------
+        g
+            Geodesic distances.
+        beta
+            Inverse temperature parameter(s).
+        mu
+            Chemical potential parameter(s).
+        """
+        return self._function(g, beta, mu)
+
+    @property
+    def parameters(self) -> dict[str, AbstractModelParameter]:
+        """Layer parameters."""
+        return {"beta": self.beta, "mu": self.mu}
 
     @property
     def model(self) -> "GRGG":
@@ -71,29 +99,74 @@ class AbstractLayer(AbstractModelModule):
 
     @model.setter
     def model(self, model: "GRGG") -> None:
-        if not isinstance(model, GRGG):
-            errmsg = "model must be a GRGG instance"
-            raise TypeError(errmsg)
         self._model = weakref.ref(model)
         self._validate_param(self.beta)
         self._validate_param(self.mu)
-        kwargs = self.__dict__.pop("_function_kwargs", {})
-        ekw, ckw, *_ = split_kwargs_by_signatures(
-            kwargs, AbstractEnergyFunction, CouplingFunction
-        )
-        energy = self.define_energy(self.model.manifold, **ekw)
-        coupling = CouplingFunction(self.model.manifold.dim, **ckw)
-        probability = ProbabilityFunction(coupling)
-        self.probability = LayerFunction(energy, probability)
+        self._function = self._define_function()
+        self.__call__ = wraps(self._function)(self.__call__.__func__).__get__(self)
+
+    @property
+    def n_nodes(self) -> int:
+        """Number of nodes in the model."""
+        return self.model.n_nodes
+
+    @property
+    def manifold(self) -> CompactManifold:
+        """The manifold the model is embedded in."""
+        return self.model.manifold
+
+    @property
+    def probability(self) -> ProbabilityFunction:
+        """The probability function."""
+        return self.model.probability
 
     @property
     def coupling(self) -> CouplingFunction:
         """The coupling function."""
-        return self.probability.probability.coupling
+        return self.probability.coupling
+
+    def equals(self, other: object) -> bool:
+        """Check if two layers are equal."""
+        return (
+            super().equals(other)
+            and self.mu.equals(other.mu)
+            and self.beta.equals(other.beta)
+            and self.probability.equals(other.probability)
+            and self.log == other.log
+            and self.eps == other.eps
+        )
 
     @abstractmethod
-    def define_energy(self) -> AbstractEnergyFunction:
-        """Define the energy function for the layer when linked to a model."""
+    def energy(self, g: Floats) -> Floats:
+        """Energy function.
+
+        Parameters
+        ----------
+        g
+            Geodesic distances.
+        """
+
+    def define_function(self) -> Callable[[Floats, Floats, Floats], Floats]:
+        """Define the layer function."""
+
+        def layer_function(g: Floats, beta: Floats, mu: Floats) -> Floats:
+            """Compute layer edge probabilities.
+
+            Parameters
+            ----------
+            g
+                Geodesic distances.
+            beta
+                Inverse temperature parameter(s).
+            mu
+                Chemical potential parameter(s).
+            """
+            energy = np.maximum(self.energy(g), self.eps)
+            if self.log:
+                energy = np.log(energy)
+            return self.probability(energy, beta, mu)
+
+        return layer_function
 
     def _validate_param(self, param: AbstractModelParameter) -> None:
         if param.is_heterogeneous and param.size != self.model.n_nodes:
@@ -116,8 +189,19 @@ class Similarity(AbstractLayer):
         Chemical potential parameter(s).
     """
 
-    def define_energy(self) -> AbstractEnergyFunction:
-        return SimilarityFunction(self.model.manifold)
+    def energy(self, g: Floats) -> Floats:
+        r"""Similarity-based energy.
+
+        .. math::
+
+            \varepsilon_{ij} = g_{ij}
+
+        Parameters
+        ----------
+        g
+            Geodesic distances.
+        """
+        return g
 
 
 class Complementarity(AbstractLayer):
@@ -131,5 +215,16 @@ class Complementarity(AbstractLayer):
         Chemical potential parameter(s).
     """
 
-    def define_energy(self) -> AbstractEnergyFunction:
-        return ComplementarityFunction(self.model.manifold)
+    def energy(self, g: Floats) -> Floats:
+        r"""Complementarity-based energy.
+
+        .. math::
+
+            \varepsilon_{ij} = g_{\max} - g_{ij}
+
+        Parameters
+        ----------
+        g
+            Geodesic distances.
+        """
+        return self.manifold.diameter - g

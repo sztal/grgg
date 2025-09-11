@@ -4,14 +4,44 @@ from typing import Any, Self
 import jax.numpy as np
 from flax import nnx
 
+from ._lazy import LazyOuter
 from ._typing import Floats, Scalar, Vector
-from .abc import AbstractModelElement
+from .abc import AbstractComponent
 
 ParamT = Scalar | Vector
 
 
-class AbstractModelVariable(AbstractModelElement, nnx.Variable[Floats]):
+class AbstractParameterConstraint(AbstractComponent):
+    """Abstract base class for parameter constraints."""
+
+    @abstractmethod
+    def validate(self, param: "AbstractModelParameter") -> None:
+        """Validate the parameter value."""
+
+    def __copy__(self) -> Self:
+        return type(self)()
+
+    def equals(self, other: object) -> bool:
+        return super().equals(other)
+
+
+class NonNegative(AbstractParameterConstraint):
+    """Constraint that ensures a parameter is non-negative."""
+
+    def validate(
+        self, param: "AbstractModelParameter", name: str | None = None
+    ) -> None:
+        if np.any(param.value < 0):
+            if not name:
+                name = type(param).__name__
+            errmsg = f"parameter '{name}' must be non-negative"
+            raise ValueError(errmsg)
+
+
+class AbstractModelVariable(AbstractComponent, nnx.Variable[Floats]):
     """Abstract base class for model variables."""
+
+    constraints: tuple[AbstractParameterConstraint, ...] = ()
 
     def __init__(self, value: Floats, **kwargs: Any) -> None:
         value = self.validate_value(value)
@@ -38,6 +68,8 @@ class AbstractModelVariable(AbstractModelElement, nnx.Variable[Floats]):
             raise TypeError(errmsg)
         if value.size == 1:
             value = value.flatten()[0]  # Convert single-element array to scalar
+        for constraint in cls.constraints:
+            constraint.validate(value, cls.__name__)
         return value
 
 
@@ -54,6 +86,11 @@ class AbstractModelParameter(AbstractModelVariable, nnx.Param[ParamT]):
     def is_heterogeneous(self) -> bool:
         """Whether the parameter is heterogeneous (varies across nodes)."""
         return self.value.size > 1
+
+    @property
+    def outer(self) -> LazyOuter:
+        """Lazy outer sum of the parameter with itself."""
+        return LazyOuter(self.value, self.value, op=np.add)
 
     @classmethod
     def validate_value(cls, value: ParamT) -> ParamT:
