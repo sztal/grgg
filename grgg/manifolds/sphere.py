@@ -1,37 +1,61 @@
 import math
 from typing import Self
 
-import numpy as np
-from scipy.spatial.distance import cdist, pdist
+import jax.numpy as np
+from flax import nnx
+
+from grgg._typing import Matrix, Scalar, Vector
 
 from .manifold import CompactManifold
 
-__all__ = ("Sphere",)
-
 
 class Sphere(CompactManifold):
-    """Class representing a sphere manifold.
+    """Sphere manifold.
 
     Attributes
     ----------
     dim
         Surface dimension of the sphere.
     r
-        Radius of the sphere, by default 1.0.
+        Radius of the sphere.
+
+    Examples
+    --------
+    >>> sphere = Sphere(2, r=3.0)
+    >>> sphere
+    Sphere(
+      dim=2,
+      r=3.0
+    )
+    >>> sphere.volume
+    113.09733552923255
+    >>> sphere.diameter
+    9.42477796076938
+    >>> points = sphere.sample_points(10, rngs=42)
+    >>> points.shape
+    (10, 3)
+    >>> bool(np.allclose(np.linalg.norm(points, axis=1), sphere.r))
+    True
+
+    Compare distances with the reference implementation from :mod:`scipy`.
+    >>> from scipy.spatial.distance import pdist
+    >>> r = sphere.r
+    >>> dists = sphere.distances(points)
+    >>> ref_dists = np.arccos(1 - pdist(points / r, metric="cosine")) * r
+    >>> bool(np.allclose(dists, ref_dists))
+    True
     """
 
     def __init__(self, dim: int, r: float = 1.0) -> None:
         super().__init__(dim)
         self.r = float(r)
 
-    @property
-    def params(self) -> dict[str, float]:
-        """Return the parameters of the sphere."""
-        return {**super().params, "r": self.r}
+    def __copy__(self) -> Self:
+        return type(self)(self.dim, self.r)
 
     @property
     def radius(self) -> float:
-        """Return the radius of the sphere, alias for :attr:`r`."""
+        """Radius of the sphere, alias for :attr:`r`."""
         return self.r
 
     @property
@@ -45,71 +69,8 @@ class Sphere(CompactManifold):
         """Maximum distance between two points on the sphere."""
         return math.pi * self.r
 
-    def _pdist(self, X: np.ndarray) -> np.ndarray:
-        """Compute pairwise distances between points on the sphere.
-
-        Examples
-        --------
-        >>> sphere = Sphere(2, 3)
-        >>> X = sphere.sample_points(5, random_state=42)
-        >>> d = sphere.pdist(X, full=False)
-        >>> all(d >= 0) and all(d <= sphere.diameter)
-        True
-        >>> d.shape
-        (10,)
-        >>> d = sphere.pdist(X, full=True)
-        >>> d.shape
-        (5, 5)
-        """
-        return np.arccos(1 - pdist(X / self.r, metric="cosine")) * self.r
-
-    def _cdist(self, X: np.ndarray, Y: np.ndarray) -> np.ndarray:
-        """Compute pairwise distances between two sets of points on the sphere.
-
-        Examples
-        --------
-        >>> sphere = Sphere(2, 3)
-        >>> X = sphere.sample_points(5, random_state=42)
-        >>> Y = sphere.sample_points(3, random_state=43)
-        >>> d = sphere.cdist(X, Y)
-        >>> d.shape
-        (5, 3)
-        >>> bool(np.all(d >= 0) and np.all(d <= sphere.diameter))
-        True
-        """
-        return np.arccos(1 - cdist(X / self.r, Y / self.r, metric="cosine")) * self.r
-
-    def _sample_points(self, n: int, rng: np.random.Generator) -> np.ndarray:
-        """Sample points uniformly on the surface sphere.
-
-        Examples
-        --------
-        >>> sphere = Sphere(2, 3)
-        >>> points = sphere.sample_points(5, random_state=42)
-        >>> points.shape
-        (5, 3)
-        >>> bool(np.allclose(np.linalg.norm(points, axis=1), sphere.radius))
-        True
-        """
-        points = rng.normal(size=(n, self.embedding_dim))
-        points /= np.linalg.norm(points, axis=1, keepdims=True)
-        if self.r != 1.0:
-            points *= self.r
-        return points
-
-    def with_radius(self, r: float) -> Self:
-        """Return a copy of the sphere with the given radius.
-
-        Examples
-        --------
-        >>> sphere = Sphere(2).with_radius(3)
-        >>> sphere.r
-        3.0
-        """
-        return self.__class__(self.dim, r)
-
     def with_volume(self, volume: float) -> Self:
-        """Return a copy of the sphere with the given volume.
+        """Return a copy of the sphere with the specified volume.
 
         Examples
         --------
@@ -119,4 +80,25 @@ class Sphere(CompactManifold):
         """
         d = self.embedding_dim
         r = (volume * math.gamma(d / 2) / (2 * math.pi ** (d / 2))) ** (1 / (d - 1))
-        return self.__class__(self.dim, r)
+        return type(self)(self.dim, r)
+
+    def equals(self, other: object) -> bool:
+        return super().equals(other) and self.r == other.r
+
+    def metric(self, x: Vector, y: Vector) -> Scalar:
+        """Geodesic distance between points on the sphere."""
+        if len(x) != self.embedding_dim or len(y) != self.embedding_dim:
+            errmsg = "points have incompatible number of coordinates"
+            raise ValueError(errmsg)
+        x /= self.r
+        y /= self.r
+        cosine = np.clip(np.dot(x, y), -1.0, 1.0)
+        return np.arccos(cosine) * self.r
+
+    def _sample_points(self, n: int, rngs: nnx.Rngs) -> Matrix:
+        """Implementation of point sampling."""
+        points = rngs.normal((n, self.embedding_dim))
+        points /= np.linalg.norm(points, axis=1, keepdims=True)
+        if self.r != 1.0:
+            points *= self.r
+        return points

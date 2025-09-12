@@ -4,17 +4,19 @@ from typing import Any, Self
 
 import jax.numpy as np
 
-from ._typing import Floats
+from grgg._typing import Floats
+from grgg.manifolds import CompactManifold, Sphere
+
 from .abc import AbstractModelModule
 from .functions import (
     CouplingFunction,
     ProbabilityFunction,
 )
 from .layers import AbstractLayer
-from .manifolds import CompactManifold, Sphere
+from .parameters import AbstractModelParameter
 
 
-class GRGG(AbstractModelModule, Sequence[AbstractLayer]):
+class GRGG(AbstractModelModule, Sequence[Self]):
     """Generalized Random Geometric Graph model.
 
     Attributes
@@ -94,10 +96,40 @@ class GRGG(AbstractModelModule, Sequence[AbstractLayer]):
     def __call__(self, g: Floats, beta: Floats, mu: Floats) -> Floats:
         return self._function(g, beta, mu)
 
+    def __add__(self, layer: AbstractLayer) -> Self:
+        """Add a layer to the GRGG model using the `+` operator.
+
+        Examples
+        --------
+        >>> from grgg import GRGG, Complementarity
+        >>> GRGG(100, 1) + Complementarity()
+        GRGG( # Beta: 1 ..., Mu: 1 ..., Total: 2 ...
+          manifold=Sphere(
+              dim=1,
+              r=...
+          ),
+          layers=(Complementarity( # Beta: 1 ..., Mu: 1 ..., Total: 2 ...
+              beta=Beta( # 1 ...
+              value=Array(1.5, ...)
+              ),
+              mu=Mu( # 1 ...
+              value=Array(0., ...)
+              ),
+              log=...,
+              eps=...
+          ),)
+        )
+        """
+        return self.add_layer(layer)
+
     @property
     def n_nodes(self) -> int:
         """Number of nodes in the model."""
         return self._n_nodes
+
+    def n_units(self) -> int:
+        """Number of units in the model."""
+        return self.n_nodes
 
     @property
     def delta(self) -> float:
@@ -124,6 +156,11 @@ class GRGG(AbstractModelModule, Sequence[AbstractLayer]):
     def coupling(self) -> CouplingFunction:
         """The coupling function."""
         return self.probability.coupling
+
+    @property
+    def parameters(self) -> list[dict[str, AbstractModelParameter]]:
+        """Model parameters."""
+        return [layer.parameters for layer in self.layers]
 
     def equals(self, other: object) -> bool:
         """Check if two models are equal."""
@@ -180,8 +217,8 @@ class GRGG(AbstractModelModule, Sequence[AbstractLayer]):
                 Mu parameters.
             """
             P = 1.0
-            for layer in self.layers:
-                P *= 1 - layer._function(g, beta, mu)
+            for i, layer in enumerate(self.layers):
+                P *= 1 - layer._function(g, beta[i], mu[i])
             return 1 - P
 
         return model_function

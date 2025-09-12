@@ -8,8 +8,8 @@ import numpy as np
 from scipy.integrate import quad
 
 from . import options
+from ._utils import batch_arrays
 from .manifolds import Manifold, Sphere
-from .utils import batch_arrays
 
 if TYPE_CHECKING:
     from .model import GRGG

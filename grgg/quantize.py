@@ -4,7 +4,7 @@ from typing import Any, Self
 import numpy as np
 
 from . import options
-from .utils.discretizers import KMeansDiscretizer
+from ._utils.discretizers import KMeansDiscretizer
 
 __all__ = ("ArrayQuantizer",)
 

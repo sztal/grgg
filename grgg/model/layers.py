@@ -7,15 +7,15 @@ from typing import TYPE_CHECKING, Self
 import jax.numpy as np
 
 from grgg import options
+from grgg._typing import Floats
+from grgg.manifolds import CompactManifold
 
-from ._typing import Floats
 from .abc import AbstractModelModule
 from .functions import CouplingFunction, ProbabilityFunction
-from .manifolds import CompactManifold
 from .parameters import AbstractModelParameter, Beta, Mu
 
 if TYPE_CHECKING:
-    from .model import GRGG
+    from .grgg import GRGG
 
 
 class AbstractLayer(AbstractModelModule):

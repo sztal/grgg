@@ -1,5 +1,5 @@
 import secrets
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from functools import singledispatch, wraps
 
 import jax
@@ -7,7 +7,7 @@ import jax.numpy as np
 from flax import nnx
 from jax._src.prng import PRNGKeyArray
 
-from ._typing import Matrix, Scalar, Vector
+from grgg._typing import Matrix, Scalar, Vector
 
 
 def random_keys(
@@ -55,6 +55,7 @@ def _(rngs: nnx.Rngs, **seeds: int | None | nnx.RngStream) -> nnx.Rngs:
     return nnx.Rngs(**streams)
 
 
+@jax.jit
 def squareform(d: Vector) -> Matrix:
     """Convert a condensed distance matrix to a square form.
 
@@ -138,12 +139,12 @@ def pairwise(
             raise ValueError(errmsg)
         if Y is None:
 
-            @nnx.jit
+            @jax.jit
             def compute(idx: tuple[int, int]) -> Scalar:
                 return jitted(X[idx[0]], X[idx[1]])
         else:
 
-            @nnx.jit
+            @jax.jit
             def compute(idx: tuple[int, int]) -> Scalar:
                 return jitted(X[idx[0]], Y[idx[1]])
 
@@ -159,5 +160,77 @@ def pairwise(
             output = output.reshape(len(X), len(Y))
         return output
 
-    pairwise_func = nnx.jit(wrapped, static_argnames=("condensed",))
+    pairwise_func = jax.jit(wrapped, static_argnames=("condensed",))
     return wraps(func)(pairwise_func)
+
+
+def cartesian_product(
+    arrays: Sequence[np.ndarray], axis: int | None = None
+) -> np.ndarray:
+    """Compute the cartesian product of input arrays along a given axis.
+
+    Parameters
+    ----------
+    arrays
+        Sequence of arrays to compute the cartesian product of.
+        The arrays must have the same shape except along the specified axis.
+    axis
+        The axis along which the cartesian product is computed.
+        This is carried out using :func:`np.stack` and it is expected
+        that the concatenation axis exists in all input arrays.
+        If `None`, then :func:`np.column_stack` is used instead,
+        which requires all input arrays to be of the same shape
+        and concatenates them along a new last axis.
+
+    Returns
+    -------
+    product
+        The cartesian product of the input arrays.
+        For two input arrays the output has `ndim+1` dimensions.
+        In no case the output will have less than 2 dimensions.
+
+    Examples
+    --------
+    >>> a = np.array([1, 2])
+    >>> b = np.array([3, 4])
+    >>> cartesian_product([a, b])
+    Array([[1, 3],
+           [1, 4],
+           [2, 3],
+           [2, 4]], ...)
+
+    >>> c = np.array([5, 6])
+    >>> cartesian_product([a, b, c])
+    Array([[1, 3, 5],
+           [1, 3, 6],
+           [1, 4, 5],
+           [1, 4, 6],
+           [2, 3, 5],
+           [2, 3, 6],
+           [2, 4, 5],
+           [2, 4, 6]], ...)
+
+    Product along arbitrary axis are also possible.
+    >>> a = np.arange(27).reshape(3, 3, 3)
+    >>> b = np.arange(18).reshape(3, 2, 3)
+    >>> cartesian_product([a, b], axis=1).shape
+    (3, 2, 6, 3)
+    """
+    arrays = [np.asarray(a) for a in arrays]
+    if not arrays:
+        return np.array([]).reshape(0, 0)
+    if len(arrays) == 1:
+        return np.expand_dims(arrays[0], axis=axis or -1)
+    if len(arrays) == 2:
+        a, b = arrays
+        ai = np.arange(a.shape[axis or 0])
+        bi = np.arange(b.shape[axis or 0])
+        grid = np.stack(np.meshgrid(ai, bi, indexing="ij"), axis=-1).reshape(-1, 2)
+        a = np.take(a, grid[:, 0], axis=axis or 0)
+        b = np.take(b, grid[:, 1], axis=axis or 0)
+        return np.column_stack([a, b]) if axis is None else np.stack([a, b], axis=axis)
+    product = cartesian_product(arrays[:2], axis=axis)
+    return cartesian_product([product, *arrays[2:]], axis=axis)
+
+
+cartesian_product = jax.jit(cartesian_product, static_argnames=("axis",))

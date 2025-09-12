@@ -1,11 +1,14 @@
-from abc import ABC, abstractmethod
-from typing import Any, Self
+from abc import abstractmethod
+from typing import Self
 
-import numpy as np
-from scipy.spatial.distance import squareform
+from flax import nnx
+
+from grgg._typing import Matrix, Scalar, Vector
+from grgg.abc import AbstractModule
+from grgg.utils import pairwise, random_state
 
 
-class Manifold(ABC):
+class Manifold(AbstractModule):
     """Abstract base class for manifolds.
 
     Attributes
@@ -19,33 +22,7 @@ class Manifold(ABC):
             errmsg = "'dim' must be a non-negative integer"
             raise ValueError(errmsg)
         self.dim = int(dim)
-
-    def __repr__(self) -> str:
-        cn = self.__class__.__name__
-        params = self.params
-        dim = params.pop("dim")
-        params = [
-            f"{k}={v:.2f}" if isinstance(v, float) else f"{k}={v}"
-            for k, v in params.items()
-        ]
-        params = [str(dim), *params]
-        return f"{cn}({", ".join(params)})"
-
-    def __copy__(self) -> Self:
-        return self.__class__(**self.params)
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, Manifold):
-            return NotImplemented
-        return self.dim == other.dim and self.params == other.params
-
-    def __hash__(self) -> int:
-        return hash((self.dim, frozenset(self.params.items())))
-
-    @property
-    @abstractmethod
-    def params(self) -> dict[str, float]:
-        return {"dim": self.dim}
+        self._distances = pairwise(self.metric)
 
     @property
     def embedding_dim(self) -> int:
@@ -56,66 +33,72 @@ class Manifold(ABC):
     def volume(self) -> float:
         """Volume of the manfiold surface."""
 
-    def pdist(self, X: np.ndarray, *, full: bool = False) -> np.ndarray:
-        """Compute pairwise geodesic distances between points on the manifold."""
-        dist = self._pdist(X)
-        if full:
-            dist = squareform(dist)
-        return dist
+    @abstractmethod
+    def with_volume(cls, volume: float) -> Self:
+        """Create a manifold instance with the specified volume."""
 
     @abstractmethod
-    def _pdist(self, X: np.ndarray) -> np.ndarray:
-        """Internal method to compute pairwise distances."""
-
-    def cdist(self, X: np.ndarray, Y: np.ndarray) -> np.ndarray:
-        """Compute pairwise distances between two sets of points on the manifold."""
-        return self._cdist(X, Y)
+    def equals(self, other: object) -> bool:
+        return super().equals(other) and self.dim == other.dim
 
     @abstractmethod
-    def _cdist(self, X: np.ndarray, Y: np.ndarray) -> np.ndarray:
-        """Internal method to compute pairwise distances between two sets of points."""
+    def metric(self, x: Vector, y: Vector) -> Scalar:
+        """Geodesic distance between two points on the manifold."""
 
-    def sample_points(
-        self, n: int, *, random_state: np.random.Generator | int | None = None
-    ) -> np.ndarray:
+    def distances(
+        self,
+        X: Matrix,
+        Y: Matrix | None = None,
+        *,
+        condensed: bool = True,
+    ) -> Vector | Matrix:
+        """Compute pairwise distances between points on the manifold.
+
+        Parameters
+        ----------
+        X
+            First set of points, shape (n, dim+1).
+        Y
+            Second set of points, shape (m, dim+1). If `None`, compute
+            pairwise distances within `X`.
+        condensed
+            If `True` and `Y` is `None`, return a condensed distance matrix,
+            shape (n * (n - 1) / 2,). Otherwise, return a full distance matrix,
+            shape (n, n) if `Y` is `None`, or (n, m) if `Y` is provided.
+        """
+        return self._distances(X, Y, condensed=condensed)
+
+    def sample_points(self, n: int, *, rngs: nnx.Rngs | int | None = None) -> Matrix:
         """Sample points uniformly from the manifold.
 
         Parameters
         ----------
         n
             Number of points to sample.
-        random_state
-            Random state for reproducibility, can be an integer seed
-            or a numpy random generator.
+        rngs
+            Random state for reproducibility, can be an integer seed,
+            a `nnx.Rngs` object, or `None` for random initialization.
+
+        Returns
+        -------
+        Matrix
+            Sampled points on the manifold, shape (n, dim+1).
         """
         if n <= 0:
             errmsg = "'n' must be positive"
             raise ValueError(errmsg)
-        random_state = np.random.default_rng(random_state)
-        return self._sample_points(n, random_state)
+        rngs = random_state(rngs)
+        return self._sample_points(n, rngs)
 
     @abstractmethod
-    def _sample_points(self, n: int, rng: np.random.Generator) -> np.ndarray:
-        """Internal method to sample points uniformly from the manifold."""
-
-    def copy(self) -> Self:
-        """Create a copy of the manifold."""
-        return self.__copy__()
-
-    @abstractmethod
-    def with_volume(cls, volume: float, *args: Any, **kwargs: Any) -> Self:
-        """Create a manifold instance from a target volume."""
+    def _sample_points(self, n: int, rngs: nnx.Rngs) -> Matrix:
+        """Implementation of point sampling."""
 
 
 class CompactManifold(Manifold):
-    """Abstract base class for compact manifolds.
-
-    A compact manifold is a manifold that is both closed and bounded.
-    This class inherits from `Manifold` and can be used to define
-    specific compact manifolds.
-    """
+    """Abstract base class for compact manifolds."""
 
     @property
     @abstractmethod
     def diameter(self) -> float:
-        """Maximum geodesic distance between any two points on the manifold."""
+        """Diameter of the manifold."""

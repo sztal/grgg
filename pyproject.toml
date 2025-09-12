@@ -24,6 +24,7 @@ dependencies = [
     "jaxtyping>=0.3.2",
     "flax>=0.11.2",
     "quadax>=0.2.9",
+    "lazyarray>=0.6.0",
     "tqdm>=4.65",
 ]
 dynamic = ["version"]

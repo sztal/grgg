@@ -4,9 +4,9 @@ from typing import Any, Self
 import jax.numpy as np
 from flax import nnx
 
-from ._lazy import LazyOuter
-from ._typing import Floats, Scalar, Vector
-from .abc import AbstractComponent
+from grgg._typing import Floats, Scalar, Vector
+from grgg.abc import AbstractComponent
+from grgg.lazy import LazyOuter
 
 ParamT = Scalar | Vector
 
@@ -90,7 +90,8 @@ class AbstractModelParameter(AbstractModelVariable, nnx.Param[ParamT]):
     @property
     def outer(self) -> LazyOuter:
         """Lazy outer sum of the parameter with itself."""
-        return LazyOuter(self.value, self.value, op=np.add)
+        value = self.value if self.is_heterogeneous else self.value / 2
+        return LazyOuter(value, value, op=np.add)
 
     @classmethod
     def validate_value(cls, value: ParamT) -> ParamT:

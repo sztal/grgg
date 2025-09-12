@@ -7,8 +7,8 @@ import jax
 import jax.numpy as np
 from flax import nnx
 
-from ._typing import Floats, Scalar, Vector
-from .abc import AbstractComponent
+from grgg._typing import Floats, Scalar, Vector
+from grgg.abc import AbstractComponent
 
 VectorLike = Scalar | Vector
 
