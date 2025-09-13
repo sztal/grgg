@@ -38,8 +38,8 @@ class LayerOptions(Options):
 
 
 @dataclass(slots=True)
-class SampleOptions(Options):
-    batch_size: int = 100
+class BatchOptions(Options):
+    size: int = 1000
     auto_progress: int = 5000
 
 
@@ -70,7 +70,7 @@ class OptimizeOptions(Options):
 @dataclass(slots=True)
 class TopOptions(Options):
     layer: LayerOptions = field(default_factory=LayerOptions)
-    sample: SampleOptions = field(default_factory=SampleOptions)
+    batch: BatchOptions = field(default_factory=BatchOptions)
     integrate: IntegrateOptions = field(default_factory=IntegrateOptions)
     quantize: QuantizeOptions = field(default_factory=QuantizeOptions)
     optimize: OptimizeOptions = field(default_factory=OptimizeOptions)

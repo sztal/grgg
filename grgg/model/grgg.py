@@ -1,13 +1,13 @@
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from functools import singledispatchmethod, wraps
-from typing import Any, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import jax.numpy as np
 
 from grgg._typing import Floats
 from grgg.manifolds import CompactManifold, Sphere
 
-from .abc import AbstractModelModule
+from .abc import AbstractModel
 from .functions import (
     CouplingFunction,
     ProbabilityFunction,
@@ -15,8 +15,11 @@ from .functions import (
 from .layers import AbstractLayer
 from .parameters import AbstractModelParameter
 
+if TYPE_CHECKING:
+    from ._sampling import Sample
 
-class GRGG(AbstractModelModule, Sequence[Self]):
+
+class GRGG(AbstractModel, Sequence[Self]):
     """Generalized Random Geometric Graph model.
 
     Attributes
@@ -40,6 +43,7 @@ class GRGG(AbstractModelModule, Sequence[Self]):
         n_nodes: int,
         manifold: CompactManifold | int | tuple[int, type[CompactManifold]],
         *layers: AbstractLayer,
+        probability_function: ProbabilityFunction | None = None,
         # quantizer: ArrayQuantizer | None = None,
         **kwargs: Any,
     ) -> None:
@@ -61,9 +65,12 @@ class GRGG(AbstractModelModule, Sequence[Self]):
         else:
             self.manifold = self._make_manifold(manifold)
         # Initialize functions
-        self._probability = ProbabilityFunction(
-            CouplingFunction(self.manifold.dim, **kwargs)
-        )
+        if probability_function is None:
+            self._probability = ProbabilityFunction(
+                CouplingFunction(self.manifold.dim, **kwargs)
+            )
+        else:
+            self._probability = probability_function
         self._function = self._define_function()
         self.__call__ = wraps(self._function)(self.__call__.__func__).__get__(self)
         # Initialize layers
@@ -73,13 +80,18 @@ class GRGG(AbstractModelModule, Sequence[Self]):
         # Initialize integration and optimization namespaces
         # self.integrate = Integration(self)
 
-    def __copy__(self) -> Self:
-        return GRGG(
-            self._n_nodes,
-            self.manifold.copy(),
-            *[layer.copy() for layer in self.layers],
-            # quantizer=copy(self.quantizer)
-        )
+    def __copy__(self, **kwargs: Any) -> Self:
+        if kwargs:
+            self = self.copy().dequantize()
+        if (key := "n_nodes") not in kwargs:
+            kwargs[key] = self._n_nodes
+        if (key := "manifold") not in kwargs:
+            kwargs[key] = self.manifold.copy()
+        if (key := "layers") not in kwargs:
+            kwargs[key] = [layer.copy() for layer in self.layers]
+        if (key := "probability_function") not in kwargs:
+            kwargs[key] = self._probability
+        return GRGG(**kwargs)
 
     def __getitem__(
         self, index: int | slice | Iterable
@@ -132,6 +144,11 @@ class GRGG(AbstractModelModule, Sequence[Self]):
         return self.n_nodes
 
     @property
+    def n_layers(self) -> int:
+        """Number of layers in the model."""
+        return len(self.layers)
+
+    @property
     def delta(self) -> float:
         """Sampling density."""
         return self.n_nodes / self.manifold.volume
@@ -141,6 +158,11 @@ class GRGG(AbstractModelModule, Sequence[Self]):
         """Iterator over single-layer submodels."""
         for i in range(len(self.layers)):
             yield self[i]
+
+    @property
+    def is_quantized(self) -> bool:
+        """Check if any of the model layers is quantized."""
+        return False
 
     @property
     def is_heterogeneous(self) -> bool:
@@ -201,6 +223,17 @@ class GRGG(AbstractModelModule, Sequence[Self]):
         self.layers = (*self.layers, layer)
         return self
 
+    def remove_layer(self, index: int) -> Self:
+        """Remove a layer from the GRGG model.
+
+        Parameters
+        ----------
+        index
+            Index of the layer to remove.
+        """
+        self.layers = tuple(layer for i, layer in enumerate(self.layers) if i != index)
+        return self
+
     def define_function(self) -> Callable[[Floats, Floats, Floats], Floats]:
         """Define the model function."""
 
@@ -222,6 +255,19 @@ class GRGG(AbstractModelModule, Sequence[Self]):
             return 1 - P
 
         return model_function
+
+    def sample(self, **kwargs: Any) -> "Sample":
+        """Generate a model sample.
+
+        See :meth:`~grgg.model._sampling.Sampler.sample` for details on `**kwargs`.
+        """
+        return self.nodes.sample(**kwargs)
+
+    # Quantization methods ------------------------------------------------------------
+
+    def dequantize(self) -> Self:
+        """Dequantize model parameters."""
+        return self
 
     # Internals ----------------------------------------------------------------------
 

@@ -1,6 +1,8 @@
 import secrets
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from functools import singledispatch, wraps
+from itertools import product
+from typing import Any
 
 import jax
 import jax.numpy as np
@@ -27,7 +29,7 @@ def random_keys(
     """
     seeds = {"default": default, **seeds}
     keys = {
-        k: jax.random.key(v if v is not None else secrets.randbelow(0, 2**31))
+        k: jax.random.key(v if v is not None else secrets.randbelow(2**31))
         for k, v in seeds.items()
     }
     return keys
@@ -234,3 +236,87 @@ def cartesian_product(
 
 
 cartesian_product = jax.jit(cartesian_product, static_argnames=("axis",))
+
+
+def batch_slices(
+    n: int,
+    batch_size: int,
+    *,
+    repeat: int | None = None,
+) -> Iterator[slice] | Iterator[tuple[slice, ...]]:
+    """Iterate over batch slices.
+
+    Parameters
+    ----------
+    n
+        Total number of items.
+    batch_size
+        Size of each batch.
+    repeat
+        If provided, generate all possible pairs of batch slices,
+        or higher cartesian products if repeat > 2.
+
+    Yields
+    ------
+    slice or tuple of slices
+        Slice object for the current batch if `repeat == None`.
+        Otherwise a tuple of slice objects for each batch.
+    """
+
+    def _iter():
+        n_batches = (n + batch_size - 1) // batch_size
+        for i in range(n_batches):
+            start = i * batch_size
+            end = min(start + batch_size, n)
+            yield slice(start, end)
+
+    if not repeat:
+        yield from _iter()
+    else:
+        yield from product(_iter(), repeat=repeat)
+
+
+def parse_switch_flag(
+    value: bool | Mapping | None,
+    default: bool | None = None,
+) -> tuple[bool, Mapping[str, Any]]:
+    """Get option `value`.
+
+    Parameters
+    ----------
+    value
+        Option value.
+    default
+        Default value to fill in when `value` is `None`.
+
+    Returns
+    -------
+    value
+        The resulting value.
+    options
+        A empty dict or `value` if it was passed as a mapping.
+
+    Examples
+    --------
+    >>> parse_switch_flag(None)
+    (False, {})
+    >>> parse_switch_flag(None, default=True)
+    (True, {})
+    >>> parse_switch_flag(True)
+    (True, {})
+    >>> parse_switch_flag(False)
+    (False, {})
+    >>> parse_switch_flag({"a": 1, "b": 2})
+    (True, {'a': 1, 'b': 2})
+    >>> parse_switch_flag({}, default=True)
+    (True, {})
+    >>> parse_switch_flag({})
+    (True, {})
+    """
+    if value is None:
+        value = default
+    if isinstance(value, Mapping):
+        value, options = True, value
+    else:
+        value, options = bool(value), {}
+    return value, options

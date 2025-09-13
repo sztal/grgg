@@ -6,13 +6,18 @@ from typing import TYPE_CHECKING, Any, Self
 import jax.numpy as np
 from flax import nnx
 
+from grgg.abc import AbstractGRGG
 from grgg.lazy import LazyOuter
+from grgg.utils import squareform
+
+from ._sampling import Sample, Sampler
 
 if TYPE_CHECKING:
     from .abc import AbstractModelModule
+    from .grgg import GRGG
 
 
-class AbstractNodeIndexer(nnx.Module):
+class AbstractModelView(nnx.Module):
     """Abstract base class for node indexers."""
 
     def __init__(self, module: "AbstractModelModule") -> None:
@@ -33,9 +38,24 @@ class AbstractNodeIndexer(nnx.Module):
     def mu(self) -> np.ndarray | LazyOuter | list[LazyOuter]:
         """Mu parameter outer product."""
 
+    @property
+    @abstractmethod
+    def is_active(self) -> bool:
+        """Whether the view is active (i.e., has any indices selected)."""
 
-class NodeIndexer(AbstractNodeIndexer):
-    """Node indexer.
+    @property
+    def reindex(self) -> Self:
+        """Return cleared view to allow reindexing."""
+        self.clear()
+        return self
+
+    @abstractmethod
+    def reset(self) -> None:
+        """Reset the view to include all nodes."""
+
+
+class NodeView(AbstractModelView):
+    """Node view.
 
     Helper class for indexing model parameters and computing node-specific
     quantities for specific node selections.
@@ -59,6 +79,25 @@ class NodeIndexer(AbstractNodeIndexer):
         return self
 
     @property
+    def n_nodes(self) -> int:
+        """Number of selected nodes."""
+        if self._i is None:
+            return self.module.n_nodes
+        if isinstance(self._i, int):
+            return 1
+        if isinstance(self._i, slice):
+            return len(range(*self._i.indices(self.module.n_nodes)))
+        return len(self._i)
+
+    @property
+    def pairs(self) -> "NodePairView":
+        """Node pairs view."""
+        pairs = NodePairView(self.module)
+        if self._i is not None:
+            return pairs[self._i][self._i]
+        return pairs
+
+    @property
     def beta(self) -> np.ndarray:
         """Beta parameter outer product."""
         return self._get_param(self.module.parameters, "beta")
@@ -68,12 +107,96 @@ class NodeIndexer(AbstractNodeIndexer):
         """Mu parameter outer product."""
         return self._get_param(self.module.parameters, "mu")
 
+    @property
+    def is_active(self) -> bool:
+        """Whether the view is active (i.e., has any indices selected)."""
+        return self._i is not None
+
+    def reset(self) -> None:
+        """Reset the current node selection."""
+        self._i = None
+
+    def probs(self, g: np.ndarray) -> np.ndarray:
+        """Compute edge probabilities within the selected group of nodes."""
+        return self.pairs.probs(g)
+
+    def sample_points(self, **kwargs: Any) -> np.ndarray:
+        """Sample points from the selected group of nodes.
+
+        `**kwargs`* are passed to :meth:`~grgg.manifolds.Manifold.sample_points`.
+        """
+        return self.module.manifold.sample_points(self.n_nodes, **kwargs)
+
+    def sample_pmatrix(self, *, condensed: bool = False, **kwargs: Any) -> np.ndarray:
+        """Sample probability matrix from the selected group of nodes.
+
+        `**kwargs`* are passed to :meth:`sample_points`.
+
+        Examples
+        --------
+        >>> from grgg import GRGG, Similarity
+        >>> model = GRGG(5, 2, Similarity(2, 1))
+        >>> P = model.nodes.sample_pmatrix()  # Full probability matrix
+        >>> P.shape
+        (5, 5)
+        >>> P_sub = model.nodes[[0, 2, 4]].sample_pmatrix()  # For nodes 0, 2, and 4
+        >>> P_sub.shape
+        (3, 3)
+        """
+        points = self.sample_points(**kwargs)
+        g = self.module.manifold.distances(points, condensed=True)
+        i, j = np.triu_indices(len(points), k=1)
+        p = self.pairs[i, j].probs(g)
+        return p if condensed else squareform(p)
+
+    def sample(self, **kwargs: Any) -> Sample:
+        """Generate a model sample for the selected group of nodes.
+
+        `**kwargs`* are passed to :meth:`~grgg.model._sampling.Sampler.sample`."""
+        return Sampler(self).sample(**kwargs)
+
+    def materialize(self, *, copy: bool = True) -> "GRGG":
+        """Materialize a new GRGG model with only the selected nodes.
+
+        Parameters
+        ----------
+        copy
+            Whether to copy the model parameters to the new model. If `False`,
+            the new model will share the same parameters as the original one.
+
+        Examples
+        --------
+        >>> from grgg import GRGG, Similarity, Complementarity
+        >>> model = GRGG(100, 2, Similarity(2, np.zeros(100)), Complementarity(1, 0))
+        >>> submodel = model.nodes[:10].materialize()
+        >>> submodel.n_nodes
+        10
+        >>> submodel.manifold.volume
+        10.0
+        >>> submodel.layers[0].mu.shape
+        (10,)
+        """
+        if not isinstance(self.module, AbstractGRGG):
+            errmsg = "only vies of the full GRGG model can be materialized"
+            raise TypeError(errmsg)
+        if self._i is None:
+            return self.module
+        layers = [
+            layer.copy(beta=beta.copy() if copy else beta, mu=mu.copy() if copy else mu)
+            for layer, beta, mu in zip(
+                self.module.layers, self.beta, self.mu, strict=False
+            )
+        ]
+        return self.module.__class__(
+            self.n_nodes, self.module.manifold.with_volume(self.n_nodes), *layers
+        )
+
     @singledispatchmethod
     def _get_param(self, params: Mapping, name: str) -> np.ndarray:
-        """Get parameter outer product."""
+        """Get parameter."""
         param = params[name]
-        if self._i is not None:
-            return param[self._i]
+        if self._i is not None and not np.isscalar(param):
+            return param.copy(param.value[self._i])
         return param
 
     @_get_param.register
@@ -81,8 +204,8 @@ class NodeIndexer(AbstractNodeIndexer):
         return [self._get_param(p, name) for p in params]
 
 
-class NodePairIndexer(AbstractNodeIndexer):
-    """Node pairs indexer.
+class NodePairView(AbstractModelView):
+    """Node pairs view.
 
     Helper class for indexing model parameters and computing pairwise
     connection probabilities and other quantities for specific node pair
@@ -133,6 +256,10 @@ class NodePairIndexer(AbstractNodeIndexer):
         self._j = None
 
     def __getitem__(self, args: Any) -> Self:
+        if isinstance(args, tuple) and len(args) == 2:
+            self._i = args
+            self._j = None
+            return self
         if self._i is None:
             self._i = args
         elif self._j is None:
@@ -151,6 +278,16 @@ class NodePairIndexer(AbstractNodeIndexer):
     def mu(self) -> LazyOuter | list[LazyOuter]:
         """Mu parameter outer product."""
         return self._get_param(self.module.parameters, "mu")
+
+    @property
+    def is_active(self) -> bool:
+        """Whether the view is active (i.e., has any indices selected)."""
+        return self._i is not None and self._j is not None
+
+    def reset(self) -> None:
+        """Reset the current node pair selection."""
+        self._i = None
+        self._j = None
 
     def probs(self, g: np.ndarray) -> np.ndarray:
         """Compute pairwise connection probabilities.
@@ -180,7 +317,7 @@ class NodePairIndexer(AbstractNodeIndexer):
         outer = params[name].outer[self._i]
         if self._j is not None:
             return outer[:, self._j]
-        return outer
+        return outer[...]
 
     @_get_param.register
     def _(self, params: Sequence, name: str) -> list[np.ndarray]:

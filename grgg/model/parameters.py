@@ -19,7 +19,7 @@ class AbstractParameterConstraint(AbstractComponent):
         """Validate the parameter value."""
 
     def __copy__(self) -> Self:
-        return type(self)()
+        return self.__class__()
 
     def equals(self, other: object) -> bool:
         return super().equals(other)
@@ -47,8 +47,10 @@ class AbstractModelVariable(AbstractComponent, nnx.Variable[Floats]):
         value = self.validate_value(value)
         super().__init__(value, **kwargs)
 
-    def __copy__(self) -> Self:
-        return super().__copy__()
+    def __copy__(self, value: Floats | None = None, **kwargs: Any) -> Self:
+        return self.__class__(
+            value if value is not None else self.value.copy(), **kwargs
+        )
 
     def equals(self, other: object) -> bool:
         return super().equals(other) and np.array_equal(self.value, other.value).item()

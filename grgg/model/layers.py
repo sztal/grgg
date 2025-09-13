@@ -1,8 +1,9 @@
 import weakref
 from abc import abstractmethod
 from collections.abc import Callable
+from copy import copy
 from functools import wraps
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Any, Self
 
 import jax.numpy as np
 
@@ -63,10 +64,11 @@ class AbstractLayer(AbstractModelModule):
         self.log = options.layer.log if log is None else log
         self.eps = options.layer.eps if eps is None else eps
 
-    def __copy__(self) -> Self:
-        return self.__class__(
-            self.model, self.beta.copy(), self.mu.copy(), log=self.log, eps=self.eps
-        )
+    def __copy__(self, **kwargs: Any) -> Self:
+        for field in ("beta", "mu", "log", "eps"):
+            if field not in kwargs:
+                kwargs[field] = copy(getattr(self, field))
+        return self.__class__(**kwargs)
 
     def __call__(self, g: Floats, beta: Floats, mu: Floats) -> Floats:
         """Compute layer edge probabilities.

@@ -88,17 +88,20 @@ class LazyOuter:
         return f"<{cn} ({self.op.__name__}), shape={self.shape}, dtype={self.dtype}>"
 
     def __getitem__(self, args: Any) -> np.ndarray | Self:
-        if self.is_scalar:
-            return self.op(self.x, self.y)
-        if not args:
-            return self[...]
         if args is Ellipsis:
+            if self.is_scalar:
+                return self.op(self.x, self.y)
             return self[slice(self.shape[0]), slice(self.shape[1])]
         if not isinstance(args, tuple):
             args = (args,)
         if len(args) == 1:
-            self.x = self.x.flatten()[args[0],]
+            if not np.isscalar(self.x):
+                self.x = self.x.flatten()[args[0],]
             return self
+        if self.is_scalar:
+            return self.op(self.x, self.y)
+        if not args:
+            return self[...]
         i1, i2 = self._process_args(args)
         if isinstance(i1, np.ndarray) and (
             np.isscalar(i1) or isinstance(i2, np.ndarray)
@@ -137,16 +140,8 @@ class LazyOuter:
             i2 = slice(None)
         i1 = self._process_arg(i1)
         i2 = self._process_arg(i2)
-        if (
-            isinstance(i1, np.ndarray)
-            and isinstance(i2, np.ndarray)
-            and (
-                (i1.size > 1 and i1.size != i2.size)
-                or (i2.size > 1 and i1.size != i2.size)
-            )
-        ):
-            errmsg = "indexing arrays cannot be broadcast together."
-            raise IndexError(errmsg)
+        if isinstance(i1, np.ndarray) and isinstance(i2, np.ndarray):
+            np.broadcast_shapes(i1.shape, i2.shape)
         return i1, i2
 
     def _process_arg(self, arg: slice | np.ndarray) -> IntVector:
@@ -159,8 +154,6 @@ class LazyOuter:
         if arg.ndim > 1:
             errmsg = "Only 1D arrays are supported for indexing"
             raise IndexError(errmsg)
-        if arg.dtype == bool:
-            arg = np.where(arg)[0]
         return arg
 
     def tree_flatten(self):
