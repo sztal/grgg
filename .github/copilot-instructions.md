@@ -92,7 +92,7 @@ NOTE: THIS SECTION NEEDS TO BE UPDATED LATER
 
 ### Import Patterns
 ```python
-import jax.numpy as np  # NOT numpy as np
+import jax.numpy as jnp  # NOT numpy as np
 from flax import nnx
 from jaxtyping import Array, Float
 ```

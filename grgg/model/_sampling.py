@@ -1,19 +1,21 @@
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from functools import cached_property
+from functools import cached_property, partial
 from typing import TYPE_CHECKING, Any
 
+import equinox as eqx
 import igraph as ig
+import jax
 import jax.numpy as jnp
 import numpy as np
-from flax import nnx
 from pathcensus import PathCensus
 from scipy.sparse import csr_array, sparray
 from tqdm.auto import tqdm
 
 from grgg._typing import Booleans, BoolVector, Floats, IntVector
 from grgg.abc import AbstractGRGG
-from grgg.utils import batch_slices, random_state
+from grgg.random import RandomGenerator
+from grgg.utils import batch_slices
 
 if TYPE_CHECKING:
     from ._views import NodeView
@@ -58,7 +60,7 @@ class Sample:
         return PathCensus(self.A)
 
 
-class Sampler(nnx.Module):
+class Sampler(eqx.Module):
     """Sampler for sampling from the GRGG model.
 
     Attributes
@@ -67,15 +69,19 @@ class Sampler(nnx.Module):
         Nodes view.
     """
 
+    nodes: "NodeView"
+    _sample_diag: Callable = eqx.field(init=False, repr=False, static=True)
+    _sample_offdiag: Callable = eqx.field(init=False, repr=False, static=True)
+
     def __init__(self, nodes: "NodeView") -> None:
         if not isinstance(nodes.module, AbstractGRGG):
             errmsg = "sampling can only be performed on a view of a full model"
             raise TypeError(errmsg)
         super().__init__()
         self.nodes = nodes
-        self._sample_diag = nnx.jit(self._sample_diag, static_argnames=("s",))
-        self._sample_offdiag = nnx.jit(
-            self._sample_offdiag, static_argnames=("s1", "s2")
+        self._sample_diag = jax.jit(partial(_sample_diag, self), static_argnames=("s",))
+        self._sample_offdiag = jax.jit(
+            partial(_sample_offdiag, self), static_argnames=("s1", "s2")
         )
 
     def __call__(self, **kwargs: Any) -> Sample:
@@ -108,12 +114,12 @@ class Sampler(nnx.Module):
 
         Examples
         --------
-        >>> import jax.numpy as np
+        >>> import jax.numpy as jnp
         >>> from grgg import GRGG, Similarity
-        >>> from grgg.utils import random_state
-        >>> rngs = random_state(42)
-        >>> model = GRGG(100, 2) + Similarity(3.0, rngs.normal(100))
-        >>> S = model.sample(rngs=rngs, batch_size=50)
+        >>> from grgg.random import RandomGenerator
+        >>> rng = RandomGenerator.from_seed(42)
+        >>> model = GRGG(100, 2) + Similarity(3.0, rng.normal(100))
+        >>> S = model.sample(rng=rng, batch_size=50)
         >>> S.A.shape
         (100, 100)
         >>> S.X.shape
@@ -134,7 +140,7 @@ class Sampler(nnx.Module):
         self,
         *,
         batch_size: int | None = None,
-        rngs: nnx.Rngs | int | None = None,
+        rng: RandomGenerator | int | None = None,
         progress: bool | Mapping | None = None,
     ) -> tuple[Floats, IntVector, IntVector]:
         nodes = (
@@ -144,8 +150,8 @@ class Sampler(nnx.Module):
         )
         batch_size = self.model.get_batch_size(batch_size)
         progress, pkw = self.model.get_progress(progress)
-        rngs = random_state(rngs)
-        points = self.nodes.sample_points(rngs=rngs)
+        rng = RandomGenerator.from_seed(rng)
+        points = self.nodes.sample_points(rng=rng)
         n_nodes = nodes.n_nodes
         bslices = [
             (bs1, bs2)
@@ -158,11 +164,11 @@ class Sampler(nnx.Module):
             if bs1 > bs2:  # type: ignore
                 continue
             if bs1 == bs2:
-                i, j, M = self._sample_diag(points, bs1, rngs)
+                i, j, M = self._sample_diag(points, bs1, rng)
                 i = i[M]
                 j = j[M]
             else:
-                M = self._sample_offdiag(points, bs1, bs2, rngs)
+                M = self._sample_offdiag(points, bs1, bs2, rng)
                 i, j = jnp.where(M)
             i += bs1.start
             j += bs2.start
@@ -172,29 +178,31 @@ class Sampler(nnx.Module):
         Aj = np.concatenate(Aj)
         return points, Ai, Aj
 
-    def _sample_diag(
-        self,
-        points: Floats,
-        s: slice,
-        rngs: nnx.Rngs,
-    ) -> tuple[IntVector, IntVector, BoolVector]:
-        X = points[s]
-        g = self.model.manifold.distances(X, condensed=True)
-        i, j = jnp.triu_indices(len(X), k=1)
-        P = self.model.pairs[i, j].probs(g)
-        M = rngs.uniform(P.shape) < P
-        return i, j, M
 
-    def _sample_offdiag(
-        self,
-        points: Floats,
-        s1: slice,
-        s2: slice,
-        rngs: nnx.Rngs,
-    ) -> Booleans:
-        X1 = points[s1]
-        X2 = points[s2]
-        g = self.model.manifold.distances(X1, X2)
-        P = self.model.pairs[s1, s2].probs(g)
-        M = rngs.uniform(P.shape) < P
-        return M
+def _sample_diag(
+    sampler,
+    points: Floats,
+    s: slice,
+    rng: RandomGenerator,
+) -> tuple[IntVector, IntVector, BoolVector]:
+    X = points[s]
+    g = sampler.model.manifold.distances(X, condensed=True)
+    i, j = jnp.triu_indices(len(X), k=1)
+    P = sampler.model.pairs[i, j].probs(g)
+    M = rng.uniform(P.shape) < P
+    return i, j, M
+
+
+def _sample_offdiag(
+    sampler,
+    points: Floats,
+    s1: slice,
+    s2: slice,
+    rng: RandomGenerator,
+) -> Booleans:
+    X1 = points[s1]
+    X2 = points[s2]
+    g = sampler.model.manifold.distances(X1, X2)
+    P = sampler.model.pairs[s1, s2].probs(g)
+    M = rng.uniform(P.shape) < P
+    return M

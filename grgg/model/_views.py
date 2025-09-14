@@ -1,10 +1,11 @@
 from abc import abstractmethod
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from functools import singledispatchmethod
 from typing import TYPE_CHECKING, Any, Self
 
-import jax.numpy as np
-from flax import nnx
+import equinox as eqx
+import jax.numpy as jnp
 
 from grgg.abc import AbstractGRGG
 from grgg.lazy import LazyOuter
@@ -17,12 +18,10 @@ if TYPE_CHECKING:
     from .grgg import GRGG
 
 
-class AbstractModelView(nnx.Module):
+class AbstractModelView(eqx.Module):
     """Abstract base class for node indexers."""
 
-    def __init__(self, module: "AbstractModelModule") -> None:
-        super().__init__()
-        self.module = module
+    module: "AbstractModelModule"
 
     @abstractmethod
     def __getitem__(self, args: Any) -> Self:
@@ -30,12 +29,12 @@ class AbstractModelView(nnx.Module):
 
     @property
     @abstractmethod
-    def beta(self) -> np.ndarray | LazyOuter | list[LazyOuter]:
+    def beta(self) -> jnp.ndarray | LazyOuter | list[LazyOuter]:
         """Beta parameter outer product."""
 
     @property
     @abstractmethod
-    def mu(self) -> np.ndarray | LazyOuter | list[LazyOuter]:
+    def mu(self) -> jnp.ndarray | LazyOuter | list[LazyOuter]:
         """Mu parameter outer product."""
 
     @property
@@ -66,17 +65,15 @@ class NodeView(AbstractModelView):
         Parent model module.
     """
 
-    def __init__(self, module: "AbstractModelModule") -> None:
-        super().__init__(module)
-        self._i = None
+    _i: int | slice | Sequence[int] | None = eqx.field(
+        default=None, repr=False, kw_only=True
+    )
 
     def __getitem__(self, args: Any) -> Self:
         if self._i is None:
-            self._i = args
-        else:
-            errmsg = "too many indices for nodes"
-            raise IndexError(errmsg)
-        return self
+            return replace(self, _i=args)
+        errmsg = "too many indices for nodes"
+        raise IndexError(errmsg)
 
     @property
     def n_nodes(self) -> int:
@@ -98,12 +95,12 @@ class NodeView(AbstractModelView):
         return pairs
 
     @property
-    def beta(self) -> np.ndarray:
+    def beta(self) -> jnp.ndarray:
         """Beta parameter outer product."""
         return self._get_param(self.module.parameters, "beta")
 
     @property
-    def mu(self) -> np.ndarray:
+    def mu(self) -> jnp.ndarray:
         """Mu parameter outer product."""
         return self._get_param(self.module.parameters, "mu")
 
@@ -116,18 +113,18 @@ class NodeView(AbstractModelView):
         """Reset the current node selection."""
         self._i = None
 
-    def probs(self, g: np.ndarray) -> np.ndarray:
+    def probs(self, g: jnp.ndarray) -> jnp.ndarray:
         """Compute edge probabilities within the selected group of nodes."""
         return self.pairs.probs(g)
 
-    def sample_points(self, **kwargs: Any) -> np.ndarray:
+    def sample_points(self, **kwargs: Any) -> jnp.ndarray:
         """Sample points from the selected group of nodes.
 
         `**kwargs`* are passed to :meth:`~grgg.manifolds.Manifold.sample_points`.
         """
         return self.module.manifold.sample_points(self.n_nodes, **kwargs)
 
-    def sample_pmatrix(self, *, condensed: bool = False, **kwargs: Any) -> np.ndarray:
+    def sample_pmatrix(self, *, condensed: bool = False, **kwargs: Any) -> jnp.ndarray:
         """Sample probability matrix from the selected group of nodes.
 
         `**kwargs`* are passed to :meth:`sample_points`.
@@ -145,7 +142,7 @@ class NodeView(AbstractModelView):
         """
         points = self.sample_points(**kwargs)
         g = self.module.manifold.distances(points, condensed=True)
-        i, j = np.triu_indices(len(points), k=1)
+        i, j = jnp.triu_indices(len(points), k=1)
         p = self.pairs[i, j].probs(g)
         return p if condensed else squareform(p)
 
@@ -161,46 +158,48 @@ class NodeView(AbstractModelView):
         Parameters
         ----------
         copy
-            Whether to copy the model parameters to the new model. If `False`,
-            the new model will share the same parameters as the original one.
+            Whether to return a deep copy of the model.
 
         Examples
         --------
         >>> from grgg import GRGG, Similarity, Complementarity
-        >>> model = GRGG(100, 2, Similarity(2, np.zeros(100)), Complementarity(1, 0))
+        >>> model = GRGG(100, 2, Similarity(2, jnp.zeros(100)), Complementarity(1, 0))
         >>> submodel = model.nodes[:10].materialize()
         >>> submodel.n_nodes
         10
         >>> submodel.manifold.volume
-        10.0
+        100.0
         >>> submodel.layers[0].mu.shape
         (10,)
         """
         if not isinstance(self.module, AbstractGRGG):
-            errmsg = "only vies of the full GRGG model can be materialized"
+            errmsg = "only views of the full GRGG model can be materialized"
             raise TypeError(errmsg)
         if self._i is None:
             return self.module
+        model = self.module.deepcopy() if copy else self.module
         layers = [
-            layer.copy(beta=beta.copy() if copy else beta, mu=mu.copy() if copy else mu)
-            for layer, beta, mu in zip(
-                self.module.layers, self.beta, self.mu, strict=False
+            layer.replace(
+                beta=beta.copy() if copy else beta, mu=mu.copy() if copy else mu
             )
+            for layer, beta, mu in zip(model.layers, self.beta, self.mu, strict=False)
         ]
-        return self.module.__class__(
-            self.n_nodes, self.module.manifold.with_volume(self.n_nodes), *layers
+        return model.replace(
+            n_nodes=self.n_nodes,
+            manifold=model.manifold,
+            layers=layers,
         )
 
     @singledispatchmethod
-    def _get_param(self, params: Mapping, name: str) -> np.ndarray:
+    def _get_param(self, params: Mapping, name: str) -> jnp.ndarray:
         """Get parameter."""
         param = params[name]
-        if self._i is not None and not np.isscalar(param):
-            return param.copy(param.value[self._i])
+        if self._i is not None and not jnp.isscalar(param):
+            return param[self._i]
         return param
 
     @_get_param.register
-    def _(self, params: Sequence, name: str) -> list[np.ndarray]:
+    def _(self, params: Sequence, name: str) -> list[jnp.ndarray]:
         return [self._get_param(p, name) for p in params]
 
 
@@ -250,24 +249,28 @@ class NodePairView(AbstractModelView):
            [10., 11.]], ...)
     """
 
-    def __init__(self, module: "AbstractModelModule") -> None:
-        self.module = module
-        self._i = None
-        self._j = None
+    _i: int | slice | Sequence[int] | None = eqx.field(
+        default=None,
+        repr=False,
+        kw_only=True,
+    )
+    _j: int | slice | Sequence[int] | None = eqx.field(
+        default=None,
+        repr=False,
+        kw_only=True,
+    )
 
     def __getitem__(self, args: Any) -> Self:
         if isinstance(args, tuple) and len(args) == 2:
-            self._i = args
-            self._j = None
-            return self
+            _i = args
+            _j = None
+            return replace(self, _i=_i, _j=_j)
         if self._i is None:
-            self._i = args
-        elif self._j is None:
-            self._j = args
-        else:
-            errmsg = "too many indices for node pairs"
-            raise IndexError(errmsg)
-        return self
+            return replace(self, _i=args)
+        if self._j is None:
+            return replace(self, _j=args)
+        errmsg = "too many indices for node pairs"
+        raise IndexError(errmsg)
 
     @property
     def beta(self) -> LazyOuter | list[LazyOuter]:
@@ -289,7 +292,7 @@ class NodePairView(AbstractModelView):
         self._i = None
         self._j = None
 
-    def probs(self, g: np.ndarray) -> np.ndarray:
+    def probs(self, g: jnp.ndarray) -> jnp.ndarray:
         """Compute pairwise connection probabilities.
 
         Parameters
@@ -305,7 +308,7 @@ class NodePairView(AbstractModelView):
         Array([[0.999245 , 0.9996325],
                [0.9969842, 0.5      ]], ...)
 
-        Evaluate the mult-layer model probabilities.
+        Evaluate the multilayer model probabilities.
         >>> model.pairs[[0, 1]][[0, 2]].probs(1)
         Array([[0.999245 , 0.9996325],
                [0.9969842, 0.5      ]], ...)
@@ -314,23 +317,26 @@ class NodePairView(AbstractModelView):
 
     @singledispatchmethod
     def _get_param(self, params: Mapping, name: str) -> LazyOuter:
-        outer = params[name].outer[self._i]
+        param = params[name]
+        if jnp.isscalar(param):
+            param = param / 2
+        outer = LazyOuter(param, op=jnp.add)[self._i]
         if self._j is not None:
             return outer[:, self._j]
         return outer[...]
 
     @_get_param.register
-    def _(self, params: Sequence, name: str) -> list[np.ndarray]:
+    def _(self, params: Sequence, name: str) -> list[jnp.ndarray]:
         return [self._get_param(p, name) for p in params]
 
     @singledispatchmethod
-    def _get_probs(self, params: Mapping, g: np.ndarray) -> np.ndarray:
+    def _get_probs(self, params: Mapping, g: jnp.ndarray) -> jnp.ndarray:
         beta = self._get_param(params, "beta")
         mu = self._get_param(params, "mu")
-        return self.module._function(g, beta, mu)
+        return self.module.function(g, beta, mu)
 
     @_get_probs.register
-    def _(self, params: Sequence, g: np.ndarray) -> list[np.ndarray]:
-        beta = np.stack([self._get_param(p, "beta") for p in params])
-        mu = np.stack([self._get_param(p, "mu") for p in params])
-        return self.module._function(g, beta, mu)
+    def _(self, params: Sequence, g: jnp.ndarray) -> list[jnp.ndarray]:
+        beta = jnp.stack([self._get_param(p, "beta") for p in params])
+        mu = jnp.stack([self._get_param(p, "mu") for p in params])
+        return self.module.function(g, beta, mu)

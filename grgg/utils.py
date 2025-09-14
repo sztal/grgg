@@ -1,60 +1,12 @@
-import secrets
 from collections.abc import Callable, Iterator, Mapping, Sequence
-from functools import singledispatch, wraps
+from functools import partial, wraps
 from itertools import product
 from typing import Any
 
 import jax
-import jax.numpy as np
-from flax import nnx
-from jax._src.prng import PRNGKeyArray
+import jax.numpy as jnp
 
 from grgg._typing import Matrix, Scalar, Vector
-
-
-def random_keys(
-    default: int | None = None,
-    **seeds: int | None,
-) -> dict[str, PRNGKeyArray]:
-    """Generate a random key for JAX operations.
-
-    Parameters
-    ----------
-    default
-        If provided, use this integer as the seed for the random key.
-        Otherwise, generate a random seed using :mod:`secrets`.
-    **streams
-        Additional named streams with their own integer seeds,
-        which can also be `None` to generate a random seed.
-    """
-    seeds = {"default": default, **seeds}
-    keys = {
-        k: jax.random.key(v if v is not None else secrets.randbelow(2**31))
-        for k, v in seeds.items()
-    }
-    return keys
-
-
-@singledispatch
-def random_state(
-    default: int | None | nnx.RngStream,
-    **seeds: int | None | nnx.RngStream,
-) -> nnx.Rngs:
-    """Create a random state for Flax modules.
-
-    Arguments are passed to :func:`random_keys`.
-    """
-    keys = random_keys(default, **seeds)
-    return nnx.Rngs(**keys)
-
-
-@random_state.register(nnx.Rngs)
-def _(rngs: nnx.Rngs, **seeds: int | None | nnx.RngStream) -> nnx.Rngs:
-    if not seeds:
-        return rngs
-    streams = {k: v for k, v in rngs.__dict__.items() if isinstance(v, nnx.RngStream)}
-    streams = {**streams, **seeds}
-    return nnx.Rngs(**streams)
 
 
 @jax.jit
@@ -74,8 +26,8 @@ def squareform(d: Vector) -> Matrix:
         Square distance matrix, shape (m, m).
     """
     n = int((1 + (1 + 8 * len(d)) ** 0.5) / 2)
-    D = np.zeros_like(d, shape=(n, n))
-    D = D.at[np.triu_indices_from(D, k=1)].set(d)
+    D = jnp.zeros_like(d, shape=(n, n))
+    D = D.at[jnp.triu_indices_from(D, k=1)].set(d)
     return D + D.T
 
 
@@ -96,37 +48,38 @@ def pairwise(
 
     Examples
     --------
-    >>> def euclidean(x, y): return np.linalg.norm(x - y)
+    >>> from grgg.random import RandomGenerator
+    >>> def euclidean(x, y): return jnp.linalg.norm(x - y)
     >>> pairwise_euclidean = pairwise(euclidean)
-    >>> rngs = nnx.Rngs(0)
-    >>> X = rngs.normal((100, 3))
-    >>> Y = rngs.normal((20, 3))
+    >>> rng = RandomGenerator.from_seed(0)
+    >>> X = rng.normal((100, 3))
+    >>> Y = rng.normal((20, 3))
     >>> D1 = pairwise_euclidean(X)
     >>> C1 = pairwise_euclidean(X, Y)  # cross-distance
 
     Test the pairwise case against the reference implementation from :mod:`scipy`.
     >>> from scipy.spatial.distance import pdist, squareform
     >>> D2 = pdist(X)
-    >>> bool(np.allclose(D1, D2))
+    >>> bool(jnp.allclose(D1, D2))
     True
     >>> D1_square = pairwise_euclidean(X, condensed=False)
     >>> D2_square = squareform(D2)
-    >>> bool(np.allclose(D1_square, D2_square))
+    >>> bool(jnp.allclose(D1_square, D2_square))
     True
 
     Test the cross-distance case against the reference implementation from :mod:`scipy`.
     >>> from scipy.spatial.distance import cdist
     >>> C2 = cdist(X, Y)
-    >>> bool(np.allclose(C1, C2))
+    >>> bool(jnp.allclose(C1, C2))
     True
 
     Importantly, the compiled function still works on single pairs of vectors.
-    >>> x = np.array([1])
-    >>> y = np.array([2])
+    >>> x = jnp.array([1])
+    >>> y = jnp.array([2])
     >>> float(pairwise_euclidean(x, y))
     1.0
     """
-    jitted = nnx.jit(func)
+    jitted = jax.jit(func)
 
     def wrapped(
         X: Matrix,
@@ -151,10 +104,10 @@ def pairwise(
                 return jitted(X[idx[0]], Y[idx[1]])
 
         if Y is None:
-            indices = np.array(np.triu_indices(len(X), k=1)).T
+            indices = jnp.array(jnp.triu_indices(len(X), k=1)).T
         else:
-            grid = np.meshgrid(np.arange(len(X)), np.arange(len(Y)), indexing="ij")
-            indices = np.stack([x.ravel() for x in grid], axis=1)
+            grid = jnp.meshgrid(jnp.arange(len(X)), jnp.arange(len(Y)), indexing="ij")
+            indices = jnp.stack([x.ravel() for x in grid], axis=1)
         output = jax.vmap(compute)(indices)
         if Y is None and not condensed:
             output = squareform(output)
@@ -166,9 +119,10 @@ def pairwise(
     return wraps(func)(pairwise_func)
 
 
+@partial(jax.jit, static_argnames=("axis",))
 def cartesian_product(
-    arrays: Sequence[np.ndarray], axis: int | None = None
-) -> np.ndarray:
+    arrays: Sequence[jnp.ndarray], axis: int | None = None
+) -> jnp.ndarray:
     """Compute the cartesian product of input arrays along a given axis.
 
     Parameters
@@ -178,9 +132,9 @@ def cartesian_product(
         The arrays must have the same shape except along the specified axis.
     axis
         The axis along which the cartesian product is computed.
-        This is carried out using :func:`np.stack` and it is expected
+        This is carried out using :func:`jnp.stack` and it is expected
         that the concatenation axis exists in all input arrays.
-        If `None`, then :func:`np.column_stack` is used instead,
+        If `None`, then :func:`jnp.column_stack` is used instead,
         which requires all input arrays to be of the same shape
         and concatenates them along a new last axis.
 
@@ -193,15 +147,15 @@ def cartesian_product(
 
     Examples
     --------
-    >>> a = np.array([1, 2])
-    >>> b = np.array([3, 4])
+    >>> a = jnp.array([1, 2])
+    >>> b = jnp.array([3, 4])
     >>> cartesian_product([a, b])
     Array([[1, 3],
            [1, 4],
            [2, 3],
            [2, 4]], ...)
 
-    >>> c = np.array([5, 6])
+    >>> c = jnp.array([5, 6])
     >>> cartesian_product([a, b, c])
     Array([[1, 3, 5],
            [1, 3, 6],
@@ -213,29 +167,28 @@ def cartesian_product(
            [2, 4, 6]], ...)
 
     Product along arbitrary axis are also possible.
-    >>> a = np.arange(27).reshape(3, 3, 3)
-    >>> b = np.arange(18).reshape(3, 2, 3)
+    >>> a = jnp.arange(27).reshape(3, 3, 3)
+    >>> b = jnp.arange(18).reshape(3, 2, 3)
     >>> cartesian_product([a, b], axis=1).shape
     (3, 2, 6, 3)
     """
-    arrays = [np.asarray(a) for a in arrays]
+    arrays = [jnp.asarray(a) for a in arrays]
     if not arrays:
-        return np.array([]).reshape(0, 0)
+        return jnp.array([]).reshape(0, 0)
     if len(arrays) == 1:
-        return np.expand_dims(arrays[0], axis=axis or -1)
+        return jnp.expand_dims(arrays[0], axis=axis or -1)
     if len(arrays) == 2:
         a, b = arrays
-        ai = np.arange(a.shape[axis or 0])
-        bi = np.arange(b.shape[axis or 0])
-        grid = np.stack(np.meshgrid(ai, bi, indexing="ij"), axis=-1).reshape(-1, 2)
-        a = np.take(a, grid[:, 0], axis=axis or 0)
-        b = np.take(b, grid[:, 1], axis=axis or 0)
-        return np.column_stack([a, b]) if axis is None else np.stack([a, b], axis=axis)
+        ai = jnp.arange(a.shape[axis or 0])
+        bi = jnp.arange(b.shape[axis or 0])
+        grid = jnp.stack(jnp.meshgrid(ai, bi, indexing="ij"), axis=-1).reshape(-1, 2)
+        a = jnp.take(a, grid[:, 0], axis=axis or 0)
+        b = jnp.take(b, grid[:, 1], axis=axis or 0)
+        return (
+            jnp.column_stack([a, b]) if axis is None else jnp.stack([a, b], axis=axis)
+        )
     product = cartesian_product(arrays[:2], axis=axis)
     return cartesian_product([product, *arrays[2:]], axis=axis)
-
-
-cartesian_product = jax.jit(cartesian_product, static_argnames=("axis",))
 
 
 def batch_slices(

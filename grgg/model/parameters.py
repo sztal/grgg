@@ -1,116 +1,104 @@
-from abc import abstractmethod
-from typing import Any, Self
+from abc import ABC, abstractmethod
 
-import jax.numpy as np
-from flax import nnx
+import equinox as eqx
+import jax.numpy as jnp
 
-from grgg._typing import Floats, Scalar, Vector
-from grgg.abc import AbstractComponent
-from grgg.lazy import LazyOuter
+from grgg._typing import Scalar, Vector
 
 ParamT = Scalar | Vector
 
 
-class AbstractParameterConstraint(AbstractComponent):
-    """Abstract base class for parameter constraints."""
+class CONSTRAINTS(eqx.Enumeration):
+    """Enumeration of supported parameter constraints."""
 
-    @abstractmethod
-    def validate(self, param: "AbstractModelParameter") -> None:
-        """Validate the parameter value."""
-
-    def __copy__(self) -> Self:
-        return self.__class__()
-
-    def equals(self, other: object) -> bool:
-        return super().equals(other)
+    real = "real"
+    non_negative = "non-negative"
 
 
-class NonNegative(AbstractParameterConstraint):
-    """Constraint that ensures a parameter is non-negative."""
+class AbstractParameterSpecification(ABC):
+    """Abstract base class for parameter specifications."""
 
-    def validate(
-        self, param: "AbstractModelParameter", name: str | None = None
-    ) -> None:
-        if np.any(param.value < 0):
-            if not name:
-                name = type(param).__name__
-            errmsg = f"parameter '{name}' must be non-negative"
-            raise ValueError(errmsg)
-
-
-class AbstractModelVariable(AbstractComponent, nnx.Variable[Floats]):
-    """Abstract base class for model variables."""
-
-    constraints: tuple[AbstractParameterConstraint, ...] = ()
-
-    def __init__(self, value: Floats, **kwargs: Any) -> None:
-        value = self.validate_value(value)
-        super().__init__(value, **kwargs)
-
-    def __copy__(self, value: Floats | None = None, **kwargs: Any) -> Self:
-        return self.__class__(
-            value if value is not None else self.value.copy(), **kwargs
-        )
-
-    def equals(self, other: object) -> bool:
-        return super().equals(other) and np.array_equal(self.value, other.value).item()
-
-    @classmethod
-    @abstractmethod
-    def validate_value(cls, value: Floats) -> Floats:
-        """Validate the variable value."""
-        value = np.asarray(value)
-        if np.issubdtype(value.dtype, np.integer):
-            value = value.astype(float)
-        if value.size <= 0:
-            errmsg = "Value must be a non-empty array"
-            raise ValueError(errmsg)
-        if not np.issubdtype(value.dtype, np.floating):
-            errmsg = f"Value must be a float array, got '{value.dtype}'"
-            raise TypeError(errmsg)
-        if value.size == 1:
-            value = value.flatten()[0]  # Convert single-element array to scalar
-        for constraint in cls.constraints:
-            constraint.validate(value, cls.__name__)
-        return value
-
-
-class AbstractModelParameter(AbstractModelVariable, nnx.Param[ParamT]):
-    """Abstract base class for model parameters."""
-
-    def __init__(self, value: ParamT | None = None, **kwargs: Any) -> None:
-        if value is None:
-            value = self.default_value
-        value = self.validate_value(value)
-        super().__init__(value, **kwargs)
+    def __call__(self, value: jnp.ndarray | None = None) -> jnp.ndarray:
+        return self.validate(value)
 
     @property
-    def is_heterogeneous(self) -> bool:
-        """Whether the parameter is heterogeneous (varies across nodes)."""
-        return self.value.size > 1
+    @abstractmethod
+    def name(self) -> str:
+        """Parameter name."""
 
     @property
-    def outer(self) -> LazyOuter:
-        """Lazy outer sum of the parameter with itself."""
-        value = self.value if self.is_heterogeneous else self.value / 2
-        return LazyOuter(value, value, op=np.add)
-
-    @classmethod
-    def validate_value(cls, value: ParamT) -> ParamT:
-        """Validate the parameter value."""
-        value = super().validate_value(value)
-        if value.ndim > 1:
-            errmsg = "Parameter value must be a scalar or 1D array"
-            raise ValueError(errmsg)
-        return value
+    @abstractmethod
+    def constraints(self) -> list[eqx._enum.EnumerationItem, ...]:
+        """List of constraints."""
+        return []
 
     @property
     @abstractmethod
     def default_value(self) -> ParamT:
         """Default parameter value."""
 
+    @classmethod
+    def validate(cls, value: jnp.ndarray | None) -> None:
+        """Check all constraints."""
+        spec = cls()
+        if value is None:
+            value = spec.default_value
+        value = cls._validate(value)
+        for constraint in spec.constraints:
+            spec._check_constraint(value, constraint)
+        return value
 
-class Beta(AbstractModelParameter):
+    @classmethod
+    @abstractmethod
+    def _validate(cls, value: jnp.ndarray) -> jnp.ndarray:
+        """Validate input value."""
+        value = jnp.asarray(value)
+        if value.size <= 0:
+            errmsg = "parameter value must be a non-empty array"
+            raise ValueError(errmsg)
+        return value
+
+    def _check_constraint(
+        self, value: jnp.ndarray, constraint: eqx._enum.EnumerationItem
+    ) -> None:
+        """Check constraint."""
+        if constraint == CONSTRAINTS.real:
+            self._error_if(constraint, ~jnp.isreal(value).all())
+        elif constraint == CONSTRAINTS.non_negative:
+            self._error_if(constraint, (value < 0).any())
+        else:
+            errmsg = f"unknown constraint: {constraint}"
+            raise ValueError(errmsg)
+
+    def _error_if(self, constraint, condition: bool) -> None:
+        name = constraint._enumeration[constraint]
+        if condition:
+            errmsg = f"'{self.name}' must be {name}"
+            raise ValueError(errmsg)
+
+
+class AbstractNodeParameterSpecification(AbstractParameterSpecification):
+    """Abstract base class for node parameter specifications."""
+
+    @property
+    def constraints(self) -> list[eqx._enum.EnumerationItem, ...]:
+        return [*super().constraints, CONSTRAINTS.real]
+
+    @classmethod
+    def _validate(cls, value: jnp.ndarray) -> jnp.ndarray:
+        value = super()._validate(value)
+        if value.ndim > 1:
+            errmsg = "node parameter value must be a scalar or a 1D array"
+            raise ValueError(errmsg)
+        return value
+
+    @classmethod
+    def validate(cls, value: jnp.ndarray) -> jnp.ndarray:
+        """Check all constraints."""
+        return super().validate(value).astype(float)
+
+
+class Beta(AbstractNodeParameterSpecification):
     """Beta parameter (inverse temperature).
 
     It controls the strength of the coupling between the network topology
@@ -123,41 +111,35 @@ class Beta(AbstractModelParameter):
 
     Examples
     --------
-    >>> beta = Beta()  # default value
-    >>> beta.value
+    >>> beta = Beta()
+    >>> beta()  # default value
     Array(1.5, ...)
-    >>> beta = Beta(2.0)  # homogeneous value
-    >>> beta.value
+    >>> beta(2.0)  # homogeneous value
     Array(2.0, ...)
-    >>> beta.is_heterogeneous
-    False
-    >>> beta = Beta([1,2,3])  # heterogeneous value
-    >>> beta.value
+    >>> beta([1,2,3])  # heterogeneous value
     Array([1., 2., 3.], ...)
-    >>> beta.is_heterogeneous
-    True
 
-    Equalit checks are implemented via the `equals` method
-    as not to interfere with Flax's internal mechanisms.
-    >>> Beta().equals(Beta())
-    True
-    >>> Beta([1,2]).equals(Beta([1,2]))
-    True
+    Error is raised for invalid values.
+    >>> beta(-1)  # negative value
+    Traceback (most recent call last):
+        ...
+    ValueError: 'beta' must be non-negative
     """
 
     @property
+    def name(self) -> str:
+        return "beta"
+
+    @property
+    def constraints(self) -> list[eqx._enum.EnumerationItem, ...]:
+        return [*super().constraints, CONSTRAINTS.non_negative]
+
+    @property
     def default_value(self) -> ParamT:
-        return np.array(1.5)  # Default beta value
-
-    def validate_value(self, value: ParamT) -> ParamT:
-        value = super().validate_value(value)
-        if np.any(value < 0):
-            errmsg = "beta must be non-negative"
-            raise ValueError(errmsg)
-        return value
+        return jnp.array(1.5)
 
 
-class Mu(AbstractModelParameter):
+class Mu(AbstractNodeParameterSpecification):
     """Mu parameter (chemical potential).
 
     It controls the average degree of the network.
@@ -169,29 +151,25 @@ class Mu(AbstractModelParameter):
 
     Examples
     --------
-    >>> mu = Mu()  # default value
-    >>> mu.value
+    >>> mu = Mu()
+    >>> mu()  # default value
     Array(0.0, ...)
-    >>> mu.is_heterogeneous
-    False
-    >>> mu = Mu([1, 2, 3])  # heterogeneous value
-    >>> mu.value
+    >>> mu(1.0)  # homogeneous value
+    Array(1.0, ...)
+    >>> mu([1, 2, 3])  # heterogeneous value
     Array([1., 2., 3.], ...)
-    >>> mu.is_heterogeneous
-    True
 
-    Equalit checks are implemented via the `equals` method
-    as not to interfere with Flax's internal mechanisms.
-    >>> Mu().equals(Mu())
-    True
-    >>> Mu([1,2]).equals(Mu([1,2]))
-    True
+    Error is raised for invalid values.
+    >>> mu(1+1j)  # negative value
+    Traceback (most recent call last):
+        ...
+    ValueError: 'mu' must be real
     """
 
     @property
-    def default_value(self) -> ParamT:
-        return np.array(0.0)  # Default mu value
+    def name(self) -> str:
+        return "mu"
 
-    def validate_value(self, value: ParamT) -> ParamT:
-        value = super().validate_value(value)
-        return value
+    @property
+    def default_value(self) -> ParamT:
+        return jnp.array(0.0)

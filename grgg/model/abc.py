@@ -3,8 +3,9 @@ from collections.abc import Callable, Mapping, Sequence
 from functools import wraps
 from typing import Any
 
-import jax.numpy as np
-from flax import nnx
+import equinox as eqx
+import jax
+import jax.numpy as jnp
 
 from grgg._options import options
 from grgg._typing import Floats
@@ -12,25 +13,26 @@ from grgg.abc import AbstractModule
 from grgg.utils import parse_switch_flag
 
 from ._views import NodePairView, NodeView
-from .parameters import AbstractModelParameter
 
 __all__ = ("AbstractModelModule",)
 
-ParamsT = Mapping[str, AbstractModelParameter]
+ParamsT = Mapping[str, jnp.ndarray]
 
 
 class AbstractModelModule(AbstractModule):
     """Abstract base class for model modules."""
 
-    @property
-    @abstractmethod
-    def n_nodes(self) -> int:
-        """Number of nodes in the model."""
+    n_nodes: eqx.AbstractVar[int]
 
     @property
     @abstractmethod
     def parameters(self) -> ParamsT | Sequence[ParamsT]:
         """Model parameters."""
+
+    @property
+    @abstractmethod
+    def is_heterogeneous(self) -> bool:
+        """Whether the module has heterogeneous parameters."""
 
     @property
     def nodes(self) -> NodeView:
@@ -47,14 +49,14 @@ class AbstractModelModule(AbstractModule):
         """Define the module function."""
 
     def _define_function(self) -> Callable[[Floats, Floats, Floats], Floats]:
-        function = self.define_function()
+        function = jax.jit(self.define_function())
 
         @wraps(function)
         def wrapper(*args: Floats) -> Floats:
-            args = tuple(np.asarray(a) for a in args)
+            args = tuple(jnp.asarray(a) for a in args)
             return function(*args)
 
-        return nnx.jit(wrapper)
+        return jax.jit(wrapper)
 
     def get_batch_size(self, batch_size: int | None = None) -> int:
         """Get batch size from value or options."""

@@ -1,12 +1,13 @@
 from abc import ABC, abstractmethod
+from copy import deepcopy
 from typing import Any, Self
 
-from flax import nnx
+import equinox as eqx
 
-__all__ = ("AbstractComponent", "AbstractModule", "AbstractGRGG")
+__all__ = ("AbstractModule", "AbstractGRGG")
 
 
-class AbstractComponent(ABC):
+class AbstractModule(eqx.Module):
     """Abstract base class for model elements."""
 
     @abstractmethod
@@ -16,17 +17,54 @@ class AbstractComponent(ABC):
         t2 = type(other)
         return issubclass(t1, t2) or issubclass(t2, t1)
 
-    @abstractmethod
     def __copy__(self) -> Self:
-        """Create a copy of the model element."""
+        """Create a shallow copy of the model element."""
+        cls = self.__class__
+        result = cls.__new__(cls)
+        for k, v in self.__dict__.items():
+            setattr(result, k, v)
+        return result
 
-    def copy(self, **kwargs: Any) -> Self:
-        """Create a copy of the model element."""
-        return self.__copy__(**kwargs)
+    def __deepcopy__(self, memo: dict[int, Any]) -> Self:
+        """Create a deep copy."""
+        cls = self.__class__
+        result = cls.__new__(cls)
+        memo[id(self)] = result
+        for k, v in self.__dict__.items():
+            copied = deepcopy(v, memo)
+            setattr(result, k, copied)
+        return result
 
+    def __replace__(self, **kwargs: Any) -> Self:
+        """Create a copy with some attributes replaced."""
+        kwargs = {**self.__dict__, **kwargs}
+        cls = self.__class__
+        result = cls.__new__(cls)
+        incorrect = set(kwargs) - set(self.__dict__)
+        if incorrect:
+            errmsg = f"cannot replace non-existent attributes: {", ".join(incorrect)}"
+            raise AttributeError(errmsg)
+        for k, v in kwargs.items():
+            setattr(result, k, v)
+        return result
 
-class AbstractModule(AbstractComponent, nnx.Module):
-    """Abstract base class for modules."""
+    def _replace(self, /, **changes) -> Self:
+        """Alias for `__replace__`."""
+        return self.__replace__(**changes)
+
+    def copy(self, *, deep: bool = False) -> Self:
+        """Create a shallow or deep copy."""
+        if deep:
+            return self.__deepcopy__({})
+        return self.__copy__()
+
+    def deepcopy(self) -> Self:
+        """Create a deep copy."""
+        return deepcopy(self)
+
+    def replace(self, **kwargs: Any) -> Self:
+        """Create a copy with some attributes replaced."""
+        return self._replace(**kwargs)
 
 
 class AbstractGRGG(ABC):  # noqa

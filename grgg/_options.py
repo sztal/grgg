@@ -68,7 +68,7 @@ class OptimizeOptions(Options):
 
 
 @dataclass(slots=True)
-class TopOptions(Options):
+class PackageOptions(Options):
     layer: LayerOptions = field(default_factory=LayerOptions)
     batch: BatchOptions = field(default_factory=BatchOptions)
     integrate: IntegrateOptions = field(default_factory=IntegrateOptions)
@@ -76,4 +76,4 @@ class TopOptions(Options):
     optimize: OptimizeOptions = field(default_factory=OptimizeOptions)
 
 
-options = TopOptions()
+options = PackageOptions()

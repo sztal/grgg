@@ -1,11 +1,13 @@
 from abc import abstractmethod
+from collections.abc import Callable
 from typing import Self
 
-from flax import nnx
+import equinox as eqx
 
 from grgg._typing import Matrix, Scalar, Vector
 from grgg.abc import AbstractModule
-from grgg.utils import pairwise, random_state
+from grgg.random import RandomGenerator
+from grgg.utils import pairwise
 
 
 class Manifold(AbstractModule):
@@ -17,12 +19,28 @@ class Manifold(AbstractModule):
         Dimension of the manifold.
     """
 
+    dim: int = eqx.field(static=True, converter=int)
+    _distances: Callable[[Matrix, Matrix | None, ...], Vector | Matrix] = eqx.field(
+        static=True,
+        repr=False,
+    )
+
     def __init__(self, dim: int) -> None:
         if dim < 0:
             errmsg = "'dim' must be a non-negative integer"
             raise ValueError(errmsg)
         self.dim = int(dim)
         self._distances = pairwise(self.metric)
+
+    def __repr__(self) -> str:
+        params = self._repr_params()
+        if params:
+            params = ", " + params
+        return f"{self.__class__.__name__}({self.dim}{params})"
+
+    @abstractmethod
+    def _repr_params(self) -> str:
+        """Parameters to include in the `__repr__` string."""
 
     @property
     def embedding_dim(self) -> int:
@@ -68,16 +86,17 @@ class Manifold(AbstractModule):
         """
         return self._distances(X, Y, condensed=condensed)
 
-    def sample_points(self, n: int, *, rngs: nnx.Rngs | int | None = None) -> Matrix:
+    def sample_points(
+        self, n: int, *, rng: RandomGenerator | int | None = None
+    ) -> Matrix:
         """Sample points uniformly from the manifold.
 
         Parameters
         ----------
         n
             Number of points to sample.
-        rngs
-            Random state for reproducibility, can be an integer seed,
-            a `nnx.Rngs` object, or `None` for random initialization.
+        rng
+            Random generator or an object interpretable as a seed.
 
         Returns
         -------
@@ -87,11 +106,11 @@ class Manifold(AbstractModule):
         if n <= 0:
             errmsg = "'n' must be positive"
             raise ValueError(errmsg)
-        rngs = random_state(rngs)
-        return self._sample_points(n, rngs)
+        rng = RandomGenerator.from_seed(rng)
+        return self._sample_points(n, rng)
 
     @abstractmethod
-    def _sample_points(self, n: int, rngs: nnx.Rngs) -> Matrix:
+    def _sample_points(self, n: int, rng: RandomGenerator) -> Matrix:
         """Implementation of point sampling."""
 
 

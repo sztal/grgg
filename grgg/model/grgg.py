@@ -1,8 +1,9 @@
-from collections.abc import Callable, Iterable, Iterator, Sequence
-from functools import singledispatchmethod, wraps
+from collections.abc import Callable, Iterable, Sequence
+from functools import singledispatchmethod
 from typing import TYPE_CHECKING, Any, Self
 
-import jax.numpy as np
+import equinox as eqx
+import jax.numpy as jnp
 
 from grgg._typing import Floats
 from grgg.manifolds import CompactManifold, Sphere
@@ -13,7 +14,6 @@ from .functions import (
     ProbabilityFunction,
 )
 from .layers import AbstractLayer
-from .parameters import AbstractModelParameter
 
 if TYPE_CHECKING:
     from ._sampling import Sample
@@ -38,22 +38,32 @@ class GRGG(AbstractModel, Sequence[Self]):
         Tuple of GRGG layers with different energy and coupling functions.
     """
 
+    n_nodes: int = eqx.field(static=True)
+    manifold: CompactManifold
+    layers: tuple[AbstractLayer, ...]
+    probability: ProbabilityFunction = eqx.field(repr=False)
+    function: Callable[[Floats, Floats, Floats], Floats] = eqx.field(repr=False)
+
     def __init__(
         self,
         n_nodes: int,
         manifold: CompactManifold | int | tuple[int, type[CompactManifold]],
-        *layers: AbstractLayer,
-        probability_function: ProbabilityFunction | None = None,
+        layers: AbstractLayer | Sequence[AbstractLayer] = (),
+        *more_layers: AbstractLayer,
         # quantizer: ArrayQuantizer | None = None,
+        probability: ProbabilityFunction | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialization method.
 
         `**kwargs` are passed to the coupling function.
         """
-        self._n_nodes = int(n_nodes)
+        self.n_nodes = int(n_nodes)
         # self.quantizer = ArrayQuantizer() if quantizer is None else
         # Handle manifold initialization
+        if not isinstance(layers, Iterable):
+            layers = (layers,)
+        layers = tuple(layers) + more_layers
         if layers and (
             isinstance(layers[0], int)
             or isinstance(layers[0], type)
@@ -65,33 +75,19 @@ class GRGG(AbstractModel, Sequence[Self]):
         else:
             self.manifold = self._make_manifold(manifold)
         # Initialize functions
-        if probability_function is None:
-            self._probability = ProbabilityFunction(
-                CouplingFunction(self.manifold.dim, **kwargs)
-            )
-        else:
-            self._probability = probability_function
-        self._function = self._define_function()
-        self.__call__ = wraps(self._function)(self.__call__.__func__).__get__(self)
+        self.probability = probability or ProbabilityFunction(
+            CouplingFunction(self.manifold.dim, **kwargs)
+        )
+        self.function = self._define_function()
         # Initialize layers
-        self.layers = ()
-        for layer in layers:
-            self.add_layer(layer)
+        self.layers = tuple(layer.attach(self) for layer in layers)
         # Initialize integration and optimization namespaces
         # self.integrate = Integration(self)
 
-    def __copy__(self, **kwargs: Any) -> Self:
-        if kwargs:
-            self = self.copy().dequantize()
-        if (key := "n_nodes") not in kwargs:
-            kwargs[key] = self._n_nodes
-        if (key := "manifold") not in kwargs:
-            kwargs[key] = self.manifold.copy()
-        if (key := "layers") not in kwargs:
-            kwargs[key] = [layer.copy() for layer in self.layers]
-        if (key := "probability_function") not in kwargs:
-            kwargs[key] = self._probability
-        return GRGG(**kwargs)
+    def __repr__(self) -> str:
+        cn = self.__class__.__name__
+        layers = ", ".join(repr(layer) for layer in self.layers)
+        return f"{cn}({self.n_nodes}, {self.manifold}, {layers})"
 
     def __getitem__(
         self, index: int | slice | Iterable
@@ -100,13 +96,13 @@ class GRGG(AbstractModel, Sequence[Self]):
             layers = tuple(self.layers[i] for i in index)
         else:
             layers = [self.layers[index]]
-        return self.__class__(self._n_nodes, self.manifold, *layers)
+        return self.replace(layers=tuple(layers))
 
     def __len__(self) -> int:
         return len(self.layers)
 
     def __call__(self, g: Floats, beta: Floats, mu: Floats) -> Floats:
-        return self._function(g, beta, mu)
+        return self.function(g, beta, mu)
 
     def __add__(self, layer: AbstractLayer) -> Self:
         """Add a layer to the GRGG model using the `+` operator.
@@ -115,29 +111,9 @@ class GRGG(AbstractModel, Sequence[Self]):
         --------
         >>> from grgg import GRGG, Complementarity
         >>> GRGG(100, 1) + Complementarity()
-        GRGG( # Beta: 1 ..., Mu: 1 ..., Total: 2 ...
-          manifold=Sphere(
-              dim=1,
-              r=...
-          ),
-          layers=(Complementarity( # Beta: 1 ..., Mu: 1 ..., Total: 2 ...
-              beta=Beta( # 1 ...
-              value=Array(1.5, ...)
-              ),
-              mu=Mu( # 1 ...
-              value=Array(0., ...)
-              ),
-              log=...,
-              eps=...
-          ),)
-        )
+        GRGG(100, Sphere(1, r=15.92), Complementarity(beta=f32[], mu=f32[], log=True))
         """
         return self.add_layer(layer)
-
-    @property
-    def n_nodes(self) -> int:
-        """Number of nodes in the model."""
-        return self._n_nodes
 
     def n_units(self) -> int:
         """Number of units in the model."""
@@ -146,18 +122,12 @@ class GRGG(AbstractModel, Sequence[Self]):
     @property
     def n_layers(self) -> int:
         """Number of layers in the model."""
-        return len(self.layers)
+        return len(self)
 
     @property
     def delta(self) -> float:
         """Sampling density."""
         return self.n_nodes / self.manifold.volume
-
-    @property
-    def submodels(self) -> Iterator[Self]:
-        """Iterator over single-layer submodels."""
-        for i in range(len(self.layers)):
-            yield self[i]
 
     @property
     def is_quantized(self) -> bool:
@@ -170,17 +140,12 @@ class GRGG(AbstractModel, Sequence[Self]):
         return any(layer.is_heterogeneous for layer in self.layers)
 
     @property
-    def probability(self) -> ProbabilityFunction:
-        """The probability function."""
-        return self._probability
-
-    @property
     def coupling(self) -> CouplingFunction:
         """The coupling function."""
         return self.probability.coupling
 
     @property
-    def parameters(self) -> list[dict[str, AbstractModelParameter]]:
+    def parameters(self) -> list[dict[str, jnp.ndarray]]:
         """Model parameters."""
         return [layer.parameters for layer in self.layers]
 
@@ -197,7 +162,7 @@ class GRGG(AbstractModel, Sequence[Self]):
         )
 
     def add_layer(self, layer: AbstractLayer) -> Self:
-        """Add a layer to the GRGG model.
+        """Return a shallow copy with the new layer.
 
         Parameters
         ----------
@@ -219,20 +184,19 @@ class GRGG(AbstractModel, Sequence[Self]):
         if not isinstance(layer, AbstractLayer):
             errmsg = f"'layer' must be a '{AbstractLayer.__name__}' instance"
             raise TypeError(errmsg)
-        layer.model = self
-        self.layers = (*self.layers, layer)
-        return self
+        layer = layer.attach(self)
+        return self.replace(layers=(*self.layers, layer))
 
     def remove_layer(self, index: int) -> Self:
-        """Remove a layer from the GRGG model.
+        """Return a shallow copy of the GRGG model without the specified layer.
 
         Parameters
         ----------
         index
             Index of the layer to remove.
         """
-        self.layers = tuple(layer for i, layer in enumerate(self.layers) if i != index)
-        return self
+        layers = tuple(layer for i, layer in enumerate(self.layers) if i != index)
+        return self.replace(layers=layers)
 
     def define_function(self) -> Callable[[Floats, Floats, Floats], Floats]:
         """Define the model function."""
@@ -251,7 +215,7 @@ class GRGG(AbstractModel, Sequence[Self]):
             """
             P = 1.0
             for i, layer in enumerate(self.layers):
-                P *= 1 - layer._function(g, beta[i], mu[i])
+                P *= 1 - layer.function(g, beta[i], mu[i])
             return 1 - P
 
         return model_function
@@ -291,5 +255,5 @@ class GRGG(AbstractModel, Sequence[Self]):
         return self._make_manifold(manifold)
 
     @_make_manifold.register
-    def _(self, dim: np.integer, *args: Any, **kwargs: Any) -> CompactManifold:
+    def _(self, dim: jnp.integer, *args: Any, **kwargs: Any) -> CompactManifold:
         return self._make_manifold(int(dim), *args, **kwargs)

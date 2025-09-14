@@ -2,9 +2,8 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any, Self
 
-import jax.numpy as np
-from flax import nnx
-from jax import tree_util
+import jax
+import jax.numpy as jnp
 from jaxtyping import DTypeLike
 
 from grgg._typing import IntVector
@@ -28,8 +27,8 @@ class LazyOuter:
 
     Examples
     --------
-    >>> x1 = np.array([1, 2, 3])
-    >>> x2 = np.array([4, 5])
+    >>> x1 = jnp.array([1, 2, 3])
+    >>> x2 = jnp.array([4, 5])
     >>> B = LazyOuter(x1, x2)
     >>> B
     <LazyOuter (multiply), shape=(3, 2), dtype=...>
@@ -47,7 +46,7 @@ class LazyOuter:
     Array([[ 4,  5],
            [ 8, 10],
            [12, 15]], ...)
-    >>> B[np.array([0, 2]), np.array([1, 0])]
+    >>> B[jnp.array([0, 2]), jnp.array([1, 0])]
     Array([ 5, 12], dtype=int32)
 
     If indexed with a single item, the result is a new instance with a filtered `x`.
@@ -64,30 +63,32 @@ class LazyOuter:
     Array(6, ...)
     """
 
+    __slots__ = ("x", "y", "op")
+
     def __init__(
         self,
-        x: np.ndarray,
-        y: np.ndarray | None = None,
-        op: Callable[[np.ndarray, np.ndarray], np.ndarray] = np.multiply,
+        x: jnp.ndarray,
+        y: jnp.ndarray | None = None,
+        op: Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray] = jnp.multiply,
     ) -> None:
-        x = np.asarray(x)
-        y = x if y is None else np.asarray(y)
+        x = jnp.asarray(x)
+        y = x if y is None else jnp.asarray(y)
         if x.ndim > 1 or y.ndim > 1:
             errmsg = "Both input arrays must be 1D."
             raise ValueError(errmsg)
-        if not np.isscalar(x) or not np.isscalar(y):
-            x = np.atleast_1d(x)
-            y = np.atleast_1d(y)
-        dtype = np.promote_types(x.dtype, y.dtype)
+        if not jnp.isscalar(x) or not jnp.isscalar(y):
+            x = jnp.atleast_1d(x)
+            y = jnp.atleast_1d(y)
+        dtype = jnp.promote_types(x.dtype, y.dtype)
         self.x = x.astype(dtype)
         self.y = y.astype(dtype)
-        self.op = wraps(op)(nnx.jit(op))
+        self.op = wraps(op)(jax.jit(op))
 
     def __repr__(self) -> str:
         cn = self.__class__.__name__
         return f"<{cn} ({self.op.__name__}), shape={self.shape}, dtype={self.dtype}>"
 
-    def __getitem__(self, args: Any) -> np.ndarray | Self:
+    def __getitem__(self, args: Any) -> jnp.ndarray | Self:
         if args is Ellipsis:
             if self.is_scalar:
                 return self.op(self.x, self.y)
@@ -95,7 +96,7 @@ class LazyOuter:
         if not isinstance(args, tuple):
             args = (args,)
         if len(args) == 1:
-            if not np.isscalar(self.x):
+            if not jnp.isscalar(self.x):
                 self.x = self.x.flatten()[args[0],]
             return self
         if self.is_scalar:
@@ -103,8 +104,8 @@ class LazyOuter:
         if not args:
             return self[...]
         i1, i2 = self._process_args(args)
-        if isinstance(i1, np.ndarray) and (
-            np.isscalar(i1) or isinstance(i2, np.ndarray)
+        if isinstance(i1, jnp.ndarray) and (
+            jnp.isscalar(i1) or isinstance(i2, jnp.ndarray)
         ):
             return self.op(self.x[i1], self.y[i2])
         return self.op(self.x[i1, None], self.y[i2])
@@ -125,7 +126,7 @@ class LazyOuter:
 
     @property
     def is_scalar(self) -> bool:
-        return np.isscalar(self.x) and np.isscalar(self.y)
+        return jnp.isscalar(self.x) and jnp.isscalar(self.y)
 
     def _process_args(
         self, args: tuple[Any, Any]
@@ -140,14 +141,14 @@ class LazyOuter:
             i2 = slice(None)
         i1 = self._process_arg(i1)
         i2 = self._process_arg(i2)
-        if isinstance(i1, np.ndarray) and isinstance(i2, np.ndarray):
-            np.broadcast_shapes(i1.shape, i2.shape)
+        if isinstance(i1, jnp.ndarray) and isinstance(i2, jnp.ndarray):
+            jnp.broadcast_shapes(i1.shape, i2.shape)
         return i1, i2
 
-    def _process_arg(self, arg: slice | np.ndarray) -> IntVector:
+    def _process_arg(self, arg: slice | jnp.ndarray) -> IntVector:
         if isinstance(arg, slice):
             return arg
-        arg = np.asarray(arg)
+        arg = jnp.asarray(arg)
         if arg.dtype == bool:
             errmsg = "boolean masks are not supported"
             raise IndexError(errmsg)
@@ -156,16 +157,17 @@ class LazyOuter:
             raise IndexError(errmsg)
         return arg
 
-    def tree_flatten(self):
-        children = (self.x, self.y)
-        aux_data = (self.op,)
-        return children, aux_data
 
-    @classmethod
-    def tree_unflatten(cls, aux_data, children):
-        return cls(*children, *aux_data)
+def _lazy_outer_tree_flatten(self):
+    children = (self.x, self.y)
+    aux_data = (self.op,)
+    return children, aux_data
 
 
-tree_util.register_pytree_node(
-    LazyOuter, LazyOuter.tree_flatten, LazyOuter.tree_unflatten
+def _lazy_outer_tree_unflatten(aux_data, children):
+    return LazyOuter(*children, *aux_data)
+
+
+jax.tree_util.register_pytree_node(
+    LazyOuter, _lazy_outer_tree_flatten, _lazy_outer_tree_unflatten
 )

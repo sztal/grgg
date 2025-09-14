@@ -1,10 +1,11 @@
 import math
 from typing import Self
 
-import jax.numpy as np
-from flax import nnx
+import equinox as eqx
+import jax.numpy as jnp
 
 from grgg._typing import Matrix, Scalar, Vector
+from grgg.random import RandomGenerator
 
 from .manifold import CompactManifold
 
@@ -23,28 +24,27 @@ class Sphere(CompactManifold):
     --------
     >>> sphere = Sphere(2, r=3.0)
     >>> sphere
-    Sphere(
-      dim=2,
-      r=3.0
-    )
+    Sphere(2, r=3.00)
     >>> sphere.volume
     113.09733552923255
     >>> sphere.diameter
     9.42477796076938
-    >>> points = sphere.sample_points(10, rngs=42)
+    >>> points = sphere.sample_points(10, rng=42)
     >>> points.shape
     (10, 3)
-    >>> bool(np.allclose(np.linalg.norm(points, axis=1), sphere.r))
+    >>> bool(jnp.allclose(jnp.linalg.norm(points, axis=1), sphere.r))
     True
 
     Compare distances with the reference implementation from :mod:`scipy`.
     >>> from scipy.spatial.distance import pdist
     >>> r = sphere.r
     >>> dists = sphere.distances(points)
-    >>> ref_dists = np.arccos(1 - pdist(points / r, metric="cosine")) * r
-    >>> bool(np.allclose(dists, ref_dists))
+    >>> ref_dists = jnp.arccos(1 - pdist(points / r, metric="cosine")) * r
+    >>> bool(jnp.allclose(dists, ref_dists))
     True
     """
+
+    r: float = eqx.field(static=True, converter=float)
 
     def __init__(self, dim: int, r: float = 1.0) -> None:
         super().__init__(dim)
@@ -52,6 +52,9 @@ class Sphere(CompactManifold):
 
     def __copy__(self) -> Self:
         return type(self)(self.dim, self.r)
+
+    def _repr_params(self) -> str:
+        return f"r={self.r:.2f}"
 
     @property
     def radius(self) -> float:
@@ -92,13 +95,13 @@ class Sphere(CompactManifold):
             raise ValueError(errmsg)
         x /= self.r
         y /= self.r
-        cosine = np.clip(np.dot(x, y), -1.0, 1.0)
-        return np.arccos(cosine) * self.r
+        cosine = jnp.clip(jnp.dot(x, y), -1.0, 1.0)
+        return jnp.arccos(cosine) * self.r
 
-    def _sample_points(self, n: int, rngs: nnx.Rngs) -> Matrix:
+    def _sample_points(self, n: int, rng: RandomGenerator) -> Matrix:
         """Implementation of point sampling."""
-        points = rngs.normal((n, self.embedding_dim))
-        points /= np.linalg.norm(points, axis=1, keepdims=True)
+        points = rng.normal((n, self.embedding_dim))
+        points /= jnp.linalg.norm(points, axis=1, keepdims=True)
         if self.r != 1.0:
             points *= self.r
         return points

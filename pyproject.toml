@@ -22,9 +22,8 @@ dependencies = [
     "scikit-learn>=1.7.1",
     "jax>=0.7.1",
     "jaxtyping>=0.3.2",
-    "flax>=0.11.2",
+    "equinox>=0.13.0",
     "quadax>=0.2.9",
-    "lazyarray>=0.6.0",
     "tqdm>=4.65",
 ]
 dynamic = ["version"]
@@ -148,6 +147,9 @@ doctest_optionflags = [
     "IGNORE_EXCEPTION_DETAIL",
     "ELLIPSIS",
     "FLOAT_CMP",
+]
+filterwarnings = [
+    "ignore:jax.interpreters.batching.NotMapped is deprecated:DeprecationWarning",
 ]
 
 [tool.coverage.paths]
