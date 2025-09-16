@@ -1,4 +1,5 @@
 # Root level
+/.hypothesis
 /_grgg
 /figures
 /_sandbox*

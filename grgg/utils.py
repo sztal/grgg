@@ -191,6 +191,50 @@ def cartesian_product(
     return cartesian_product([product, *arrays[2:]], axis=axis)
 
 
+def split_by(
+    data: jnp.ndarray, groups: Sequence | jnp.ndarray
+) -> tuple[jnp.ndarray, ...]:
+    """Split an array into groups along the first axis.
+
+    Parameters
+    ----------
+    data
+        The array to be split.
+    groups
+        A sequence of group labels.
+
+    Returns
+    -------
+    splits
+        A tuple of arrays, each corresponding to a group.
+
+    Examples
+    --------
+    >>> data = jnp.arange(10).reshape(5, 2)
+    >>> data
+    Array([[0, 1],
+           [2, 3],
+           [4, 5],
+           [6, 7],
+           [8, 9]], ...)
+    >>> split_by(data, [1, 1, 2, 2, 1])
+    (Array([[0, 1],
+           [2, 3],
+           [8, 9]], dtype=int32), Array([[4, 5],
+           [6, 7]], dtype=int32))
+    """
+    groups = jnp.atleast_1d(jnp.asarray(groups))
+    if groups.ndim != 1:
+        errmsg = "'groups' must be a 1D array-like."
+        raise ValueError(errmsg)
+    if len(groups) != len(data):
+        errmsg = "'groups' must have the same length as the first dimension of 'data'."
+        raise ValueError(errmsg)
+    order = jnp.argsort(groups, stable=True)
+    _, splitpoints = jnp.unique(groups[order], return_index=True)
+    return tuple(jnp.split(data[order], splitpoints[1:]))
+
+
 def batch_slices(
     n: int,
     batch_size: int,

@@ -1,15 +1,16 @@
 from collections.abc import Callable
-from functools import wraps
+from dataclasses import replace
 from typing import Any, Self
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 from jaxtyping import DTypeLike
 
-from grgg._typing import IntVector
+from grgg._typing import IntVector, Vector
 
 
-class LazyOuter:
+class LazyOuter(eqx.Module):
     """Lazy outer operation on two 1D arrays.
 
     Only standard indexing with integers or broadcastable 1D integer arrays
@@ -63,7 +64,9 @@ class LazyOuter:
     Array(6, ...)
     """
 
-    __slots__ = ("x", "y", "op")
+    x: Vector
+    y: Vector
+    op: Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]
 
     def __init__(
         self,
@@ -82,7 +85,7 @@ class LazyOuter:
         dtype = jnp.promote_types(x.dtype, y.dtype)
         self.x = x.astype(dtype)
         self.y = y.astype(dtype)
-        self.op = wraps(op)(jax.jit(op))
+        self.op = jax.jit(op)
 
     def __repr__(self) -> str:
         cn = self.__class__.__name__
@@ -97,7 +100,7 @@ class LazyOuter:
             args = (args,)
         if len(args) == 1:
             if not jnp.isscalar(self.x):
-                self.x = self.x.flatten()[args[0],]
+                return replace(self, x=self.x.flatten()[args[0],])
             return self
         if self.is_scalar:
             return self.op(self.x, self.y)
@@ -156,18 +159,3 @@ class LazyOuter:
             errmsg = "Only 1D arrays are supported for indexing"
             raise IndexError(errmsg)
         return arg
-
-
-def _lazy_outer_tree_flatten(self):
-    children = (self.x, self.y)
-    aux_data = (self.op,)
-    return children, aux_data
-
-
-def _lazy_outer_tree_unflatten(aux_data, children):
-    return LazyOuter(*children, *aux_data)
-
-
-jax.tree_util.register_pytree_node(
-    LazyOuter, _lazy_outer_tree_flatten, _lazy_outer_tree_unflatten
-)

@@ -177,7 +177,7 @@ class NodeView(AbstractModelView):
             raise TypeError(errmsg)
         if self._i is None:
             return self.module
-        model = self.module.deepcopy() if copy else self.module
+        model = self.module.copy(deep=True) if copy else self.module
         layers = [
             layer.replace(
                 beta=beta.copy() if copy else beta, mu=mu.copy() if copy else mu
