@@ -5,6 +5,7 @@ from typing import Any
 
 import jax
 import jax.numpy as jnp
+from equinox import tree_pformat
 
 from grgg._typing import Matrix, Scalar, Vector
 
@@ -317,3 +318,11 @@ def parse_switch_flag(
     else:
         value, options = bool(value), {}
     return value, options
+
+
+def format_array(x: jnp.ndarray) -> str:
+    """Format a JAX array for display."""
+    s = tree_pformat(x)
+    if jnp.isscalar(x):
+        return f"{x.item():.2f}"
+    return s

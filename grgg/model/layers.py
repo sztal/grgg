@@ -1,7 +1,7 @@
 import weakref
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Self
+from typing import TYPE_CHECKING, Self, Union
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -10,10 +10,11 @@ from grgg import options
 from grgg._typing import Floats
 from grgg.abc import AbstractGRGG
 from grgg.manifolds import CompactManifold
+from grgg.model.abc import ParamsT
 
 from .abc import AbstractModelModule
 from .functions import CouplingFunction, ProbabilityFunction
-from .parameters import Beta, Mu
+from .parameters import Beta, Mu, Parameters
 
 if TYPE_CHECKING:
     from .grgg import GRGG
@@ -39,27 +40,46 @@ class AbstractLayer(AbstractModelModule):
     Similarity(beta=f...[], mu=f...[], log=...)
     """
 
-    beta: jnp.ndarray = eqx.field(default=None, converter=Beta.validate)
-    mu: jnp.ndarray = eqx.field(default=None, converter=Mu.validate)
-    log: bool = eqx.field(
-        default=None,
-        kw_only=True,
-        static=True,
-        converter=lambda x: bool(options.layer.log if x is None else x),
-    )
-    eps: float = eqx.field(
-        default=None,
-        kw_only=True,
-        static=True,
-        repr=False,
-        converter=lambda x: float(options.layer.eps if x is None else x),
-    )
-    _model: weakref.ReferenceType["GRGG"] | None = eqx.field(
-        default=None, repr=False, static=True
-    )
+    beta: jnp.ndarray
+    mu: jnp.ndarray
+    log: bool = eqx.field(static=True)
+    eps: float = eqx.field(static=True, repr=False)
+    _model: weakref.ReferenceType["GRGG"] | None = eqx.field(repr=False, static=True)
     function: Callable[[Floats, Floats, Floats], Floats] = eqx.field(
-        default=None, repr=False, static=True
+        repr=False, static=True
     )
+
+    def __init__(
+        self,
+        beta: jnp.ndarray | None = None,
+        mu: jnp.ndarray | None = None,
+        *,
+        log: bool | None = None,
+        eps: float | None = None,
+        _model: Union[weakref.ReferenceType["GRGG"], "GRGG", None] = None,
+        function: Callable[[Floats, Floats, Floats], Floats] | None = None,
+    ) -> None:
+        """Initialize layer."""
+        self.beta = Beta.validate(beta)
+        self.mu = Mu.validate(mu)
+        self.log = bool(options.model.log if log is None else log)
+        self.eps = float(options.model.eps if eps is None else eps)
+        if _model is not None and not isinstance(_model, weakref.ReferenceType):
+            if not isinstance(_model, AbstractGRGG):
+                errmsg = "_model must be a GRGG model or a weak reference to one"
+                raise TypeError(errmsg)
+            _model = weakref.ref(_model)
+        self._model = _model
+        if function is None and _model is not None:
+            function = self.define_function(self.model)
+        self.function = function
+
+    def __check_init__(self) -> None:
+        if self.eps <= 0:
+            errmsg = "'eps' must be positive"
+            raise ValueError(errmsg)
+        if self._model is not None:
+            self.parameters.validate(self.n_units)
 
     def __call__(self, g: Floats, beta: Floats, mu: Floats) -> Floats:
         """Compute layer edge probabilities.
@@ -78,7 +98,7 @@ class AbstractLayer(AbstractModelModule):
     @property
     def parameters(self) -> dict[str, jnp.ndarray]:
         """Layer parameters."""
-        return {"beta": self.beta, "mu": self.mu}
+        return Parameters(beta=self.beta, mu=self.mu)
 
     @property
     def model(self) -> "GRGG":
@@ -96,9 +116,19 @@ class AbstractLayer(AbstractModelModule):
         return self.model.n_nodes
 
     @property
+    def n_units(self) -> int:
+        """Number of units in the model."""
+        return self.model.n_units
+
+    @property
     def is_heterogeneous(self) -> bool:
         """Whether the layer has heterogeneous parameters."""
         return any(not jnp.isscalar(param) for param in self.parameters.values())
+
+    @property
+    def is_quantized(self) -> bool:
+        """Whether the layer has quantized parameters."""
+        return self.model.is_quantized
 
     @property
     def manifold(self) -> CompactManifold:
@@ -119,8 +149,8 @@ class AbstractLayer(AbstractModelModule):
         """Check if two layers are equal."""
         return (
             super().equals(other)
-            and self.mu.equals(other.mu)
-            and self.beta.equals(other.beta)
+            and jnp.array_equal(self.mu, other.mu)
+            and jnp.array_equal(self.beta, other.beta)
             and self.probability.equals(other.probability)
             and self.log == other.log
             and self.eps == other.eps
@@ -134,15 +164,22 @@ class AbstractLayer(AbstractModelModule):
         model
             The GRGG model to attach to.
         """
-        if not isinstance(model, AbstractGRGG):
-            errmsg = "layer can only be attached to a GRGG model"
-            raise TypeError(errmsg)
-        model = weakref.ref(model)  # type: ignore
-        function = self.define_function(model())
-        layer = self.replace(_model=model, function=function)
-        layer._validate_param(layer.beta)
-        layer._validate_param(layer.mu)
-        return layer
+        return self.replace(_model=model)
+
+    def detach(self) -> Self:
+        """Return a shallow copy detached from any model."""
+        return self.replace(_model=None, function=None)
+
+    def set_parameters(
+        self, parameters: ParamsT | None = None, **kwargs: jnp.ndarray
+    ) -> Self:
+        if parameters is None:
+            parameters = {}
+        parameters = {**parameters, **kwargs}
+        if any(key not in self.parameters for key in parameters):
+            errmsg = "invalid parameter name(s) provided"
+            raise KeyError(errmsg)
+        return self.replace(**parameters) if parameters else self
 
     @abstractmethod
     def energy(self, g: Floats) -> Floats:
@@ -177,14 +214,6 @@ class AbstractLayer(AbstractModelModule):
             return model.probability(energy, beta, mu)
 
         return layer_function
-
-    def _validate_param(self, param: jnp.ndarray) -> None:
-        if not jnp.isscalar(param) and param.size != self.model.n_nodes:
-            errmsg = (
-                f"node parameter size ({param.size}) does not match number of nodes "
-                f"({self.n_nodes})"
-            )
-            raise ValueError(errmsg)
 
 
 class Similarity(AbstractLayer):

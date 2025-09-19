@@ -1,3 +1,4 @@
+import math
 from abc import abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
@@ -8,6 +9,7 @@ import equinox as eqx
 import jax.numpy as jnp
 
 from grgg.abc import AbstractGRGG
+from grgg.indexing import CartesianCoordinates, IndexArg
 from grgg.lazy import LazyOuter
 from grgg.utils import squareform
 
@@ -22,10 +24,88 @@ class AbstractModelView(eqx.Module):
     """Abstract base class for node indexers."""
 
     module: "AbstractModelModule"
+    coords: CartesianCoordinates = eqx.field(repr=False, kw_only=True)
+    _index: IndexArg | tuple[IndexArg, ...] | None = eqx.field(
+        static=False, repr=False, kw_only=True
+    )
 
-    @abstractmethod
+    def __init__(
+        self,
+        module: "AbstractModelModule",
+        *,
+        coords: CartesianCoordinates | None = None,
+        _index: IndexArg | tuple[IndexArg, ...] | None = None,
+    ) -> None:
+        self.module = module
+        self._index = self._index_input(_index)
+        coords = coords if coords is not None else CartesianCoordinates(self.full_shape)
+        if self._index is not None:
+            coords = CartesianCoordinates(coords.s_[self._index])
+        self.coords = coords
+
+    def __check_init__(self):
+        if (
+            self._index is not None
+            and isinstance(self._index, tuple)
+            and len(self._index) > self.full_ndim
+        ):
+            cn = self.__class__.__name__
+            errmsg = (
+                f"too many indices for '{cn}': expected up to "
+                f"{self.full_ndim}, got {len(self._index)}"
+            )
+            raise ValueError(errmsg)
+
     def __getitem__(self, args: Any) -> Self:
-        """Indexing method."""
+        if self._index is None:
+            return replace(self, _index=args)
+        cn = self.__class__.__name__
+        errmsg = (
+            f"'{cn}' can only be indexed once; use the `reset()` method "
+            "or `reindex` property to define new indexing from scratch "
+            "or call `materialize()` to create a new model with the current selection"
+        )
+        raise IndexError(errmsg)
+
+    @property
+    @abstractmethod
+    def full_shape(self) -> tuple[int, ...]:
+        """Default shape of the view."""
+
+    @property
+    def full_ndim(self) -> int:
+        return len(self.full_shape)
+
+    @property
+    def full_size(self) -> int:
+        return math.prod(self.full_shape)
+
+    @property
+    def shape(self) -> tuple[int, ...]:
+        """Shape of the view."""
+        return self.coords.shape
+
+    @property
+    def ndim(self) -> int:
+        return len(self.shape)
+
+    @property
+    def size(self) -> int:
+        return math.prod(self.shape)
+
+    @property
+    def n_nodes(self) -> int:
+        return self.module.n_units
+
+    @property
+    def index(self) -> int | slice | Sequence[int] | None:
+        """Current index or `None` if no indexing is applied."""
+        return self._index
+
+    @property
+    def reindex(self) -> Self:
+        """Reindex the view to use Cartesian coordinates."""
+        return self.reset()
 
     @property
     @abstractmethod
@@ -38,19 +118,22 @@ class AbstractModelView(eqx.Module):
         """Mu parameter outer product."""
 
     @property
-    @abstractmethod
     def is_active(self) -> bool:
         """Whether the view is active (i.e., has any indices selected)."""
+        return self._index is not None
 
-    @property
-    def reindex(self) -> Self:
-        """Return cleared view to allow reindexing."""
-        self.clear()
-        return self
-
-    @abstractmethod
     def reset(self) -> None:
-        """Reset the view to include all nodes."""
+        """Reset the view."""
+        return replace(self, _index=None)
+
+    def _index_input(
+        self, index: IndexArg | tuple[IndexArg, ...] | None
+    ) -> IndexArg | tuple[IndexArg, ...] | None:
+        """Process input index."""
+        if index is None:
+            return None
+        _index = index if isinstance(index, tuple) else (index,)
+        return _index
 
 
 class NodeView(AbstractModelView):
@@ -65,33 +148,32 @@ class NodeView(AbstractModelView):
         Parent model module.
     """
 
-    _i: int | slice | Sequence[int] | None = eqx.field(
-        default=None, repr=False, kw_only=True
-    )
-
-    def __getitem__(self, args: Any) -> Self:
-        if self._i is None:
-            return replace(self, _i=args)
-        errmsg = "too many indices for nodes"
-        raise IndexError(errmsg)
-
     @property
-    def n_nodes(self) -> int:
-        """Number of selected nodes."""
-        if self._i is None:
-            return self.module.n_nodes
-        if isinstance(self._i, int):
-            return 1
-        if isinstance(self._i, slice):
-            return len(range(*self._i.indices(self.module.n_nodes)))
-        return len(self._i)
+    def full_shape(self) -> tuple[int, ...]:
+        return (self.module.n_units,)
 
     @property
     def pairs(self) -> "NodePairView":
-        """Node pairs view."""
+        """Node pairs view from the current nodes' view."""
         pairs = NodePairView(self.module)
-        if self._i is not None:
-            return pairs[self._i][self._i]
+        if self.index is not None:
+            index = self.index
+            index = index[0] if isinstance(index, tuple) else index
+            if not isinstance(index, slice) and not jnp.isscalar(index):
+                index = jnp.asarray(index)
+                if index.ndim > 1:
+                    errmsg = (
+                        "cannot create pairs view from multi-dimensional node indices"
+                    )
+                    raise IndexError(errmsg)
+                if index.ndim == 1:
+                    if jnp.issubdtype(index.dtype, jnp.bool_):
+                        errmsg = "cannot create pairs view from boolean node indices"
+                        raise IndexError(errmsg)
+                    index = jnp.ix_(index, index)
+            else:
+                index = (index, index)
+            return pairs[index]
         return pairs
 
     @property
@@ -107,11 +189,11 @@ class NodeView(AbstractModelView):
     @property
     def is_active(self) -> bool:
         """Whether the view is active (i.e., has any indices selected)."""
-        return self._i is not None
+        return self._index is not None
 
     def reset(self) -> None:
         """Reset the current node selection."""
-        self._i = None
+        self._index = None
 
     def probs(self, g: jnp.ndarray) -> jnp.ndarray:
         """Compute edge probabilities within the selected group of nodes."""
@@ -124,23 +206,41 @@ class NodeView(AbstractModelView):
         """
         return self.module.manifold.sample_points(self.n_nodes, **kwargs)
 
-    def sample_pmatrix(self, *, condensed: bool = False, **kwargs: Any) -> jnp.ndarray:
+    def sample_pmatrix(
+        self,
+        points: jnp.ndarray | None = None,
+        *,
+        condensed: bool = False,
+        **kwargs: Any,
+    ) -> jnp.ndarray:
         """Sample probability matrix from the selected group of nodes.
 
-        `**kwargs`* are passed to :meth:`sample_points`.
+        Parameters
+        ----------
+        points
+            Points to use. If `None`, points are sampled using
+            :meth:`~grgg.model._views.NodeView.sample_points`.
+        condensed
+            Whether to return the condensed form of the probability matrix.
+        **kwargs
+            Additional arguments passed to
+            :meth:`~grgg.model._views.NodeView.sample_points`.
 
         Examples
         --------
-        >>> from grgg import GRGG, Similarity
+        >>> from grgg import GRGG, Similarity, RandomGenerator
+        >>> rng = RandomGenerator(0)
         >>> model = GRGG(5, 2, Similarity(2, 1))
-        >>> P = model.nodes.sample_pmatrix()  # Full probability matrix
+        >>> P = model.nodes.sample_pmatrix(rng=rng)  # Full probability matrix
         >>> P.shape
         (5, 5)
-        >>> P_sub = model.nodes[[0, 2, 4]].sample_pmatrix()  # For nodes 0, 2, and 4
+        >>> P_sub = model.nodes[[0, 2, 4]].sample_pmatrix(rng=rng)  # nodes 0, 2, and 4
         >>> P_sub.shape
         (3, 3)
         """
-        points = self.sample_points(**kwargs)
+        self = self.materialize(copy=False).nodes if self.is_active else self
+        if points is None:
+            points = self.sample_points(**kwargs)
         g = self.module.manifold.distances(points, condensed=True)
         i, j = jnp.triu_indices(len(points), k=1)
         p = self.pairs[i, j].probs(g)
@@ -152,7 +252,7 @@ class NodeView(AbstractModelView):
         `**kwargs`* are passed to :meth:`~grgg.model._sampling.Sampler.sample`."""
         return Sampler(self).sample(**kwargs)
 
-    def materialize(self, *, copy: bool = True) -> "GRGG":
+    def materialize(self, *, copy: bool = False) -> "GRGG":
         """Materialize a new GRGG model with only the selected nodes.
 
         Parameters
@@ -162,6 +262,7 @@ class NodeView(AbstractModelView):
 
         Examples
         --------
+        >>> import jax.numpy as jnp
         >>> from grgg import GRGG, Similarity, Complementarity
         >>> model = GRGG(100, 2, Similarity(2, jnp.zeros(100)), Complementarity(1, 0))
         >>> submodel = model.nodes[:10].materialize()
@@ -175,28 +276,43 @@ class NodeView(AbstractModelView):
         if not isinstance(self.module, AbstractGRGG):
             errmsg = "only views of the full GRGG model can be materialized"
             raise TypeError(errmsg)
-        if self._i is None:
+        if self._index is None:
             return self.module
+        index = self.index
+        if isinstance(index, tuple):
+            if len(index) != 1:
+                errmsg = "only single-axis indexing is supported for node views"
+                raise IndexError(errmsg)
+            index = index[0]
+        if isinstance(index, jnp.ndarray) and index.ndim > 1:
+            errmsg = "only 1D array indexing is supported when materializing node views"
+            raise IndexError(errmsg)
         model = self.module.copy(deep=True) if copy else self.module
         layers = [
-            layer.replace(
-                beta=beta.copy() if copy else beta, mu=mu.copy() if copy else mu
+            layer.copy()
+            .detach()
+            .replace(
+                beta=beta.copy() if copy else beta,
+                mu=mu.copy() if copy else mu,
             )
             for layer, beta, mu in zip(model.layers, self.beta, self.mu, strict=False)
         ]
         return model.replace(
-            n_nodes=self.n_nodes,
+            n_nodes=self.shape[0],
             manifold=model.manifold,
             layers=layers,
         )
+
+    def degree(self, *args: Any, **kwargs: Any) -> jnp.ndarray:
+        """Compute expected degrees for the selected nodes."""
 
     @singledispatchmethod
     def _get_param(self, params: Mapping, name: str) -> jnp.ndarray:
         """Get parameter."""
         param = params[name]
-        if self._i is not None and not jnp.isscalar(param):
-            return param[self._i]
-        return param
+        if self._index is None or jnp.isscalar(param):
+            return param
+        return param[self.index]
 
     @_get_param.register
     def _(self, params: Sequence, name: str) -> list[jnp.ndarray]:
@@ -218,6 +334,7 @@ class NodePairView(AbstractModelView):
     Examples
     --------
     Indexing in the homogeneous case always returns scalars.
+    >>> import jax.numpy as jnp
     >>> from grgg import GRGG, Similarity, Complementarity
     >>> model = GRGG(100, 2, Similarity(2, 1), Complementarity(1, 0))
     >>> model.pairs[0, 1].beta
@@ -238,39 +355,27 @@ class NodePairView(AbstractModelView):
             [ 9., 10., 11.],
             [10., 11., 12.]], ...)]
 
-    Indexing with cartesian indices is supported too
-    as supported by :mod:`numpy` and :mod:`jax`.
+    Arbitrary NumPy-style indexing is supported.
+    Below we select pairs (0,1) and (1,2).
     >>> model.layers[0].pairs[[0, 1], [1, 2]].mu
     Array([ 9., 11.], ...)
 
-    Selecting rectangular blocks is also supported through repeated indexing.
-    >>> model.layers[0].pairs[[0, 1]][[1, 2]].mu
+    Selecting rectangular is also possible, either through basic slicing,
+    or index cross products.
+    >>> model.layers[0].pairs[:2, 1:3].mu
     Array([[ 9., 10.],
            [10., 11.]], ...)
+    >>> i = jnp.array([0, 1])
+    >>> j = jnp.array([0, 1, 2])
+    >>> model.layers[0].pairs[jnp.ix_(i, j)].beta
+    Array([[2., 3., 4.],
+           [3., 4., 5.]], ...)
     """
 
-    _i: int | slice | Sequence[int] | None = eqx.field(
-        default=None,
-        repr=False,
-        kw_only=True,
-    )
-    _j: int | slice | Sequence[int] | None = eqx.field(
-        default=None,
-        repr=False,
-        kw_only=True,
-    )
-
-    def __getitem__(self, args: Any) -> Self:
-        if isinstance(args, tuple) and len(args) == 2:
-            _i = args
-            _j = None
-            return replace(self, _i=_i, _j=_j)
-        if self._i is None:
-            return replace(self, _i=args)
-        if self._j is None:
-            return replace(self, _j=args)
-        errmsg = "too many indices for node pairs"
-        raise IndexError(errmsg)
+    @property
+    def full_shape(self) -> tuple[int, int]:
+        n = self.module.n_units
+        return (n, n)
 
     @property
     def beta(self) -> LazyOuter | list[LazyOuter]:
@@ -282,16 +387,6 @@ class NodePairView(AbstractModelView):
         """Mu parameter outer product."""
         return self._get_param(self.module.parameters, "mu")
 
-    @property
-    def is_active(self) -> bool:
-        """Whether the view is active (i.e., has any indices selected)."""
-        return self._i is not None and self._j is not None
-
-    def reset(self) -> None:
-        """Reset the current node pair selection."""
-        self._i = None
-        self._j = None
-
     def probs(self, g: jnp.ndarray) -> jnp.ndarray:
         """Compute pairwise connection probabilities.
 
@@ -302,28 +397,142 @@ class NodePairView(AbstractModelView):
 
         Examples
         --------
-        >>> from grgg import GRGG, Similarity, Complementarity
-        >>> model = GRGG(3, 2, Similarity([1,2,3], [1,0,0]))
-        >>> model.layers[0].pairs[[0, 1]][[0, 2]].probs(1)
-        Array([[0.999245 , 0.9996325],
-               [0.9969842, 0.5      ]], ...)
+        For homogeneous models, indexing always returns scalars.
+        We use non-logged and non-modified energies to make it easier
+        to verify the results.
+        >>> import jax.numpy as jnp
+        >>> from jax.scipy.special import expit
+        >>> from grgg import GRGG, Similarity, Complementarity, options
+        >>> options.model.log = False
+        >>> options.model.modified = False
+        >>> model = (
+        ...     GRGG(100, 2) +
+        ...     Similarity(2, 1) +
+        ...     Complementarity(3, 2)
+        ... )
+        >>> d = model.manifold.dim
+        >>> gmax = model.manifold.diameter
+        >>> g = jnp.linspace(0, gmax, 10)
+        >>> tol = {"rtol": 1e-4, "atol": 1e-4}
 
-        Evaluate the multilayer model probabilities.
-        >>> model.pairs[[0, 1]][[0, 2]].probs(1)
-        Array([[0.999245 , 0.9996325],
-               [0.9969842, 0.5      ]], ...)
+        Check similarity layer.
+        >>> beta, mu = model.parameters[0].values()
+        >>> sim_probs = model[0].pairs.probs(g)
+        >>> expected = expit(-d*beta*(g - mu))
+        >>> jnp.allclose(sim_probs, expected, **tol).item()
+        True
+
+        Check complementarity layer.
+        >>> beta, mu = model.parameters[1].values()
+        >>> comp_probs = model[1].pairs.probs(g)
+        >>> expected = expit(-d*beta*(gmax - g - mu))
+        >>> jnp.allclose(comp_probs, expected, **tol).item()
+        True
+
+        Check multilayer model.
+        >>> probs = model.pairs.probs(g)
+        >>> jnp.allclose(probs, 1 - (1-sim_probs)*(1-comp_probs), **tol).item()
+        True
+
+        For heterogeneous models arrays are returned.
+        >>> model = (
+        ...     GRGG(3, 3) +
+        ...     Similarity([1,2,3], 1) +
+        ...     Complementarity([4,5,6], [0,1,2])
+        ... )
+        >>> gmax = model.manifold.diameter
+        >>> g = jnp.linspace(0, gmax, 10)
+        >>> d = model.manifold.dim
+
+        Check similarity layer.
+        >>> params = model.parameters[0]
+        >>> beta = params.outer.beta[...]
+        >>> mu = params.outer.mu[...]
+        >>> sim_probs = model[0].pairs.probs(g[:, None, None])
+        >>> expected = expit(-d*beta*(g[:, None, None] - mu))
+        >>> i, j = model.pairs.coords[...]  # zero out diagonals
+        >>> expected = jnp.where(i == j, 0.0, expected)
+        >>> sim_probs.shape == expected.shape
+        True
+        >>> jnp.allclose(sim_probs, expected, **tol).item()
+        True
+
+        Check complementarity layer.
+        >>> params = model.parameters[1]
+        >>> beta = params.outer.beta[...]
+        >>> mu = params.outer.mu[...]
+        >>> comp_probs = model[1].pairs.probs(g[:, None, None])
+        >>> expected = expit(-d*beta*(gmax - g[:, None, None] - mu))
+        >>> i, j = model.pairs.coords[...]  # zero out diagonals
+        >>> expected = jnp.where(i == j, 0.0, expected)
+        >>> comp_probs.shape == expected.shape
+        True
+        >>> jnp.allclose(comp_probs, expected, **tol).item()
+        True
+
+        Check multilayer model.
+        >>> probs = model.pairs.probs(g[:, None, None])
+        >>> expected = 1 - (1-sim_probs)*(1-comp_probs)
+        >>> i, j = model.pairs.coords[...]  # zero out diagonals
+        >>> expected = jnp.where(i == j, 0.0, expected)
+        >>> probs.shape == expected.shape
+        True
+        >>> jnp.allclose(probs, expected, **tol).item()
+        True
+
+        Node pair indexing is supported too.
+        Below we select pairs (0,1) and (2,1).
+        >>> i, j = [0, 2], [1, 1]
+
+        Check similarity layer.
+        >>> params = model.parameters[0]
+        >>> beta = params.outer.beta[i, j]
+        >>> mu = params.outer.mu[i, j]
+        >>> sim_probs = model[0].pairs[i, j].probs(g[:, None])
+        >>> expected = expit(-d*beta*(g[:, None] - mu))
+        >>> sim_probs.shape == expected.shape
+        True
+        >>> jnp.allclose(sim_probs, expected, **tol).item()
+        True
+
+        Check complementarity layer.
+        >>> params = model.parameters[1]
+        >>> beta = params.outer.beta[i, j]
+        >>> mu = params.outer.mu[i, j]
+        >>> comp_probs = model[1].pairs[i, j].probs(g[:, None])
+        >>> expected = expit(-d*beta*(gmax - g[:, None] - mu))
+        >>> comp_probs.shape == expected.shape
+        True
+        >>> jnp.allclose(comp_probs, expected, **tol).item()
+        True
+
+        Check multilayer model.
+        >>> probs = model.pairs[i, j].probs(g[:, None])
+        >>> expected = 1 - (1-sim_probs)*(1-comp_probs)
+        >>> probs.shape == expected.shape
+        True
+        >>> jnp.allclose(probs, expected, **tol).item()
+        True
+
+        Note that when pairs are selected, the self-loop probabilities are still
+        zeroed out correctly.
+        >>> i, j = [1, 2], [1, 2]
+        >>> jnp.all(model.pairs[i, j].probs(g[:, None]) == 0).item()
+        True
+        >>> jnp.all(model.pairs[2, 2].probs(g) == 0).item()
+        True
+
+        Reset options to original values.
+        >>> options.reset()
         """
-        return self._get_probs(self.module.parameters, g)
+        return self._get_probs(self.module.parameters.aligned, g)
 
     @singledispatchmethod
     def _get_param(self, params: Mapping, name: str) -> LazyOuter:
-        param = params[name]
-        if jnp.isscalar(param):
-            param = param / 2
-        outer = LazyOuter(param, op=jnp.add)[self._i]
-        if self._j is not None:
-            return outer[:, self._j]
-        return outer[...]
+        outer = params.outer[name]
+        if self._index is None:
+            return outer[...]
+        return outer[self.index]
 
     @_get_param.register
     def _(self, params: Sequence, name: str) -> list[jnp.ndarray]:
@@ -333,10 +542,24 @@ class NodePairView(AbstractModelView):
     def _get_probs(self, params: Mapping, g: jnp.ndarray) -> jnp.ndarray:
         beta = self._get_param(params, "beta")
         mu = self._get_param(params, "mu")
-        return self.module.function(g, beta, mu)
+        probs = self.module.function(g, beta, mu)
+        return probs
 
     @_get_probs.register
     def _(self, params: Sequence, g: jnp.ndarray) -> list[jnp.ndarray]:
         beta = jnp.stack([self._get_param(p, "beta") for p in params])
         mu = jnp.stack([self._get_param(p, "mu") for p in params])
-        return self.module.function(g, beta, mu)
+        probs = self.module.function(g, beta, mu)
+        if self.module.is_homogeneous:
+            return probs
+        if self.ndim >= 2:
+            i, j = self.coords[...]
+        else:
+            try:
+                coords = self.coords[...]
+                i, j = coords if len(coords) == 2 else self.index
+            except ValueError:
+                # This must be a single integer index
+                i = self.index
+                return probs.at[i].set(0.0)
+        return jnp.where(i == j, 0.0, probs)

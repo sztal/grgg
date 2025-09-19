@@ -1,9 +1,14 @@
 from abc import ABC, abstractmethod
+from collections.abc import Iterable, Iterator, Mapping, Sequence
+from dataclasses import replace
+from typing import Self
 
 import equinox as eqx
 import jax.numpy as jnp
 
-from grgg._typing import Scalar, Vector
+from grgg._typing import IntVector, Scalar, Vector
+from grgg.lazy import LazyOuter
+from grgg.utils import format_array
 
 ParamT = Scalar | Vector
 
@@ -173,3 +178,257 @@ class Mu(AbstractNodeParameterSpecification):
     @property
     def default_value(self) -> ParamT:
         return jnp.array(0.0)
+
+
+class AbstractParametersContainer(eqx.Module):
+    """Abstract base class for parameter containers."""
+
+    @property
+    @abstractmethod
+    def lengths(self) -> IntVector:
+        """Lengths of parameter arrays in each layer."""
+
+    @property
+    def n_units(self) -> int:
+        """Number of units (axis 0 length)."""
+        return int(max(self.lengths))
+
+    @property
+    @abstractmethod
+    def is_heterogeneous(self) -> bool:
+        """Check if any parameter is heterogeneous."""
+
+    @property
+    @abstractmethod
+    def heterogeneous(self) -> Self:
+        """Select only heterogeneous parameters."""
+
+    @property
+    def aligned(self) -> Self:
+        """Return parameters aligned to the number of units."""
+
+    @property
+    @abstractmethod
+    def array(self) -> jnp.ndarray:
+        """Parameters as a single array obtained with :func:`jax.numpy.column_stack`."""
+
+    @abstractmethod
+    def validate(self, n: int) -> Self:
+        """Validate that parameter arrays have correct lengths."""
+
+    @abstractmethod
+    def dump(self) -> dict[str, list[float] | float]:
+        """Dump parameters to a simple data structure."""
+
+
+class Parameters(AbstractParametersContainer, Mapping[str, jnp.ndarray]):
+    """Layer parameter mapping."""
+
+    class Outer(eqx.Module, Mapping[str, LazyOuter]):
+        """Lazy outer sums of parameter vectors."""
+
+        parameters: "Parameters"
+
+        def __getitem__(self, key: str) -> LazyOuter:
+            param = self.parameters[key]
+            if jnp.isscalar(param):
+                return LazyOuter(param / 2, op=jnp.add)
+            return LazyOuter(param, op=jnp.add)
+
+        def __getattr__(self, name: str) -> LazyOuter:
+            try:
+                return self[name]
+            except KeyError as err:
+                errmsg = f"'{self.__class__.__name__}' object has no attribute '{name}'"
+                raise AttributeError(errmsg) from err
+
+        def __iter__(self) -> Iterator[str]:
+            yield from self.parameters
+
+        def __len__(self) -> int:
+            return len(self.parameters)
+
+    _mapping: Mapping[str, jnp.ndarray]
+
+    def __init__(
+        self,
+        _mapping: Mapping[str, jnp.ndarray] | None = None,
+        **kwargs: jnp.ndarray,
+    ) -> None:
+        if _mapping is None:
+            _mapping = {}
+        _mapping = {**_mapping, **kwargs}
+        self._mapping = {n: jnp.asarray(p) for n, p in _mapping.items()}
+
+    def __repr__(self) -> str:
+        items = ", ".join(f"{n}={format_array(p)}" for n, p in self._mapping.items())
+        return f"{self.__class__.__name__}({items})"
+
+    def __getitem__(self, key: str) -> jnp.ndarray:
+        return self._mapping[key]
+
+    def __getattr__(self, name: str) -> jnp.ndarray:
+        try:
+            return self._mapping[name]
+        except KeyError as err:
+            errmsg = f"'{self.__class__.__name__}' object has no attribute '{name}'"
+            raise AttributeError(errmsg) from err
+
+    def __iter__(self) -> Iterator[str]:
+        yield from self._mapping
+
+    def __len__(self) -> int:
+        return len(self._mapping)
+
+    def __check_init__(self) -> None:
+        lengths = self.lengths
+        n_units = max(lengths or [1])
+        if not all(length in (1, n_units) for length in lengths):
+            errmsg = "all parameter arrays must have the same length or be scalars"
+            raise ValueError(errmsg)
+
+    @property
+    def outer(self) -> "Parameters.Outer":
+        """Lazy outer sums of parameter vectors."""
+        return self.Outer(self)
+
+    @property
+    def lengths(self) -> list[int]:
+        """Lengths of parameter arrays in the layer."""
+        return [1 if jnp.isscalar(p) else len(p) for p in self._mapping.values()]
+
+    @property
+    def aligned(self) -> Self:
+        """Return parameters aligned to the number of units."""
+        if not self._mapping:
+            return self
+        values = [
+            v / 2 if self.is_heterogeneous and jnp.isscalar(v) else v
+            for v in self._mapping.values()
+        ]
+        arrays = jnp.broadcast_arrays(*values)
+        mapping = dict(zip(self._mapping.keys(), arrays, strict=True))
+        return replace(self, _mapping=mapping)
+
+    @property
+    def is_heterogeneous(self) -> bool:
+        """Check if any parameter is heterogeneous."""
+        return any(not jnp.isscalar(p) for p in self._mapping.values())
+
+    @property
+    def heterogeneous(self) -> Self:
+        """Select only heterogeneous parameters."""
+        return replace(
+            self,
+            _mapping={n: p for n, p in self._mapping.items() if not jnp.isscalar(p)},
+        )
+
+    @property
+    def array(self) -> jnp.ndarray:
+        """Parameters as a single array."""
+        if not self._mapping:
+            return jnp.array([])
+        return jnp.column_stack(list(self.aligned.values()))
+
+    def validate(self, n: int) -> Self:
+        """Validate that parameter arrays have correct lengths."""
+        if not all(length in (1, n) for length in self.lengths):
+            errmsg = "all parameter arrays must have the same length or be scalars"
+            raise ValueError(errmsg)
+        return self
+
+    def dump(self) -> dict[str, jnp.ndarray]:
+        """Dump parameters to a dictionary."""
+        return self._mapping.copy()
+
+
+class ParameterGroups(eqx.Module, Sequence[Parameters]):
+    """Container for model parameters.
+
+    Attributes
+    ----------
+    groups
+        Tuple of parameter mappings.
+    """
+
+    _groups: tuple[Parameters, ...]
+    weights: jnp.ndarray = eqx.field(converter=jnp.asarray)
+
+    def __init__(
+        self,
+        *groups: Parameters,
+        weights: jnp.ndarray = 1.0,
+        _groups: Iterable[Parameters] = (),
+    ) -> None:
+        params = []
+        groups = (*_groups, *groups)
+        for group in groups:
+            if isinstance(group, Mapping):
+                params.append(group)
+            else:
+                params.extend(group)
+        self._groups = tuple(Parameters(**param) for param in params)
+        self.weights = jnp.asarray(weights).astype(float)
+
+    def __repr__(self) -> str:
+        groups = "\n".join(f"    {repr(group)}" for group in self._groups)
+        groups += "\n    weights=" + eqx.tree_pformat(self.weights)
+        return f"{self.__class__.__name__}(\n{groups}\n)"
+
+    def __check_init__(self) -> None:
+        lengths = {*sum((g.lengths for g in self._groups), start=[])}
+        if lengths - {1, max(lengths)}:
+            errmsg = "all parameter arrays must have the same length or be scalars"
+            raise ValueError(errmsg)
+
+    def __len__(self) -> int:
+        return len(self._groups)
+
+    def __getitem__(self, index: int) -> ParamT:
+        return self._groups[index]
+
+    @property
+    def lengths(self) -> list[int]:
+        """Lengths of parameter arrays in each layer."""
+        return [group.lengths for group in self._groups]
+
+    @property
+    def n_units(self) -> int:
+        """Number of units (nodes) in the network."""
+        return max(length for group in self._groups for length in group.lengths)
+
+    @property
+    def aligned(self) -> Self:
+        """Return parameters aligned to the number of units."""
+        return replace(self, _groups=tuple(g.aligned for g in self._groups))
+
+    @property
+    def is_heterogeneous(self) -> bool:
+        """Check if any parameter is heterogeneous."""
+        return any(g.is_heterogeneous for g in self._groups)
+
+    @property
+    def heterogeneous(self) -> bool:
+        """Select only heterogeneous parameters."""
+        return replace(self, _groups=tuple(g.heterogeneous for g in self._groups))
+
+    @property
+    def array(self) -> jnp.ndarray:
+        """Parameters as a single array."""
+        arrays = []
+        for group in self.aligned:
+            arr = group.array
+            if arr.size <= 0:
+                continue
+            arrays.append(arr)
+        return jnp.column_stack(arrays) if arrays else jnp.array([])
+
+    def validate(self, n: int) -> Self:
+        """Validate that parameter arrays have correct lengths."""
+        for group in self:
+            group.validate(n)
+        return self
+
+    def dump(self) -> list[dict[str, jnp.ndarray]]:
+        """Dump parameters to a list of dictionaries."""
+        return [group.dump() for group in self._groups]

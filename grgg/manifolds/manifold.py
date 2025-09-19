@@ -9,6 +9,8 @@ from grgg.abc import AbstractModule
 from grgg.random import RandomGenerator
 from grgg.utils import pairwise
 
+DistanceFunctionT = Callable[[Matrix, Matrix | None, ...], Vector | Matrix]
+
 
 class Manifold(AbstractModule):
     """Abstract base class for manifolds.
@@ -19,18 +21,19 @@ class Manifold(AbstractModule):
         Dimension of the manifold.
     """
 
-    dim: int = eqx.field(static=True, converter=int)
-    _distances: Callable[[Matrix, Matrix | None, ...], Vector | Matrix] = eqx.field(
-        static=True,
-        repr=False,
-    )
+    dim: int = eqx.field(static=True)
+    _distances: DistanceFunctionT = eqx.field(static=True, repr=False)
 
-    def __init__(self, dim: int) -> None:
-        if dim < 0:
+    def __init__(
+        self, dim: int, *, _distances: DistanceFunctionT | None = None
+    ) -> None:
+        self.dim = int(dim)
+        self._distances = pairwise(self.metric) if _distances is None else _distances
+
+    def __check_init__(self) -> None:
+        if self.dim < 0:
             errmsg = "'dim' must be a non-negative integer"
             raise ValueError(errmsg)
-        self.dim = int(dim)
-        self._distances = pairwise(self.metric)
 
     def __repr__(self) -> str:
         params = self._repr_params()
@@ -50,6 +53,11 @@ class Manifold(AbstractModule):
     @abstractmethod
     def volume(self) -> float:
         """Volume of the manfiold surface."""
+
+    @property
+    @abstractmethod
+    def linear_size(self) -> float:
+        """Linear size of the manifold."""
 
     @abstractmethod
     def with_volume(cls, volume: float) -> Self:

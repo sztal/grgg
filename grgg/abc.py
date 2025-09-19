@@ -20,7 +20,7 @@ class AbstractModule(eqx.Module):
 
     def __copy__(self) -> Self:
         """Create a shallow copy of the model element."""
-        self.replace()
+        return self.replace()
 
     def __deepcopy__(self, memo: dict[int, Any]) -> Self:
         """Create a deep copy."""

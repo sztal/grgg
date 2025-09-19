@@ -5,22 +5,25 @@ from typing import TYPE_CHECKING, Any, Self
 import equinox as eqx
 import jax.numpy as jnp
 
+from grgg import options
 from grgg._typing import Floats
 from grgg.manifolds import CompactManifold, Sphere
 
-from .abc import AbstractModel
+from ._quantizer import ModelQuantizer
+from .abc import AbstractModel, ParamsT
 from .functions import (
     CouplingFunction,
     ProbabilityFunction,
 )
 from .layers import AbstractLayer
+from .parameters import ParameterGroups
 
 if TYPE_CHECKING:
     from ._sampling import Sample
 
 
 class GRGG(AbstractModel, Sequence[Self]):
-    """Generalized Random Geometric Graph model.
+    r"""Generalized Random Geometric Graph model.
 
     Attributes
     ----------
@@ -36,13 +39,102 @@ class GRGG(AbstractModel, Sequence[Self]):
         of the manifold surface, not of the enclosed space.
     layers
         Tuple of GRGG layers with different energy and coupling functions.
+
+    Examples
+    --------
+    Create a homogeneous similarity-driven GRGG model with 100 nodes on a 2D sphere.
+    For simplicity, we will use the non-logarithmic energies and non-modified couplings.
+    >>> from grgg import GRGG, Similarity, options
+    >>> options.model.log = False
+    >>> options.model.modified = False
+    >>> model = GRGG(100, 2) + Similarity()
+    >>> model
+    GRGG(100, Sphere(2, r=2.82), Similarity(beta=f32[], mu=f32[], log=False))
+    >>> model.n_layers
+    1
+    >>> model.n_nodes
+    100
+    >>> model.is_heterogeneous  # model is node-homogeneous
+    False
+
+    Now, we will use it to compute edge probability at a given distance.
+    We are using raw energies, so since also by default :math:`\mu = 0`
+    we must get 1/2 prob for zero distance and something that should be very close
+    to zero at the maximal distance, known as the manifold diameter.
+    >>> import jax.numpy as jnp
+    >>> import numpy as np
+    >>> g = jnp.array([0, model.manifold.diameter])
+    >>> p = model.pairs.probs(g)
+    >>> p.tolist()
+    [0.5, 0.0]
+
+    Before going further, let us emphasize the crucial point that the model is
+    implemented using :mod:`jax` and is therefore jit-compilable and differentiable.
+    Let us see how this works by computing the gradients of the edge probabilities.
+    >>> import jax
+    >>> # By default jax differentiates with respect to the first argument,
+    >>> # so we put the model first
+    >>> @jax.jit
+    ... def probs(model, g): return model.pairs.probs(g)
+    >>> # Check that the jit compilation works
+    >>> probs(model, g).tolist()
+    [0.5, 0.0]
+
+    Now we compute the full jacobian (matrix of gradients at the two distances).
+    >>> probs_jac = jax.jacobian(probs)
+    >>> deriv = probs_jac(model, g)
+    >>> deriv
+    GRGG(100, Sphere(2, r=2.82), Similarity(beta=f32[2], mu=f32[2], log=False))
+
+    Looks weird, but it is correct; :mod:`jax` returns the same structure as the input,
+    now with gradient arrays in place of the original scalar parameters.
+    We can see better by extracting parameter containers from the model.
+    >>> np.asarray(deriv.parameters[0].beta)  # wrap in numpy to make the doctest work
+    array([-4.9999999e-10, -5.0358325e-11], dtype=...)
+    >>> np.asarray(deriv.parameters[0].mu)
+    array([7.500000e-01, 8.523493e-12], dtype=...)
+
+    More generally, the parameters (or computed derivatives etc.) are neatly organized
+    in parameter containers.
+    >>> deriv.parameters
+    ParameterGroups(
+        Parameters(beta=f32[2], mu=f32[2])
+        weights=f32[]
+    )
+
+    Now, let us extract a more explicit edge probability function from the model,
+    which we can use to check the gradients using :mod:`scipy` and finite differences.
+    >>> # extract model parameters
+    >>> beta, mu = model.parameters[0].values()
+    >>> np.asarray(model.probability(g, beta, mu))
+    array([5.0000000e-01, 2.8411642e-12], dtype=...)
+
+    Now we can check finite differences using scipy.
+    >>> from scipy.differentiate import jacobian
+    >>> params = np.array([beta, mu])
+    >>> jac_g0 = jacobian(lambda x: model.probability(g[0], *x), params)
+    >>> jac_g1 = jacobian(lambda x: model.probability(g[1], *x), params)
+    >>> jac_fd = np.stack([jac_g0.df, jac_g1.df])
+    >>> jac_fd
+    array([[ 0.000000e+00,  7.500019e-01],
+           [-5.035830e-11,  8.523494e-12]], dtype=...)
+
+    So indeed, our jacobian computation is correct.
+    >>> jnp.allclose(deriv.parameters.array, jac_fd).item()
+    True
+
+    Reset model options to default values.
+    >>> options.reset()
     """
 
     n_nodes: int = eqx.field(static=True)
     manifold: CompactManifold
     layers: tuple[AbstractLayer, ...]
     probability: ProbabilityFunction = eqx.field(repr=False)
-    function: Callable[[Floats, Floats, Floats], Floats] = eqx.field(repr=False)
+    function: Callable[[Floats, Floats, Floats], Floats] = eqx.field(
+        repr=False, static=True
+    )
+    quantizer: ModelQuantizer | None = eqx.field(repr=False)
 
     def __init__(
         self,
@@ -50,8 +142,8 @@ class GRGG(AbstractModel, Sequence[Self]):
         manifold: CompactManifold | int | tuple[int, type[CompactManifold]],
         layers: AbstractLayer | Sequence[AbstractLayer] = (),
         *more_layers: AbstractLayer,
-        # quantizer: ArrayQuantizer | None = None,
         probability: ProbabilityFunction | None = None,
+        quantizer: ModelQuantizer | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialization method.
@@ -79,15 +171,21 @@ class GRGG(AbstractModel, Sequence[Self]):
             CouplingFunction(self.manifold.dim, **kwargs)
         )
         self.function = self._define_function()
-        # Initialize layers
-        self.layers = tuple(layer.attach(self) for layer in layers)
-        # Initialize integration and optimization namespaces
+        # Initialize auxliary attributes
+        self.quantizer = quantizer
         # self.integrate = Integration(self)
+        # Initialize layers
+        layers = [layer() if isinstance(layer, type) else layer for layer in layers]
+        self.layers = tuple(layer.attach(self) for layer in layers)
 
     def __repr__(self) -> str:
         cn = self.__class__.__name__
         layers = ", ".join(repr(layer) for layer in self.layers)
-        return f"{cn}({self.n_nodes}, {self.manifold}, {layers})"
+        n = f"{self.n_units}|{self.n_nodes}" if self.is_quantized else self.n_nodes
+        inner = f"{n}, {self.manifold}"
+        if layers:
+            inner += f", {layers}"
+        return f"{cn}({inner})"
 
     def __getitem__(
         self, index: int | slice | Iterable
@@ -115,8 +213,11 @@ class GRGG(AbstractModel, Sequence[Self]):
         """
         return self.add_layer(layer)
 
+    @property
     def n_units(self) -> int:
         """Number of units in the model."""
+        if self.is_quantized:
+            return self.quantizer.n_codes
         return self.n_nodes
 
     @property
@@ -132,7 +233,7 @@ class GRGG(AbstractModel, Sequence[Self]):
     @property
     def is_quantized(self) -> bool:
         """Check if any of the model layers is quantized."""
-        return False
+        return self.quantizer is not None
 
     @property
     def is_heterogeneous(self) -> bool:
@@ -145,9 +246,12 @@ class GRGG(AbstractModel, Sequence[Self]):
         return self.probability.coupling
 
     @property
-    def parameters(self) -> list[dict[str, jnp.ndarray]]:
+    def parameters(self) -> ParameterGroups:
         """Model parameters."""
-        return [layer.parameters for layer in self.layers]
+        groups = [layer.parameters for layer in self.layers]
+        if self.is_quantized:
+            return ParameterGroups(groups, weights=self.quantizer.counts)
+        return ParameterGroups(groups)
 
     def equals(self, other: object) -> bool:
         """Check if two models are equal."""
@@ -220,6 +324,56 @@ class GRGG(AbstractModel, Sequence[Self]):
 
         return model_function
 
+    def set_parameters(
+        self, parameters: Iterable[ParamsT] = (), *more_parameters: ParamsT
+    ) -> Self:
+        """Get shallow copy with update parameter values.
+
+        Parameters
+        ----------
+        parameters
+            An iterable of parameter dictionaries, one for each layer.
+        more_parameters
+            Additional parameter dictionaries.
+
+        Examples
+        --------
+        Update the parameters of a two-layer model.
+        >>> from grgg import GRGG, Complementarity, Similarity
+        >>> model = (
+        ...     GRGG(100, 1) +
+        ...     Complementarity() +
+        ...     Similarity()
+        ... )
+        >>> new_params = [
+        ...     {"beta": 0.5, "mu": 0.1},
+        ...     {"beta": 1.0, "mu": 0.2},
+        ... ]
+        >>> updated_model = model.set_parameters(new_params)
+        >>> updated_model.layers[0].beta.item(), updated_model.layers[0].mu.item()
+        (0.5, 0.1)
+        >>> updated_model.layers[1].beta.item(), updated_model.layers[1].mu.item()
+        (1.0, 0.2)
+        >>> updated_model.equals(model)
+        False
+        """
+        parameters = tuple(parameters) + more_parameters
+        if len(parameters) != len(self.layers):
+            errmsg = (
+                "number of parameter sets must match number of layers; "
+                "pass empty dicts for layers that should not be updated"
+            )
+            raise ValueError(errmsg)
+        if not parameters:
+            return self
+        layers = [
+            layer.set_parameters(p)
+            for layer, p in zip(self.layers, parameters, strict=True)
+        ]
+        return self.replace(layers=tuple(layers))
+
+    # Computation methods ------------------------------------------------------------
+
     def sample(self, **kwargs: Any) -> "Sample":
         """Generate a model sample.
 
@@ -229,9 +383,48 @@ class GRGG(AbstractModel, Sequence[Self]):
 
     # Quantization methods ------------------------------------------------------------
 
+    def quantize(self, **kwargs: Any) -> Self:
+        """Quantize node parameters.
+
+        Parameters
+        ----------
+        **kwargs
+            Additional keyword arguments passed to
+            :meth:`~grgg.quantize.ArrayQuantizer.from_data`.
+
+        Examples
+        --------
+        Quantize a model with 1000 nodes to 100 units.
+        >>> from grgg import GRGG, Complementarity, Similarity
+        >>> from grgg.random import RandomGenerator
+        >>> rng = RandomGenerator(17)
+        >>> n = 1000
+        >>> model = (
+        ...     GRGG(n, 1) +
+        ...     Complementarity(rng.normal(n)**2, rng.normal(n)) +
+        ...     Similarity(rng.normal(n)**2, rng.normal(n))
+        ... )
+        >>> quantized = model.quantize(n_codes=100)
+        >>> quantized.equals(model)
+        False
+        >>> quantized.dequantize().equals(model)
+        True
+        """
+        if not self.is_heterogeneous or (self.is_quantized and not kwargs):
+            return self
+        model = self.dequantize() if self.is_quantized and kwargs else self.copy()
+        kwargs = {
+            "n_codes": options.quantize.n_codes,
+            **kwargs,
+        }
+        quantizer = ModelQuantizer.from_model(model, **kwargs)
+        return quantizer.quantize(model)
+
     def dequantize(self) -> Self:
         """Dequantize model parameters."""
-        return self
+        if not self.is_quantized:
+            return self
+        return self.quantizer.dequantize(self)
 
     # Internals ----------------------------------------------------------------------
 

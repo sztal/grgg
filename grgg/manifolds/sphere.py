@@ -1,5 +1,5 @@
 import math
-from typing import Self
+from typing import Any, Self
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -44,11 +44,16 @@ class Sphere(CompactManifold):
     True
     """
 
-    r: float = eqx.field(static=True, converter=float)
+    r: float = eqx.field(static=True)
 
-    def __init__(self, dim: int, r: float = 1.0) -> None:
-        super().__init__(dim)
+    def __init__(self, dim: int, r: float = 1.0, **kwargs: Any) -> None:
+        super().__init__(dim=dim, **kwargs)
         self.r = float(r)
+
+    def __check_init__(self) -> None:
+        if self.r <= 0:
+            errmsg = "'r' must be a positive number"
+            raise ValueError(errmsg)
 
     def __copy__(self) -> Self:
         return type(self)(self.dim, self.r)
@@ -59,6 +64,11 @@ class Sphere(CompactManifold):
     @property
     def radius(self) -> float:
         """Radius of the sphere, alias for :attr:`r`."""
+        return self.r
+
+    @property
+    def linear_size(self) -> float:
+        """Linear size of the sphere."""
         return self.r
 
     @property

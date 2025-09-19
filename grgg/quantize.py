@@ -4,13 +4,31 @@ from functools import singledispatchmethod
 from typing import Any, Self
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
+import numpy as np
 from jax.scipy.cluster.vq import vq
 from scipy.cluster.vq import kmeans2
 
 from grgg._typing import Floats, IntVector
 from grgg.abc import AbstractModule
 from grgg.utils import split_by
+
+
+@jax.jit
+def _reshape_in(data: jnp.ndarray) -> jnp.ndarray:
+    if data.ndim == 1:
+        data = data[:, None]
+    if data.ndim > 2:
+        data = data.reshape(len(data), -1)
+    return data
+
+
+@jax.jit
+def _assign_codes(states: jnp.ndarray, codebook: jnp.ndarray):
+    states = _reshape_in(states)
+    codes, _ = vq(states, codebook)
+    return codes
 
 
 class ArrayQuantizer(AbstractModule):
@@ -21,11 +39,9 @@ class ArrayQuantizer(AbstractModule):
     codebook
         Quantization codebook (k-means centroids).
     codes
-        Quantization codes.
+        Assigned quantization codes for the original data.
     inverse
         Inverse mapping from codes to original indices.
-    data
-        Original data used to create the quantizer.
 
     Examples
     --------
@@ -65,21 +81,22 @@ class ArrayQuantizer(AbstractModule):
     codebook: Floats = eqx.field(converter=jnp.asarray, repr=False)
     codes: IntVector = eqx.field(converter=jnp.asarray, repr=False)
     inverse: tuple[IntVector] = eqx.field(converter=tuple, repr=False)
-    data: jnp.ndarray = eqx.field(converter=jnp.asarray, repr=False)
+    trailing_shape: tuple[int, ...] = eqx.field(repr=False, static=True)
 
     def __repr__(self) -> str:
-        qshape = self.quantized_shape
+        qshape = (self.n_codes, *self.shape[1:])
         return f"<{self.__class__.__name__} {self.shape}->{qshape} at {hex(id(self))}>"
 
     @property
     def shape(self) -> tuple[int, ...]:
         """Shape of the original data."""
-        return self.data.shape
+        n = len(self.codes)
+        return (n, *self.trailing_shape)
 
     @property
     def ndim(self) -> int:
         """Number of dimensions of the original data."""
-        return len(self.shape)
+        return 1 + len(self.shape)
 
     @property
     def size(self) -> int:
@@ -87,14 +104,14 @@ class ArrayQuantizer(AbstractModule):
         return math.prod(self.shape)
 
     @property
-    def quantized_shape(self) -> tuple[int, ...]:
-        """Shape of the quantized data."""
-        return (len(self.codebook), *self.data.shape[1:])
+    def n_codes(self) -> int:
+        """Number of quantization codes."""
+        return len(self.codebook)
 
     @property
-    def quantized_size(self) -> int:
-        """Total number of elements in the quantized data."""
-        return math.prod(self.quantized_shape)
+    def counts(self) -> IntVector:
+        """Counts of each quantization code in the original data."""
+        return jnp.array([len(idx) for idx in self.inverse], dtype=int)
 
     @property
     def dequantize(self) -> "Dequantization":
@@ -115,45 +132,47 @@ class ArrayQuantizer(AbstractModule):
             Additional keyword arguments passed to :func:`scipy.cluster.vq.kmeans2`.
         """
         data = cls._validate_data(data)
+        shape = data.shape
         reshaped_data = cls.reshape_in(data)
         kwargs = {"minit": "++", **kwargs}
         if not jnp.issubdtype(reshaped_data.dtype, jnp.floating):
             reshaped_data = reshaped_data.astype(float)
-        codebook, codes = kmeans2(reshaped_data, n_codes, **kwargs)
+        codebook, codes = kmeans2(np.asarray(reshaped_data), n_codes, **kwargs)
+        codebook = jnp.asarray(codebook)
+        codes = jnp.asarray(codes)
         order = jnp.argsort(codes)
         index = jnp.arange(len(codes))[order]
         inverse = split_by(index, codes[order])
-        return cls(codebook, codes, inverse, data)
+        return cls(codebook, codes, inverse, shape[1:])
 
     def equals(self, other: object) -> bool:
         return (
             super().equals(other)
             and jnp.array_equal(self.codebook, other.codebook)
-            and jnp.array_equal(self.codes, other.codes)
             and all(
                 jnp.array_equal(a, b)
                 for a, b in zip(self.inverse, other.inverse, strict=True)
             )
-            and jnp.array_equal(self.data, other.data)
+            and self.shape == other.shape
         )
 
     @staticmethod
     def reshape_in(data: jnp.ndarray) -> jnp.ndarray:
         """Reshape possibly multi-dimensional data into 2D array."""
-        if data.ndim == 1:
-            data = data[:, None]
-        if data.ndim > 2:
-            data = data.reshape(len(data), -1)
-        return data
+        return _reshape_in(data)
 
     def reshape_out(
-        self, data: jnp.ndarray, trailing_shape: tuple[int, ...]
+        self, data: jnp.ndarray, trailing_shape: tuple[int, ...] | None = None
     ) -> jnp.ndarray:
         """Reshape 2D quantized data to have the original trailing shape."""
+        if trailing_shape is None:
+            trailing_shape = self.trailing_shape
         return data.reshape((-1, *trailing_shape))
 
     def quantize(
-        self, states: jnp.ndarray, *data: jnp.ndarray
+        self,
+        states: jnp.ndarray,
+        *data: jnp.ndarray,
     ) -> jnp.ndarray | tuple[jnp.ndarray, ...]:
         """Quantize the provided data.
 
@@ -177,7 +196,7 @@ class ArrayQuantizer(AbstractModule):
             errmsg = "all data arrays must have the same first dimension."
             raise ValueError(errmsg)
         states = self._validate_data(states)
-        codes, _ = vq(self.reshape_in(states), self.codebook)
+        codes = self.assign_codes(states)
         uniq_codes, index = jnp.unique(codes, return_index=True)
         uniq_codes = uniq_codes[jnp.argsort(index)]
         quantized = self.codebook[uniq_codes]
@@ -191,6 +210,10 @@ class ArrayQuantizer(AbstractModule):
             qarray = jnp.stack([g.mean(0) for g in groups])[uniq_codes]
             quantized_data.append(qarray)
         return (quantized, *quantized_data)
+
+    def assign_codes(self, states: jnp.ndarray) -> IntVector:
+        """Assign quantization codes to the provided states."""
+        return _assign_codes(states, self.codebook)
 
     @staticmethod
     def _validate_data(data: jnp.ndarray) -> jnp.ndarray:
@@ -236,17 +259,18 @@ class Dequantization(eqx.Module):
     0.99943518
 
     One can also dequantize only a subset of the original data.
-    Here we will dequantize only the first 10 rows of the original data
+    Here we will dequantize an arbitrary selection of rows of the original data
     from the same full set of quantized states.
-    >>> dX, dY = quantizer.dequantize[:10](qX, qY)
-    >>> error(X[:10], dX)
-    0.124817281
-    >>> corr(X[:10], dX)
-    0.969516634
-    >>> error(Y[:10], dY)
-    0.117741279
-    >>> corr(Y[:10], dY)
-    0.969514310
+    >>> idx = jnp.array([3, 17, 10, 90, 56, 90, 54, 31, 0, 2, 80, 34, ])
+    >>> dX, dY = quantizer.dequantize[idx](qX, qY)
+    >>> error(X[idx], dX)
+    0.020884850
+    >>> corr(X[idx], dX)
+    0.999533951
+    >>> error(Y[idx], dY)
+    0.020762944
+    >>> corr(Y[idx], dY)
+    0.999534845
     """
 
     quantizer: ArrayQuantizer
@@ -293,7 +317,7 @@ class Dequantization(eqx.Module):
             errmsg = "All data arrays must have the same first dimension."
             raise ValueError(errmsg)
         states = self.quantizer._validate_data(states)
-        codes, _ = vq(self.quantizer.reshape_in(states), self.quantizer.codebook)
+        codes = self.quantizer.assign_codes(states)
         if len(jnp.unique(codes)) < len(codes):
             err = "multiple states correspond to the same quantized codes"
             raise ValueError(err)

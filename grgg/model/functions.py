@@ -7,6 +7,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from grgg import options
 from grgg._typing import Floats, Scalar, Vector
 from grgg.abc import AbstractModule
 
@@ -108,7 +109,12 @@ class CouplingFunction(AbstractModelFunction):
     """
 
     dim: int = eqx.field(static=True, converter=int)
-    modified: bool = eqx.field(static=True, kw_only=True, default=True, converter=bool)
+    modified: bool = eqx.field(
+        static=True,
+        kw_only=True,
+        default=None,
+        converter=lambda x: (bool(x if x is not None else options.model.modified)),
+    )
 
     @property
     def deriv_argnums(self) -> tuple[int, ...]:
@@ -206,7 +212,7 @@ class ProbabilityFunction(AbstractModelFunction):
     True
     """
 
-    coupling: CouplingFunction = eqx.field(repr=False)
+    coupling: CouplingFunction
 
     @property
     def deriv_argnums(self) -> tuple[int, ...]:

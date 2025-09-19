@@ -23,6 +23,10 @@ class Options:
         exc_value: BaseException | None,
         traceback: TracebackType | None,
     ) -> bool | None:
+        self.reset()
+
+    def reset(self) -> None:
+        """Reset options to their original values."""
         if self.__original__ is not None:
             for slot_name in self.__slots__:
                 obj = getattr(self.__original__, slot_name)
@@ -30,11 +34,12 @@ class Options:
 
 
 @dataclass(slots=True)
-class LayerOptions(Options):
+class ModelOptions(Options):
     beta: float = 1.5
     mu: float = 0.0
     log: bool = True
     eps: float = 1e-9
+    modified: bool = True
 
 
 @dataclass(slots=True)
@@ -51,8 +56,7 @@ class IntegrateOptions(Options):
 @dataclass(slots=True)
 class QuantizeOptions(Options):
     auto: bool = True
-    n_bins: int = 256
-    strategy: str = "joint"
+    n_codes: int = 256
 
 
 @dataclass(slots=True)
@@ -69,7 +73,7 @@ class OptimizeOptions(Options):
 
 @dataclass(slots=True)
 class PackageOptions(Options):
-    layer: LayerOptions = field(default_factory=LayerOptions)
+    model: ModelOptions = field(default_factory=ModelOptions)
     batch: BatchOptions = field(default_factory=BatchOptions)
     integrate: IntegrateOptions = field(default_factory=IntegrateOptions)
     quantize: QuantizeOptions = field(default_factory=QuantizeOptions)

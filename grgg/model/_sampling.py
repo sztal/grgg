@@ -1,4 +1,4 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from dataclasses import dataclass
 from functools import cached_property, partial
 from typing import TYPE_CHECKING, Any
@@ -70,19 +70,16 @@ class Sampler(eqx.Module):
     """
 
     nodes: "NodeView"
-    _sample_diag: Callable = eqx.field(init=False, repr=False, static=True)
-    _sample_offdiag: Callable = eqx.field(init=False, repr=False, static=True)
 
     def __init__(self, nodes: "NodeView") -> None:
         if not isinstance(nodes.module, AbstractGRGG):
-            errmsg = "sampling can only be performed on a view of a full model"
+            errmsg = (
+                "sampling can only be performed for GRGG models, not layer modules; "
+                "extract a layer-specific submodule to sample based on a single layer"
+            )
             raise TypeError(errmsg)
         super().__init__()
         self.nodes = nodes
-        self._sample_diag = jax.jit(partial(_sample_diag, self), static_argnames=("s",))
-        self._sample_offdiag = jax.jit(
-            partial(_sample_offdiag, self), static_argnames=("s1", "s2")
-        )
 
     def __call__(self, **kwargs: Any) -> Sample:
         return self.sample(**kwargs)
@@ -95,7 +92,7 @@ class Sampler(eqx.Module):
     @property
     def n_nodes(self) -> int:
         """Number of nodes in the model."""
-        return self.model.n_nodes
+        return self.nodes.n_nodes
 
     def sample(self, **kwargs: Any) -> Sample:
         """Sample a graph from the model.
@@ -125,13 +122,28 @@ class Sampler(eqx.Module):
         >>> S.X.shape
         (100, 3)
 
+        It is also possible to sample from a node view of the model.
+        >>> S = model.nodes[:10].sample(rng=rng)
+        >>> S.A.shape
+        (10, 10)
+        >>> S.X.shape
+        (10, 3)
+
+        Sampling from a quantized model is allowed as well,
+        even though the meaning of that operation is less clear.
+        >>> S = model.quantize(n_codes=16).sample(rng=rng)
+        >>> S.A.shape
+        (16, 16)
+        >>> S.X.shape
+        (16, 3)
+
         Returns
         -------
         Sample
             Sampled graph and associated data.
         """
         points, i, j = (np.asarray(x) for x in self._sample(**kwargs))
-        n_nodes = self.n_nodes
+        n_nodes = len(points)
         A = csr_array((np.ones_like(i), (i, j)), shape=(n_nodes, n_nodes))
         A += A.T
         return Sample(A, points)
@@ -143,13 +155,13 @@ class Sampler(eqx.Module):
         rng: RandomGenerator | int | None = None,
         progress: bool | Mapping | None = None,
     ) -> tuple[Floats, IntVector, IntVector]:
-        nodes = (
-            self.model.materialize(copy=False).nodes
-            if self.nodes.is_active
-            else self.nodes
-        )
-        batch_size = self.model.get_batch_size(batch_size)
-        progress, pkw = self.model.get_progress(progress)
+        if self.nodes.is_active:
+            nodes = self.nodes.materialize(copy=False).nodes
+            self = self.__class__(nodes)
+        else:
+            nodes = self.nodes
+        batch_size = self.model._get_batch_size(batch_size)
+        progress, pkw = self.model._get_progress(progress)
         rng = RandomGenerator.from_seed(rng)
         points = self.nodes.sample_points(rng=rng)
         n_nodes = nodes.n_nodes
@@ -164,11 +176,11 @@ class Sampler(eqx.Module):
             if bs1 > bs2:  # type: ignore
                 continue
             if bs1 == bs2:
-                i, j, M = self._sample_diag(points, bs1, rng)
+                i, j, M = _sample_diag(self, points, bs1, rng)
                 i = i[M]
                 j = j[M]
             else:
-                M = self._sample_offdiag(points, bs1, bs2, rng)
+                M = _sample_offdiag(self, points, bs1, bs2, rng)
                 i, j = jnp.where(M)
             i += bs1.start
             j += bs2.start
@@ -179,6 +191,7 @@ class Sampler(eqx.Module):
         return points, Ai, Aj
 
 
+@partial(jax.jit, static_argnames=("s",))
 def _sample_diag(
     sampler,
     points: Floats,
@@ -193,6 +206,7 @@ def _sample_diag(
     return i, j, M
 
 
+@partial(jax.jit, static_argnames=("s1", "s2"))
 def _sample_offdiag(
     sampler,
     points: Floats,
