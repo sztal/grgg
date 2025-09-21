@@ -52,7 +52,7 @@ class LazyArray(eqx.Module):
     >>>
     >>> A = LazyArray(X.shape, a_ij, dtype=X.dtype)
     >>> A
-    <LazyArray (a_ij), shape=(10, 8, 5), dtype=...>
+    <LazyArray (a_ij) shape=(10, 8, 5), dtype=...>
     >>> jnp.array_equal(A[...], X).item()
     True
     >>> jnp.array_equal(A[3], X[3]).item()
@@ -75,6 +75,79 @@ class LazyArray(eqx.Module):
     True
     >>> mask = [False]*1+[True]*3+[False]*4
     >>> jnp.array_equal(A[:, mask, :, None], X[:, mask, :, None]).item()
+    True
+
+    Now, let us check that computations are jittable.
+    It is recommended to use :func:`equinox.filter_jit` for JIT compilation
+    of functions that take :class:`LazyArray` as input.
+    >>> import equinox as eqx
+    >>> @eqx.filter_jit
+    ... def compute_sum(A, *args):
+    ...     return jnp.sum(A[args])
+    >>>
+    >>> compute_sum(A, 2, 3)
+    Array(35, ...)
+    >>> compute_sum(A, 2, [0, 2])
+    Array(50, ...)
+    >>> compute_sum(A, [0, 2], [1, 3])
+    Array(50, ...)
+    >>> compute_sum(A, ...)
+    Array(4000, ...)
+    >>> compute_sum(A, ..., 1)
+    Array(720, ...)
+    >>> compute_sum(A, slice(2, 5), ..., [0, 2])
+    Array(360, ...)
+    >>> i = jnp.array([0, 2, 4])
+    >>> j = jnp.array([1, 3])
+    >>> k = jnp.array([0, 2, 4])
+    >>> idx = jnp.ix_(i, j, k)
+    >>> compute_sum(A, *idx)
+    Array(108, ...)
+    >>> compute_sum(A, *idx[:2], slice(1, 3))
+    Array(66, ...)
+
+    Boolean indexing is not supported in JIT-compiled functions,
+    so we do not test it here.
+
+    To allow for differentiation, some extra care is needed.
+    Most importantly, it is best to work with a subclass of :class:`LazyArray`
+    that stores the low rank factors as attributes.
+    >>> class Lazy3DSum(LazyArray):
+    ...     x1: jnp.ndarray
+    ...     x2: jnp.ndarray
+    ...     x3: jnp.ndarray
+    ...
+    ...     def __init__(self, x1, x2, x3):
+    ...         self.x1 = x1
+    ...         self.x2 = x2
+    ...         self.x3 = x3
+    ...         shape = (len(x1), len(x2), len(x3))
+    ...         super().__init__(shape)
+    ...
+    ...     def a_ij(self, i, j, k):
+    ...         return self.x1[i] + self.x2[j] + self.x3[k]
+    >>>
+    >>> x1 = jnp.arange(10, dtype=jnp.float32)
+    >>> x2 = jnp.arange(8, dtype=jnp.float32)
+    >>> x3 = jnp.arange(5, dtype=jnp.float32)
+    >>> A = Lazy3DSum(x1, x2, x3)
+    >>>
+    >>> @eqx.filter_jit
+    ... def compute_sum(A, *args):
+    ...     return jnp.sum(A[args])
+    >>>
+    >>> compute_sum(A, ...)
+    Array(4000., ...)
+    >>> compute_sum_grad = eqx.filter_grad(compute_sum)
+    >>> g = compute_sum_grad(A, ...)
+    >>> gx1_expected = jnp.ones_like(x1) * (A.shape[1] * A.shape[2])
+    >>> gx2_expected = jnp.ones_like(x2) * (A.shape[0] * A.shape[2])
+    >>> gx3_expected = jnp.ones_like(x3) * (A.shape[0] * A.shape[1])
+    >>> jnp.array_equal(g.x1, gx1_expected).item()
+    True
+    >>> jnp.array_equal(g.x2, gx2_expected).item()
+    True
+    >>> jnp.array_equal(g.x3, gx3_expected).item()
     True
     """
 
@@ -123,7 +196,8 @@ class LazyArray(eqx.Module):
         attrs = f"shape={self.shape}"
         if self.dtype is not None:
             attrs += f", dtype={self.dtype}"
-        return f"<{cn} ({self._f.__name__}), {attrs}>"
+        fname = f" ({self._f.__name__})" if self._f is not None else ""
+        return f"<{cn}{fname} {attrs}>"
 
     def __getitem__(self, args: Any) -> jnp.ndarray:
         target_shape = None
@@ -265,14 +339,14 @@ class LazyOuter(LazyArray):
     >>> x2 = jnp.array([4, 5])
     >>> O = LazyOuter(x1, x2)
     >>> O
-    <LazyOuter (multiply), shape=(3, 2), dtype=...>
+    <LazyOuter (multiply) shape=(3, 2), dtype=...>
     >>> jnp.array_equal(O[...], jnp.outer(x1, x2)).item()
     True
 
     Scalar case.
     >>> O = LazyOuter(3, 4)
     >>> O
-    <LazyOuter (multiply), shape=(), dtype=...>
+    <LazyOuter (multiply) shape=(), dtype=...>
     >>> O[...].item()
     12
 
@@ -280,6 +354,29 @@ class LazyOuter(LazyArray):
     is allowed, but always produces the same scalar result.
     >>> O[:5, ..., [1,2]].item()
     12
+
+    JIT-compilation and differentiation work as expected.
+    However, it is best to use :func:`equinox.filter_jit`
+    and :func:`equinox.filter_grad` for functions that take
+    :class:`LazyOuter` as input.
+    >>> import equinox as eqx
+    >>> x = jnp.arange(10, dtype=jnp.float32)
+    >>> y = jnp.arange(8, dtype=jnp.float32)
+    >>> outer = LazyOuter(x, y, op=jnp.add)
+    >>> @eqx.filter_jit
+    ... def sum_outer(outer, *args):
+    ...     return outer[args].sum()
+    >>> sum_outer(outer, ...).item()
+    640.0
+    >>> sum_outer(outer, 2, 3).item()
+    5.0
+    >>>
+    >>> grad = eqx.filter_grad(sum_outer)
+    >>> g = grad(outer, ...)
+    >>> jnp.array_equal(g.x, jnp.ones_like(x) * outer.shape[1]).item()
+    True
+    >>> jnp.array_equal(g.y, jnp.ones_like(y) * outer.shape[0]).item()
+    True
     """
 
     x: Vector
@@ -309,7 +406,8 @@ class LazyOuter(LazyArray):
 
     def __repr__(self) -> str:
         cn = self.__class__.__name__
-        return f"<{cn} ({self.op.__name__}), shape={self.shape}, dtype={self.dtype}>"
+        opname = f" ({self.op.__name__})" if self.op is not None else ""
+        return f"<{cn}{opname} shape={self.shape}, dtype={self.dtype}>"
 
     def __getitem__(self, args: Any) -> jnp.ndarray:
         if self.is_scalar:

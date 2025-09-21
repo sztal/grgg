@@ -63,6 +63,8 @@ class AbstractIntegral(eqx.Module):
 
         Parameters
         ----------
+        *args
+            Additional positional arguments passed to the integrand.
         limits
             Integration limits as a tuple `(a, b)`. If `None`, uses `self.domain`.
         method
@@ -80,5 +82,6 @@ class AbstractIntegral(eqx.Module):
             breakpoints = self.breakpoints
         interval = jnp.array([limits[0], *breakpoints, limits[1]])
         options = {**self.defaults, **kwargs}
-        integral, info = method(self.integrand, interval, args, **options)
+        integrand = eqx.filter_jit(self.integrand)
+        integral, info = method(integrand, interval, args, **options)
         return self.constant * integral, info

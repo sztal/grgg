@@ -8,6 +8,7 @@ from typing import Self
 
 import equinox as eqx
 import jax.numpy as jnp
+from jax import lax
 import numpy as np
 
 __all__ = ("MultiIndexRavel", "IndexableShape", "CartesianCoordinates")
@@ -104,10 +105,10 @@ class ShapedIndexExpression(Shaped):
         ):
             errmsg = f"expected integer index, got '{type(a)}'"
             raise TypeError(errmsg)
-        a = int(a + n if a < 0 else a)
-        if a < 0 or a >= n:
-            errmsg = f"index {a} is out of bounds for axis with size {n}"
-            raise IndexError(errmsg)
+        a = lax.cond(a < 0, lambda x: x + n, lambda x: x, a)
+        # if a < 0 or a >= n:
+        #     errmsg = f"index {a} is out of bounds for axis with size {n}"
+        #     raise IndexError(errmsg)
         return a
 
     def _handle_ellipses(self, args: tuple[IndexArg, ...]) -> tuple[IndexArg, ...]:

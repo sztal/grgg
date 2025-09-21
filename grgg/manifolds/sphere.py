@@ -3,6 +3,7 @@ from typing import Any, Self
 
 import equinox as eqx
 import jax.numpy as jnp
+from jax.scipy.special import gamma
 
 from grgg._typing import Matrix, Scalar, Vector
 from grgg.random import RandomGenerator
@@ -115,3 +116,42 @@ class Sphere(CompactManifold):
         if self.r != 1.0:
             points *= self.r
         return points
+
+    def distance_density(self, g: jnp.ndarray) -> jnp.ndarray:
+        theta = g / self.r
+        d = self.dim
+        num = gamma((d + 1) / 2) * jnp.sin(theta) ** (d - 1)
+        den = jnp.sqrt(math.pi) * gamma(d / 2)
+        return num / den
+
+    def cosine_law(
+        self, theta: jnp.ndarray, g_ij: jnp.ndarray, g_ik: jnp.ndarray
+    ) -> jnp.ndarray:
+        """Spherical law of cosines.
+
+        Parameters
+        ----------
+        theta
+            The angle at the focal point `i` between the two points `j` and `k`.
+        g_ij
+            The geodesic distance between points i and j.
+        g_ik
+            The geodesic distance between points i and k.
+
+        Returns
+        -------
+        g_jk
+            The geodesic distance between points j and k.
+        """
+        theta_ij = g_ij / self.r
+        theta_ik = g_ik / self.r
+        cos_theta_jk = jnp.clip(
+            (
+                jnp.cos(theta_ij) * jnp.cos(theta_ik)
+                + jnp.sin(theta_ij) * jnp.sin(theta_ik) * jnp.cos(theta)
+            ),
+            -1.0,
+            1.0,
+        )
+        theta_jk = jnp.arccos(cos_theta_jk)
+        return theta_jk * self.r

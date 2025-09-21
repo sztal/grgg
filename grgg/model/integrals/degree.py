@@ -1,20 +1,24 @@
-from abc import abstractmethod
-from typing import TYPE_CHECKING, Any, Self
+from collections.abc import Callable
+from functools import partial
+from typing import TYPE_CHECKING, Any
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 
-from grgg._typing import IntVector
-from grgg.abc import AbstractGRGG, AbstractModule
-from grgg.integrate import AbstractIntegral
+from grgg.utils import number_of_batches
+
+from .abc import AbstractNodesIntegral
 
 if TYPE_CHECKING:
     from grgg.model.grgg import GRGG
 
 __all__ = ("DegreeIntegral",)
 
+HeterogeneousCarryT = tuple["GRGG", int, jnp.ndarray]
 
-class DegreeIntegral(AbstractIntegral, AbstractModule):
+
+class DegreeIntegral(AbstractNodesIntegral):
     """Abstract base class for degree integrals.
 
     It is also used to construct concrete degree integrals using
@@ -31,39 +35,8 @@ class DegreeIntegral(AbstractIntegral, AbstractModule):
     radius in the constant multiplier. Thus, the domain of integration is `[0, pi]`.
     """
 
-    model: "GRGG"
 
-    @property
-    def domain(self) -> tuple[float, float]:
-        return (0, jnp.pi)
-
-    @property
-    @abstractmethod
-    def constant(self) -> float:
-        delta = self.model.delta
-        R = self.model.manifold.linear_size
-        d = self.model.manifold.dim
-        dV = self.model.manifold.__class__(d - 1).volume
-        return delta * R**d * dV
-
-    @property
-    def defaults(self) -> dict[str, Any]:
-        return super().defaults
-
-    def equals(self, other: object) -> bool:
-        return super().equals(other) and self.model.equals(other.model)
-
-    @classmethod
-    def from_model(cls, model: "GRGG") -> Self:
-        """Construct an appropriate degree integral from a model."""
-        if not isinstance(model, AbstractGRGG):
-            errmsg = "model must be a GRGG instance"
-            raise TypeError(errmsg)
-        if model.is_heterogeneous:
-            return HeterogeneousDegreeIntegral(model)
-        return HomogeneousDegreeIntegral(model)
-
-
+@DegreeIntegral.register_homogeneous
 class HomogeneousDegreeIntegral(DegreeIntegral):
     """Homogeneous degree integral.
 
@@ -109,9 +82,10 @@ class HomogeneousDegreeIntegral(DegreeIntegral):
         """Compute the integrand at given angle(s) `theta`."""
         d = self.model.manifold.dim
         R = self.model.manifold.linear_size
-        return jnp.sin(theta) ** (d - 1) * self.model.pairs.probs(theta * R)
+        return jnp.sin(theta) ** (d - 1) * self.nodes.pairs.probs(theta * R)
 
 
+@DegreeIntegral.register_heterogeneous
 class HeterogeneousDegreeIntegral(DegreeIntegral):
     """Heterogeneous degree integral.
 
@@ -167,16 +141,16 @@ class HeterogeneousDegreeIntegral(DegreeIntegral):
     """
 
     batch_size: int = eqx.field(static=True)
-    # inner_sum: Callable[[Self, jnp.ndarray, IntVector], jnp.ndarray] = eqx.field(
-    #     static=True, repr=False
-    # )
-    # _batch_indices: jnp.ndarray = eqx.field(repr=False)
+    inner_sum: Callable[
+        [HeterogeneousCarryT, ...], tuple[HeterogeneousCarryT, jnp.ndarray]
+    ] = eqx.field(static=True, init=False, repr=False)
 
     def __init__(
         self, *args: Any, batch_size: int | None = None, **kwargs: Any
     ) -> None:
         super().__init__(*args, **kwargs)
         self.batch_size = self.model._get_batch_size(batch_size)
+        self.inner_sum = self._define_inner_sum()
 
     @property
     def constant(self) -> float:
@@ -185,13 +159,41 @@ class HeterogeneousDegreeIntegral(DegreeIntegral):
     def integrand(self, theta: jnp.ndarray) -> jnp.ndarray:
         """Compute the integrand at given angle(s) `x`."""
         d = self.model.manifold.dim
-        R = self.model.manifold.linear_size
-        P = self.model.pairs.probs(theta * R).sum(axis=1)
-        return jnp.sin(theta) ** (d - 1) * P
+        g = theta * self.model.manifold.linear_size
+        if self.model.n_units > self.batch_size:
+            _, P = jax.lax.scan(
+                self.inner_sum,
+                (self.model, 0, g),
+                length=number_of_batches(self.model.n_units, self.batch_size),
+            )
+        else:
+            P = self.inner_sum(g)
+        integral = jnp.sin(theta) ** (d - 1) * P
+        return integral.reshape(-1)[: self.model.n_units]
 
-    @staticmethod
-    def _inner_sum(integrator: Self, theta: jnp.ndarray, i: IntVector) -> jnp.ndarray:
-        """Compute the inner sum for a batch of angles."""
-        R = integrator.model.manifold.linear_size
-        indices = jnp.arange(integrator.batch_size) + i
-        return integrator.model.pairs[indices, :].probs(theta * R).sum(axis=1)
+    def _define_inner_sum(
+        self,
+    ) -> Callable[[HeterogeneousCarryT, ...], tuple[HeterogeneousCarryT, jnp.ndarray]]:
+        if self.model.n_units <= self.batch_size:
+
+            @partial(jax.checkpoint)
+            @partial(jax.jit, donate_argnums=0)
+            def inner_sum(g: jnp.ndarray) -> jnp.ndarray:
+                probs = self.nodes.pairs.probs(g, adjust_quantized=True)
+                if self.model.is_quantized:
+                    probs *= self.model.parameters.weights
+                return probs.sum(axis=-1)
+        else:
+
+            @partial(jax.checkpoint, prevent_cse=False)
+            @partial(jax.jit, donate_argnums=0)
+            def inner_sum(
+                carry: HeterogeneousCarryT,
+                *args: Any,  # noqa
+            ) -> tuple[HeterogeneousCarryT, jnp.ndarray]:
+                model, i, g = carry
+                indices = i + jnp.arange(self.batch_size)
+                p = model.pairs[indices].probs(g, adjust_quantized=True).sum(axis=-1)
+                return (model, i + self.batch_size, g), p
+
+        return inner_sum

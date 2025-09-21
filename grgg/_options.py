@@ -56,7 +56,7 @@ class IntegrateOptions(Options):
 @dataclass(slots=True)
 class QuantizeOptions(Options):
     auto: bool = True
-    n_codes: int = 256
+    n_codes: int = 1024
 
 
 @dataclass(slots=True)

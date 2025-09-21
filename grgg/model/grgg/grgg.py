@@ -5,21 +5,18 @@ from typing import TYPE_CHECKING, Any, Self
 import equinox as eqx
 import jax.numpy as jnp
 
-from grgg import options
 from grgg._typing import Floats
 from grgg.manifolds import CompactManifold, Sphere
-
-from ._quantizer import ModelQuantizer
-from .abc import AbstractModel, ParamsT
-from .functions import (
+from grgg.model.abc import AbstractModel, ParamsT
+from grgg.model.functions import (
     CouplingFunction,
     ProbabilityFunction,
 )
-from .layers import AbstractLayer
-from .parameters import ParameterGroups
+from grgg.model.layers import AbstractLayer
+from grgg.model.parameters import ParameterGroups
 
 if TYPE_CHECKING:
-    from ._sampling import Sample
+    from grgg.model._sampling import Sample
 
 
 class GRGG(AbstractModel, Sequence[Self]):
@@ -134,7 +131,6 @@ class GRGG(AbstractModel, Sequence[Self]):
     function: Callable[[Floats, Floats, Floats], Floats] = eqx.field(
         repr=False, static=True
     )
-    quantizer: ModelQuantizer | None = eqx.field(repr=False)
 
     def __init__(
         self,
@@ -143,7 +139,6 @@ class GRGG(AbstractModel, Sequence[Self]):
         layers: AbstractLayer | Sequence[AbstractLayer] = (),
         *more_layers: AbstractLayer,
         probability: ProbabilityFunction | None = None,
-        quantizer: ModelQuantizer | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialization method.
@@ -171,17 +166,15 @@ class GRGG(AbstractModel, Sequence[Self]):
             CouplingFunction(self.manifold.dim, **kwargs)
         )
         self.function = self._define_function()
-        # Initialize auxliary attributes
-        self.quantizer = quantizer
         # self.integrate = Integration(self)
         # Initialize layers
         layers = [layer() if isinstance(layer, type) else layer for layer in layers]
-        self.layers = tuple(layer.attach(self) for layer in layers)
+        self.layers = tuple(layer.detach().attach(self) for layer in layers)
 
     def __repr__(self) -> str:
         cn = self.__class__.__name__
         layers = ", ".join(repr(layer) for layer in self.layers)
-        n = f"{self.n_units}|{self.n_nodes}" if self.is_quantized else self.n_nodes
+        n = self.n_units
         inner = f"{n}, {self.manifold}"
         if layers:
             inner += f", {layers}"
@@ -216,8 +209,6 @@ class GRGG(AbstractModel, Sequence[Self]):
     @property
     def n_units(self) -> int:
         """Number of units in the model."""
-        if self.is_quantized:
-            return self.quantizer.n_codes
         return self.n_nodes
 
     @property
@@ -233,7 +224,7 @@ class GRGG(AbstractModel, Sequence[Self]):
     @property
     def is_quantized(self) -> bool:
         """Check if any of the model layers is quantized."""
-        return self.quantizer is not None
+        return False
 
     @property
     def is_heterogeneous(self) -> bool:
@@ -381,13 +372,36 @@ class GRGG(AbstractModel, Sequence[Self]):
         """
         return self.nodes.sample(**kwargs)
 
+    def sample_pmatrix(self, **kwargs: Any) -> jnp.ndarray:
+        """Sample the adjacency probability matrix.
+
+        Parameters
+        ----------
+        **kwargs
+            Additional keyword arguments passed to :meth:`~grgg.model.grgg.GRGG.sample`.
+        """
+        return self.nodes.sample_pmatrix(**kwargs)
+
+    def sample_points(self, **kwargs: Any) -> jnp.ndarray:
+        """Sample node positions on the manifold.
+
+        Parameters
+        ----------
+        **kwargs
+            Additional keyword arguments passed to
+            :meth:`~grgg.manifolds.CompactManifold.sample_points`.
+        """
+        return self.nodes.sample_points(**kwargs)
+
     # Quantization methods ------------------------------------------------------------
 
-    def quantize(self, **kwargs: Any) -> Self:
+    def quantize(self, n_codes: int | None = None, **kwargs: Any) -> Self:
         """Quantize node parameters.
 
         Parameters
         ----------
+        n_codes
+            Number of quantization codes.
         **kwargs
             Additional keyword arguments passed to
             :meth:`~grgg.quantize.ArrayQuantizer.from_data`.
@@ -405,26 +419,39 @@ class GRGG(AbstractModel, Sequence[Self]):
         ...     Similarity(rng.normal(n)**2, rng.normal(n))
         ... )
         >>> quantized = model.quantize(n_codes=100)
+        >>> quantized
+        QuantizedGRGG(100, Sphere(1, r=159.15), ...)
+        >>> quantized.manifold.volume  # quantization does not change the manifold
+        1000.0
+        >>> quantized.n_nodes  # the true number of nodes is unchanged
+        1000
+        >>> quantized.n_units  # but the number of units is now 100
+        100
+        >>> # quantized parameters have weights equal to the bin counts
+        >>> quantized.parameters.weights.size == quantized.n_units
+        True
         >>> quantized.equals(model)
         False
-        >>> quantized.dequantize().equals(model)
+        >>> dequantized = quantized.dequantize()
+        >>> dequantized.equals(model)  # dequantization is lossy by design
+        False
+        >>> dequantized.n_units == model.n_units
         True
         """
-        if not self.is_heterogeneous or (self.is_quantized and not kwargs):
+        from grgg.model.grgg.quantized import QuantizedGRGG
+
+        if self.is_quantized:
+            errmsg = "model is already quantized"
+            raise ValueError(errmsg)
+        if self.is_homogeneous:
             return self
-        model = self.dequantize() if self.is_quantized and kwargs else self.copy()
-        kwargs = {
-            "n_codes": options.quantize.n_codes,
-            **kwargs,
-        }
-        quantizer = ModelQuantizer.from_model(model, **kwargs)
-        return quantizer.quantize(model)
+        if n_codes is not None:
+            kwargs["n_codes"] = n_codes
+        return QuantizedGRGG.from_model(self, **kwargs)
 
     def dequantize(self) -> Self:
         """Dequantize model parameters."""
-        if not self.is_quantized:
-            return self
-        return self.quantizer.dequantize(self)
+        return self
 
     # Internals ----------------------------------------------------------------------
 

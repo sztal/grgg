@@ -2,7 +2,7 @@ import math
 from abc import abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from functools import singledispatchmethod
+from functools import partial, singledispatchmethod
 from typing import TYPE_CHECKING, Any, Self
 
 import equinox as eqx
@@ -11,9 +11,10 @@ import jax.numpy as jnp
 from grgg.abc import AbstractGRGG
 from grgg.indexing import CartesianCoordinates, IndexArg
 from grgg.lazy import LazyOuter
-from grgg.utils import squareform
+from grgg.utils import split_kwargs_by_signature, squareform
 
 from ._sampling import Sample, Sampler
+from .integrals import DegreeIntegral, EdgeProbabilityIntegral
 
 if TYPE_CHECKING:
     from .abc import AbstractModelModule
@@ -47,7 +48,15 @@ class AbstractModelView(eqx.Module):
         if (
             self._index is not None
             and isinstance(self._index, tuple)
-            and len(self._index) > self.full_ndim
+            and sum(
+                i
+                not in (
+                    None,
+                    Ellipsis,
+                )
+                for i in self._index
+            )
+            > self.full_ndim
         ):
             cn = self.__class__.__name__
             errmsg = (
@@ -124,7 +133,7 @@ class AbstractModelView(eqx.Module):
 
     def reset(self) -> None:
         """Reset the view."""
-        return replace(self, _index=None)
+        return replace(self, _index=None, coords=None)
 
     def _index_input(
         self, index: IndexArg | tuple[IndexArg, ...] | None
@@ -147,6 +156,10 @@ class NodeView(AbstractModelView):
     module
         Parent model module.
     """
+
+    @property
+    def n_nodes(self) -> int:
+        return max(1, self.shape[0])
 
     @property
     def full_shape(self) -> tuple[int, ...]:
@@ -186,18 +199,9 @@ class NodeView(AbstractModelView):
         """Mu parameter outer product."""
         return self._get_param(self.module.parameters, "mu")
 
-    @property
-    def is_active(self) -> bool:
-        """Whether the view is active (i.e., has any indices selected)."""
-        return self._index is not None
-
     def reset(self) -> None:
         """Reset the current node selection."""
         self._index = None
-
-    def probs(self, g: jnp.ndarray) -> jnp.ndarray:
-        """Compute edge probabilities within the selected group of nodes."""
-        return self.pairs.probs(g)
 
     def sample_points(self, **kwargs: Any) -> jnp.ndarray:
         """Sample points from the selected group of nodes.
@@ -303,8 +307,69 @@ class NodeView(AbstractModelView):
             layers=layers,
         )
 
-    def degree(self, *args: Any, **kwargs: Any) -> jnp.ndarray:
-        """Compute expected degrees for the selected nodes."""
+    def degree(
+        self,
+        *args: Any,
+        full_shape: bool = False,
+        dequantize: bool = True,
+        **kwargs: Any,
+    ) -> jnp.ndarray:
+        """Compute expected degrees for the selected nodes.
+
+        Parameters
+        ----------
+        *args, **kwargs
+            Arguments passed to :class:`~grgg.model.integrals.DegreeIntegral`
+            and :meth:`~grgg.model.integrals.DegreeIntegral.integrate`.
+        full_shape
+            Whether to return the output in the full shape for homogeneous models.
+        dequantized
+            Whether to dequantize the output when computing degrees based
+            on the quantized model.
+
+        Examples
+        --------
+        >>> import jax.numpy as jnp
+        >>> from grgg import GRGG, Similarity, RandomGenerator
+        >>> model = GRGG(100, 2, Similarity(2, 1))
+        >>> D = model.nodes.degree()
+        >>> D.shape
+        ()
+        >>> D = model.nodes.degree(full_shape=True)  # full shape for homogeneous models
+        >>> D.shape
+        (100,)
+        >>> D = model.nodes[10:20].degree(full_shape=True)  # selected nodes
+        >>> D.shape
+        (10,)
+
+        Degree calculations are supported for quantized models too.
+        By default, the output is dequantized.
+        >>> rng = RandomGenerator(0)
+        >>> n = 100
+        >>> model = GRGG(n, 2, Similarity(rng.normal(n)**2, rng.normal(n)))
+        >>> qmodel = model.quantize(n_codes=32, random_state=17)
+        >>> D = model.nodes.degree()
+        >>> Q = qmodel.nodes.degree()
+        >>> Q.shape
+        (100,)
+        >>> jnp.corrcoef(D, Q)[0, 1].item()  # correlation with non-quantized degrees
+        0.9631980
+        >>> jnp.abs((D - Q) / D).mean().item()  # mean relative error
+        0.1664205
+
+        If `dequantize=False`, the output is not dequantized.
+        >>> Q = qmodel.nodes.degree(dequantize=False)
+        >>> Q.shape
+        (32,)
+        """
+        init_kwargs, kwargs = split_kwargs_by_signature(DegreeIntegral, **kwargs)
+        integrator = DegreeIntegral.from_nodes(self, **init_kwargs)
+        integral = integrator.integrate(*args, **kwargs)[0]
+        if self.module.is_homogeneous:
+            return jnp.full((self.n_nodes,), integral) if full_shape else integral
+        if self.module.is_quantized and dequantize:
+            integral = self.module.dequantize_arrays(integral)[0]
+        return integral
 
     @singledispatchmethod
     def _get_param(self, params: Mapping, name: str) -> jnp.ndarray:
@@ -387,13 +452,16 @@ class NodePairView(AbstractModelView):
         """Mu parameter outer product."""
         return self._get_param(self.module.parameters, "mu")
 
-    def probs(self, g: jnp.ndarray) -> jnp.ndarray:
+    def probs(self, g: jnp.ndarray, adjust_quantized: bool = False) -> jnp.ndarray:
         """Compute pairwise connection probabilities.
 
         Parameters
         ----------
         g
             Pairwise distances.
+        adjust_quantized
+            boolean flag to indicate whether to adjust for self-loops when
+            computing connection probabilities between bins in quantized models.
 
         Examples
         --------
@@ -525,7 +593,96 @@ class NodePairView(AbstractModelView):
         Reset options to original values.
         >>> options.reset()
         """
-        return self._get_probs(self.module.parameters.aligned, g)
+        return _pairs_probs(self, g, adjust_quantized=adjust_quantized)
+
+    def expected_probs(
+        self,
+        *args: Any,
+        full_shape: bool = False,
+        dequantize: bool = True,
+        **kwargs: Any,
+    ) -> jnp.ndarray:
+        """Connection probabilities averaged over all possible distances.
+
+        Parameters
+        ----------
+        *args, **kwargs
+            Arguments passed to :class:`~grgg.model.integrals.EdgeProbabilityIntegral`
+            and :meth:`~grgg.model.integrals.EdgeProbabilityIntegral.integrate`.
+        full_shape
+            Whether to return the output in the full shape for homogeneous models.
+        dequantized
+            Whether to dequantize the output when computing probabilities based
+            on the quantized model.
+
+        Examples
+        --------
+        >>> from grgg import GRGG, Similarity, Complementarity, RandomGenerator
+        >>> rng = RandomGenerator(42)
+        >>> n = 100
+        >>> model = (
+        ...     GRGG(n, 2) +
+        ...     Similarity(rng.normal(n)**2, rng.normal(n)) +
+        ...     Complementarity(rng.normal(n)**2, rng.normal(n))
+        ... )
+        >>> probs = model.pairs.expected_probs()
+        >>> probs.shape
+        (100, 100)
+
+        Arbitrary indexing is supported.
+        >>> model.pairs[1, None, :10].expected_probs().shape
+        (1, 10)
+        """
+        init_kwargs, kwargs = split_kwargs_by_signature(
+            EdgeProbabilityIntegral, **kwargs
+        )
+        integrator = EdgeProbabilityIntegral.from_pairs(self, **init_kwargs)
+        integral = integrator.integrate(*args, **kwargs)[0]
+        if self.module.is_homogeneous and full_shape:
+            n = self.module.n_units
+            p = jnp.full(n * (n - 1) // 2, integral)
+            return squareform(p)
+        if self.module.is_homogeneous or not self.module.is_quantized or not dequantize:
+            return integral
+        # Dequantize branch
+        errmsg = "Dequantization for expected probabilities is not implemented yet."
+        raise NotImplementedError(errmsg)
+
+    def edge_distance_density(
+        self, g: jnp.ndarray, *args: Any, **kwargs: Any
+    ) -> jnp.ndarray:
+        """Edge distance density function.
+
+        This is the probability density function over distances between connected nodes.
+
+        Parameters
+        ----------
+        g
+            Pairwise distances.
+
+        Examples
+        --------
+        >>> import jax.numpy as jnp
+        >>> from grgg import GRGG, Similarity, RandomGenerator
+        >>> rng = RandomGenerator(42)
+        >>> n = 100
+        >>> model = GRGG(n, 2, Similarity(rng.normal(n)**2, rng.normal(n)))
+        >>> gmax = model.manifold.diameter
+        >>> g = jnp.linspace(0, gmax, 10)
+        >>> density = model.pairs.edge_distance_density(g[:, None, None])
+        >>> density.shape
+        (10, 100, 100)
+
+        Indexing is supported too.
+        >>> density = model.pairs[0, :10].edge_distance_density(g)
+        >>> density.shape
+        (10,)
+        """
+        pairs_kwargs, kwargs = split_kwargs_by_signature(self.probs, **kwargs)
+        expected_probs = self.expected_probs(*args, **kwargs)
+        probs = self.probs(g, **pairs_kwargs)
+        gdensity = self.module.manifold.distance_density(g)
+        return probs * gdensity / expected_probs
 
     @singledispatchmethod
     def _get_param(self, params: Mapping, name: str) -> LazyOuter:
@@ -538,28 +695,50 @@ class NodePairView(AbstractModelView):
     def _(self, params: Sequence, name: str) -> list[jnp.ndarray]:
         return [self._get_param(p, name) for p in params]
 
-    @singledispatchmethod
-    def _get_probs(self, params: Mapping, g: jnp.ndarray) -> jnp.ndarray:
-        beta = self._get_param(params, "beta")
-        mu = self._get_param(params, "mu")
-        probs = self.module.function(g, beta, mu)
-        return probs
-
-    @_get_probs.register
-    def _(self, params: Sequence, g: jnp.ndarray) -> list[jnp.ndarray]:
+    def _get_probs(
+        self,
+        params: Sequence,
+        g: jnp.ndarray,
+        *,
+        adjust_quantized: bool = False,
+    ) -> list[jnp.ndarray]:
+        if not isinstance(self.module, AbstractGRGG):
+            errmsg = "only views of the full GRGG model can compute probabilities"
+            raise TypeError(errmsg)
         beta = jnp.stack([self._get_param(p, "beta") for p in params])
         mu = jnp.stack([self._get_param(p, "mu") for p in params])
         probs = self.module.function(g, beta, mu)
-        if self.module.is_homogeneous:
+        if self.module.is_homogeneous or (
+            self.module.is_quantized and not adjust_quantized
+        ):
             return probs
-        if self.ndim >= 2:
-            i, j = self.coords[...]
-        else:
-            try:
-                coords = self.coords[...]
-                i, j = coords if len(coords) == 2 else self.index
-            except ValueError:
-                # This must be a single integer index
-                i = self.index
-                return probs.at[i].set(0.0)
+        try:
+            i, j = self._get_ij()
+        except ValueError:
+            # This must be a single integer index
+            if adjust_quantized and self.module.is_quantized:
+                w = self.module.parameters.weights[self.index]
+                return probs.at[self.index].mul(1 / w * (w - 1))
+            return probs.at[self.index].set(0.0)
+        if adjust_quantized and self.module.is_quantized:
+            weights = self.module.parameters.weights
+            wi = weights[i]
+            return jnp.where(i == j, probs / wi * (wi - 1), probs)
         return jnp.where(i == j, 0.0, probs)
+
+    def _get_ij(self) -> tuple[jnp.ndarray, jnp.ndarray]:
+        args = tuple(a for a in (self._index or ()) if a is not None)
+        coords = self.reindex[args].coords[...]
+        if len(coords) < 2:
+            coords = self.index
+        return coords
+
+
+@partial(eqx.filter_jit)
+def _pairs_probs(
+    pairs: NodePairView,
+    g: jnp.ndarray,
+    **kwargs: Any,
+) -> jnp.ndarray:
+    """Compute pairwise connection probabilities."""
+    return pairs._get_probs(pairs.module.parameters.aligned, g, **kwargs)

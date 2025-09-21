@@ -121,6 +121,16 @@ class Manifold(AbstractModule):
     def _sample_points(self, n: int, rng: RandomGenerator) -> Matrix:
         """Implementation of point sampling."""
 
+    @abstractmethod
+    def distance_density(self, g: float) -> float:
+        """Probability density of the distance between two random points.
+
+        Parameters
+        ----------
+        g
+            Geodesic distance between two points.
+        """
+
 
 class CompactManifold(Manifold):
     """Abstract base class for compact manifolds."""

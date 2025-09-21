@@ -1,6 +1,5 @@
 import math
 from dataclasses import replace
-from functools import singledispatchmethod
 from typing import Any, Self
 
 import equinox as eqx
@@ -8,7 +7,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 from jax.scipy.cluster.vq import vq
-from scipy.cluster.vq import kmeans2
+from sklearn.cluster import BisectingKMeans
 
 from grgg._typing import Floats, IntVector
 from grgg.abc import AbstractModule
@@ -48,7 +47,8 @@ class ArrayQuantizer(AbstractModule):
     Below we quantize a 3D array into using 32 k-means centroids.
     >>> import jax.numpy as jnp
     >>> data = jnp.arange(400).reshape(100, 2, 2)
-    >>> quantizer = ArrayQuantizer.from_data(data, n_codes=32, rng=17) # rng fixes seed
+    >>> quantizer = ArrayQuantizer.from_data(data, n_codes=32, random_state=17)
+
     >>> quantizer
     <ArrayQuantizer (100, 2, 2)->(32, 2, 2) at ...>
     >>> quantizer.codebook.shape
@@ -129,17 +129,24 @@ class ArrayQuantizer(AbstractModule):
         n_codes
             Number of quantization codes.
         **kwargs
-            Additional keyword arguments passed to :func:`scipy.cluster.vq.kmeans2`.
+            Additional keyword arguments passed to
+            :class:`sklearn.cluster.BisectingKMeans`.
         """
         data = cls._validate_data(data)
         shape = data.shape
         reshaped_data = cls.reshape_in(data)
-        kwargs = {"minit": "++", **kwargs}
+        kwargs = {
+            "init": "k-means++",
+            "algorithm": "lloyd",
+            "bisecting_strategy": "biggest_inertia",
+            **kwargs,
+        }
         if not jnp.issubdtype(reshaped_data.dtype, jnp.floating):
             reshaped_data = reshaped_data.astype(float)
-        codebook, codes = kmeans2(np.asarray(reshaped_data), n_codes, **kwargs)
-        codebook = jnp.asarray(codebook)
-        codes = jnp.asarray(codes)
+        _input = np.asarray(reshaped_data)
+        kmeans = BisectingKMeans(n_clusters=n_codes, **kwargs).fit(_input)
+        codebook = jnp.asarray(kmeans.cluster_centers_)
+        codes = jnp.asarray(kmeans.labels_)
         order = jnp.argsort(codes)
         index = jnp.arange(len(codes))[order]
         inverse = split_by(index, codes[order])
@@ -237,7 +244,7 @@ class Dequantization(eqx.Module):
     and co-dequantize new data.
     >>> import jax.numpy as jnp
     >>> X = jnp.arange(400).reshape(100, 2, 2)
-    >>> quantizer = ArrayQuantizer.from_data(X, n_codes=32, rng=17) # rng fixes seed
+    >>> quantizer = ArrayQuantizer.from_data(X, n_codes=32, random_state=17)
     >>> quantizer.dequantize
     <Dequantization of ArrayQuantizer (100, 2, 2)->(32, 2, 2) at ...>
     >>> def f(x): return x * 1.34 + 2.1
@@ -246,17 +253,17 @@ class Dequantization(eqx.Module):
     >>> qX, qY = quantizer.quantize(X, Y)
     >>> dX, dY = quantizer.dequantize(qX, qY)
     >>> error(X, dX)
-    0.016824403
+    0.016324782
     >>> error(Y, dY)
-    0.016725890
+    0.016388867
 
     The alignment between the original and dequantized data can be also
     measured by correlation.
     >>> def corr(x, y): return jnp.corrcoef(x.ravel(), y.ravel())[0, 1].item()
     >>> corr(X, dX)
-    0.99943584
+    0.99946892
     >>> corr(Y, dY)
-    0.99943518
+    0.99945795
 
     One can also dequantize only a subset of the original data.
     Here we will dequantize an arbitrary selection of rows of the original data
@@ -264,13 +271,13 @@ class Dequantization(eqx.Module):
     >>> idx = jnp.array([3, 17, 10, 90, 56, 90, 54, 31, 0, 2, 80, 34, ])
     >>> dX, dY = quantizer.dequantize[idx](qX, qY)
     >>> error(X[idx], dX)
-    0.020884850
+    0.022174103
     >>> corr(X[idx], dX)
-    0.999533951
+    0.999712407
     >>> error(Y[idx], dY)
-    0.020762944
+    0.021866155
     >>> corr(Y[idx], dY)
-    0.999534845
+    0.999696373
     """
 
     quantizer: ArrayQuantizer
@@ -323,36 +330,15 @@ class Dequantization(eqx.Module):
             raise ValueError(err)
         return self._dequantize(self.indices, states, codes, *data)
 
-    @singledispatchmethod
     def _dequantize(
         self,
-        _indices: None,
+        indices: jnp.ndarray | None,
         states: jnp.ndarray,
         codes: jnp.ndarray,
         *data: jnp.ndarray,
     ) -> jnp.ndarray | tuple[jnp.ndarray, ...]:
-        inverse = tuple(self.quantizer.inverse[c] for c in codes)
-        indices = jnp.concat(inverse)
-        codes_order = jnp.argsort(codes)
-        codes = self.quantizer.codes[indices]
-        dequantized = self.quantizer.codebook[codes]
-        dequantized = self.quantizer.reshape_out(dequantized, states.shape[1:])
-        if not data:
-            return dequantized
-        dequantized_data = []
-        for array in data:
-            array = self.quantizer._validate_data(array)[codes_order][codes]
-            dequantized_data.append(array)
-        return (dequantized, *dequantized_data)
-
-    @_dequantize.register
-    def _(
-        self,
-        indices: jnp.ndarray,
-        states: jnp.ndarray,
-        codes: jnp.ndarray,
-        *data: jnp.ndarray,
-    ) -> jnp.ndarray | tuple[jnp.ndarray, ...]:
+        if indices is None:
+            indices = jnp.arange(self.quantizer.shape[0])
         target_codes = self.quantizer.codes[indices]
         dequantized = self.quantizer.codebook[target_codes]
         dequantized = self.quantizer.reshape_out(dequantized, states.shape[1:])

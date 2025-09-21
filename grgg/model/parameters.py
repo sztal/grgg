@@ -7,6 +7,7 @@ import equinox as eqx
 import jax.numpy as jnp
 
 from grgg._typing import IntVector, Scalar, Vector
+from grgg.abc import AbstractModule
 from grgg.lazy import LazyOuter
 from grgg.utils import format_array
 
@@ -180,7 +181,7 @@ class Mu(AbstractNodeParameterSpecification):
         return jnp.array(0.0)
 
 
-class AbstractParametersContainer(eqx.Module):
+class AbstractParametersContainer(AbstractModule):
     """Abstract base class for parameter containers."""
 
     @property
@@ -211,6 +212,11 @@ class AbstractParametersContainer(eqx.Module):
     @abstractmethod
     def array(self) -> jnp.ndarray:
         """Parameters as a single array obtained with :func:`jax.numpy.column_stack`."""
+
+    @property
+    @abstractmethod
+    def names(self) -> list[str] | list[tuple[str, ...]]:
+        """Names of parameters in the container."""
 
     @abstractmethod
     def validate(self, n: int) -> Self:
@@ -287,6 +293,16 @@ class Parameters(AbstractParametersContainer, Mapping[str, jnp.ndarray]):
             errmsg = "all parameter arrays must have the same length or be scalars"
             raise ValueError(errmsg)
 
+    def equals(self, other: object) -> bool:
+        return (
+            super().equals(other)
+            and len(self) == len(other)
+            and all(
+                k1 == k2 and jnp.array_equal(v1, v2)
+                for (k1, v1), (k2, v2) in zip(self.items(), other.items(), strict=True)
+            )
+        )
+
     @property
     def outer(self) -> "Parameters.Outer":
         """Lazy outer sums of parameter vectors."""
@@ -330,6 +346,11 @@ class Parameters(AbstractParametersContainer, Mapping[str, jnp.ndarray]):
             return jnp.array([])
         return jnp.column_stack(list(self.aligned.values()))
 
+    @property
+    def names(self) -> tuple[str]:
+        """Names of parameters in the container."""
+        return tuple(self._mapping.keys())
+
     def validate(self, n: int) -> Self:
         """Validate that parameter arrays have correct lengths."""
         if not all(length in (1, n) for length in self.lengths):
@@ -342,7 +363,7 @@ class Parameters(AbstractParametersContainer, Mapping[str, jnp.ndarray]):
         return self._mapping.copy()
 
 
-class ParameterGroups(eqx.Module, Sequence[Parameters]):
+class ParameterGroups(AbstractModule, Sequence[Parameters]):
     """Container for model parameters.
 
     Attributes
@@ -377,7 +398,7 @@ class ParameterGroups(eqx.Module, Sequence[Parameters]):
 
     def __check_init__(self) -> None:
         lengths = {*sum((g.lengths for g in self._groups), start=[])}
-        if lengths - {1, max(lengths)}:
+        if lengths and lengths - {1, max(lengths)}:
             errmsg = "all parameter arrays must have the same length or be scalars"
             raise ValueError(errmsg)
 
@@ -422,6 +443,41 @@ class ParameterGroups(eqx.Module, Sequence[Parameters]):
                 continue
             arrays.append(arr)
         return jnp.column_stack(arrays) if arrays else jnp.array([])
+
+    @property
+    def names(self) -> list[tuple[str, ...]]:
+        """Names of parameters in the container.
+
+        Examples
+        --------
+        >>> from grgg import GRGG, Similarity, Complementarity
+        >>> model = (
+        ...     GRGG(2, 2) +
+        ...     Similarity(1.0, [0, 1]) +
+        ...     Complementarity([0, 1], 2)
+        ... )
+        >>> model.parameters.names
+        [('beta', 'mu'), ('beta', 'mu')]
+        >>> model.parameters.heterogeneous.names
+        [('mu',), ('beta',)]
+        >>> model = GRGG(2, 2) + Similarity
+        >>> model.parameters.names
+        [('beta', 'mu')]
+        >>> model.parameters.heterogeneous.names
+        [()]
+        """
+        return [group.names for group in self._groups]
+
+    def equals(self, other: object) -> bool:
+        return (
+            super().equals(other)
+            and len(self) == len(other)
+            and all(
+                g1.equals(g2)
+                for g1, g2 in zip(self._groups, other._groups, strict=True)
+            )
+            and jnp.array_equal(self.weights, other.weights)
+        )
 
     def validate(self, n: int) -> Self:
         """Validate that parameter arrays have correct lengths."""

@@ -1,8 +1,10 @@
 from collections.abc import Callable, Iterator, Mapping, Sequence
 from functools import partial, wraps
+from inspect import Signature, signature
 from itertools import product
 from typing import Any
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 from equinox import tree_pformat
@@ -236,6 +238,54 @@ def split_by(
     return tuple(jnp.split(data[order], splitpoints[1:]))
 
 
+@eqx.filter_jit
+def batch_starts(n: int, batch_size: int, *, repeat: int | None = None) -> jnp.ndarray:
+    """Get the starting indices of batches.
+
+    Parameters
+    ----------
+    n
+        Total number of items.
+    batch_size
+        Size of each batch.
+    repeat
+        If provided, generate all possible starting indices for each batch.
+
+    Returns
+    -------
+    starts
+        An array of starting indices for each batch.
+
+    Examples
+    --------
+    >>> batch_starts(10, 3)
+    Array([0, 3, 6, 9], ...)
+    >>> batch_starts(7, 3, repeat=2)
+    Array([[0, 0],
+           [0, 3],
+           [0, 6],
+           [3, 0],
+           [3, 3],
+           [3, 6],
+           [6, 0],
+           [6, 3],
+           [6, 6]], ...)
+    """
+    if n < 1:
+        errmsg = "'n' must be a positive integer."
+        raise ValueError(errmsg)
+    if batch_size < 1:
+        errmsg = "'batch_size' must be a positive integer."
+        raise ValueError(errmsg)
+    if repeat and repeat < 1:
+        errmsg = "'repeat' must be a positive integer."
+        raise ValueError(errmsg)
+    starts = (jnp.arange(0, n, batch_size),)
+    if repeat:
+        starts = starts * repeat
+    return cartesian_product(starts).squeeze()
+
+
 def batch_slices(
     n: int,
     batch_size: int,
@@ -272,6 +322,66 @@ def batch_slices(
         yield from _iter()
     else:
         yield from product(_iter(), repeat=repeat)
+
+
+def number_of_batches(n: int, batch_size: int) -> int:
+    """Compute the number of batches needed to process `n` with given `batch_size`.
+
+    Parameters
+    ----------
+    n
+        Total number of items.
+    batch_size
+        Size of each batch.
+
+    Returns
+    -------
+    n_batches
+        The number of batches needed.
+    """
+    if n <= 0:
+        errmsg = "'n' must be a positive integer."
+        raise ValueError(errmsg)
+    if batch_size <= 0:
+        errmsg = "'batch_size' must be a positive integer."
+        raise ValueError(errmsg)
+    return (n + batch_size - 1) // batch_size
+
+
+def split_kwargs_by_signature(
+    func: Callable, **kwargs: Any
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split keyword arguments by function signature.
+
+    Parameters
+    ----------
+    signature
+        The function signature to match against.
+
+    Returns
+    -------
+    matched
+        A dictionary of matched keyword arguments.
+    unmatched
+        A dictionary of unmatched keyword arguments.
+    """
+    sig = func if isinstance(func, Signature) else signature(func)
+    matched = {}
+    unmatched = {}
+    for k, v in kwargs.items():
+        if k in sig.parameters:
+            matched[k] = v
+        else:
+            unmatched[k] = v
+    return matched, unmatched
+
+
+def format_array(x: jnp.ndarray) -> str:
+    """Format a JAX array for display."""
+    s = tree_pformat(x)
+    if jnp.isscalar(x):
+        return f"{x.item():.2f}"
+    return s
 
 
 def parse_switch_flag(
@@ -318,11 +428,3 @@ def parse_switch_flag(
     else:
         value, options = bool(value), {}
     return value, options
-
-
-def format_array(x: jnp.ndarray) -> str:
-    """Format a JAX array for display."""
-    s = tree_pformat(x)
-    if jnp.isscalar(x):
-        return f"{x.item():.2f}"
-    return s

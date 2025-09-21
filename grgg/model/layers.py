@@ -1,14 +1,12 @@
-import weakref
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import TYPE_CHECKING, Self, Union
+from typing import TYPE_CHECKING, Self
 
 import equinox as eqx
 import jax.numpy as jnp
 
 from grgg import options
 from grgg._typing import Floats
-from grgg.abc import AbstractGRGG
 from grgg.manifolds import CompactManifold
 from grgg.model.abc import ParamsT
 
@@ -44,10 +42,12 @@ class AbstractLayer(AbstractModelModule):
     mu: jnp.ndarray
     log: bool = eqx.field(static=True)
     eps: float = eqx.field(static=True, repr=False)
-    _model: weakref.ReferenceType["GRGG"] | None = eqx.field(repr=False, static=True)
-    function: Callable[[Floats, Floats, Floats], Floats] = eqx.field(
-        repr=False, static=True
+    function: Callable[[Floats, Floats, Floats], Floats] | None = eqx.field(
+        static=True,
+        repr=False,
+        init=False,
     )
+    _model_getter: Callable[[], "GRGG"] | None = eqx.field(static=True, repr=False)
 
     def __init__(
         self,
@@ -56,29 +56,21 @@ class AbstractLayer(AbstractModelModule):
         *,
         log: bool | None = None,
         eps: float | None = None,
-        _model: Union[weakref.ReferenceType["GRGG"], "GRGG", None] = None,
-        function: Callable[[Floats, Floats, Floats], Floats] | None = None,
+        _model_getter: Callable[[], "GRGG"] | None = None,
     ) -> None:
         """Initialize layer."""
         self.beta = Beta.validate(beta)
         self.mu = Mu.validate(mu)
         self.log = bool(options.model.log if log is None else log)
         self.eps = float(options.model.eps if eps is None else eps)
-        if _model is not None and not isinstance(_model, weakref.ReferenceType):
-            if not isinstance(_model, AbstractGRGG):
-                errmsg = "_model must be a GRGG model or a weak reference to one"
-                raise TypeError(errmsg)
-            _model = weakref.ref(_model)
-        self._model = _model
-        if function is None and _model is not None:
-            function = self.define_function(self.model)
-        self.function = function
+        self._model_getter = _model_getter
+        self.function = self.define_function(self.model) if self._model_getter else None
 
     def __check_init__(self) -> None:
         if self.eps <= 0:
             errmsg = "'eps' must be positive"
             raise ValueError(errmsg)
-        if self._model is not None:
+        if self._model_getter is not None:
             self.parameters.validate(self.n_units)
 
     def __call__(self, g: Floats, beta: Floats, mu: Floats) -> Floats:
@@ -103,12 +95,10 @@ class AbstractLayer(AbstractModelModule):
     @property
     def model(self) -> "GRGG":
         """The GRGG model this layer is part of."""
-        model = getattr(self, "_model", None)
-        model = model() if model is not None else None
-        if model is None:
+        if self._model_getter is None:
             errmsg = "layer is not linked to a model"
             raise AttributeError(errmsg)
-        return model
+        return self._model_getter()
 
     @property
     def n_nodes(self) -> int:
@@ -164,11 +154,15 @@ class AbstractLayer(AbstractModelModule):
         model
             The GRGG model to attach to.
         """
-        return self.replace(_model=model)
+
+        def _model_getter() -> "GRGG":
+            return model
+
+        return self.replace(_model_getter=_model_getter)
 
     def detach(self) -> Self:
         """Return a shallow copy detached from any model."""
-        return self.replace(_model=None, function=None)
+        return self.replace(_model_getter=None)
 
     def set_parameters(
         self, parameters: ParamsT | None = None, **kwargs: jnp.ndarray
