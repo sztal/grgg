@@ -82,7 +82,6 @@ def pairwise(
     >>> float(pairwise_euclidean(x, y))
     1.0
     """
-    jitted = jax.jit(func)
 
     def wrapped(
         X: Matrix,
@@ -91,7 +90,7 @@ def pairwise(
         condensed: bool = True,
     ) -> Vector:
         if X.ndim == 1 and (Y is not None and Y.ndim == 1):
-            return jitted(X, Y)
+            return func(X, Y)
         if X.ndim != 2 or (Y is not None and Y.ndim != 2):
             errmsg = "'X' and 'Y' must be 2D arrays"
             raise ValueError(errmsg)
@@ -99,12 +98,12 @@ def pairwise(
 
             @jax.jit
             def compute(idx: tuple[int, int]) -> Scalar:
-                return jitted(X[idx[0]], X[idx[1]])
+                return func(X[idx[0]], X[idx[1]])
         else:
 
             @jax.jit
             def compute(idx: tuple[int, int]) -> Scalar:
-                return jitted(X[idx[0]], Y[idx[1]])
+                return func(X[idx[0]], Y[idx[1]])
 
         if Y is None:
             indices = jnp.array(jnp.triu_indices(len(X), k=1)).T

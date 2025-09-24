@@ -6,6 +6,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from grgg.integrate import IntegrandT
 from grgg.utils import number_of_batches
 
 from .abc import AbstractNodesIntegral
@@ -16,6 +17,10 @@ if TYPE_CHECKING:
 __all__ = ("DegreeIntegral",)
 
 HeterogeneousCarryT = tuple["GRGG", int, jnp.ndarray]
+InnerSumT = Callable[[jnp.ndarray], jnp.ndarray]
+InnerSumScanT = Callable[
+    [HeterogeneousCarryT, ...], tuple[HeterogeneousCarryT, jnp.ndarray]
+]
 
 
 class DegreeIntegral(AbstractNodesIntegral):
@@ -35,6 +40,14 @@ class DegreeIntegral(AbstractNodesIntegral):
     radius in the constant multiplier. Thus, the domain of integration is `[0, pi]`.
     """
 
+    @property
+    def constant(self) -> float:
+        delta = self.model.delta
+        R = self.model.manifold.linear_size
+        d = self.model.manifold.dim
+        dV = self.model.manifold.__class__(d - 1).volume
+        return delta * R**d * dV
+
 
 @DegreeIntegral.register_homogeneous
 class HomogeneousDegreeIntegral(DegreeIntegral):
@@ -50,14 +63,14 @@ class HomogeneousDegreeIntegral(DegreeIntegral):
     >>> import jax
     >>> import jax.numpy as jnp
     >>> import numpy as np
-    >>> from grgg import GRGG, Similarity, Complementarity, RandomGenerator
+    >>> from grgg import GRGG, Sphere, Similarity, Complementarity, RandomGenerator
     >>> from grgg.model.integrals import DegreeIntegral
     >>> rng = RandomGenerator(42)
     >>> model = GRGG(100, 3, Similarity, Complementarity)  # homogeneous
     >>> degree = DegreeIntegral.from_model(model)
     >>> kbar, _ = degree.integrate()
     >>> expected = jnp.asarray(
-    ...     [model.nodes.sample_pmatrix(rng=rng).sum(axis=1).mean() for _ in range(20)]
+    ...     [model.nodes.sample_pmatrix(rng=rng).sum(axis=1).mean() for _ in range(50)]
     ... ).mean()
     >>> jnp.isclose(kbar, expected, rtol=1e-2).item()
     True
@@ -70,7 +83,17 @@ class HomogeneousDegreeIntegral(DegreeIntegral):
     True
     >>> grad = jax.grad(compute_kbar)
     >>> np.asarray(grad(model).parameters.array)
-    array([[-4.1539392, 15.003034 , -4.1539392, 15.003028 ]], dtype=...)
+    array([[15.003032 , -4.153939 , 15.003028 , -4.1539392]], dtype=...)
+
+    Check that it works for other dimensions and volumes.
+    >>> model = GRGG(100, Sphere(4, r=1.0), Similarity, Complementarity)
+    >>> degree = DegreeIntegral.from_model(model)
+    >>> kbar, _ = degree.integrate()
+    >>> expected = jnp.asarray(
+    ...     [model.nodes.sample_pmatrix(rng=rng).sum(axis=1).mean() for _ in range(50)]
+    ... ).mean()
+    >>> jnp.isclose(kbar, expected, rtol=1e-2).item()
+    True
     """
 
     @property
@@ -78,11 +101,15 @@ class HomogeneousDegreeIntegral(DegreeIntegral):
         n = self.model.n_nodes
         return super().constant * (n - 1) / n
 
-    def integrand(self, theta: jnp.ndarray) -> jnp.ndarray:
-        """Compute the integrand at given angle(s) `theta`."""
-        d = self.model.manifold.dim
-        R = self.model.manifold.linear_size
-        return jnp.sin(theta) ** (d - 1) * self.nodes.pairs.probs(theta * R)
+    def define_integrand(self) -> IntegrandT:
+        @jax.jit
+        def integrand(theta: jnp.ndarray) -> jnp.ndarray:
+            """Compute the integrand at given angle(s) `theta`."""
+            d = self.model.manifold.dim
+            R = self.model.manifold.linear_size
+            return jnp.sin(theta) ** (d - 1) * self.nodes.pairs.probs(theta * R)
+
+        return integrand
 
 
 @DegreeIntegral.register_heterogeneous
@@ -99,19 +126,19 @@ class HeterogeneousDegreeIntegral(DegreeIntegral):
     >>> import jax
     >>> import jax.numpy as jnp
     >>> import numpy as np
-    >>> from grgg import GRGG, Similarity, Complementarity, RandomGenerator
+    >>> from grgg import GRGG, Sphere, Similarity, Complementarity, RandomGenerator
     >>> from grgg.model.integrals import DegreeIntegral
     >>> rng = RandomGenerator(42)
     >>> n = 100
     >>> model = (
     ...     GRGG(n, 2) +
-    ...     Similarity(rng.normal(n)**2, rng.normal(n)) +
-    ...     Complementarity(rng.normal(n)**2, rng.normal(n))
+    ...     Similarity(rng.normal(n), rng.normal(n)**2) +
+    ...     Complementarity(rng.normal(n), rng.normal(n)**2)
     ... )
     >>> degree = DegreeIntegral.from_model(model)
     >>> kbar, _ = degree.integrate()
     >>> expected = jnp.stack(
-    ...     [model.nodes.sample_pmatrix(rng=rng).sum(axis=1) for _ in range(20)]
+    ...     [model.nodes.sample_pmatrix(rng=rng).sum(axis=1) for _ in range(50)]
     ... ).mean(0)
     >>> jnp.allclose(kbar, expected, rtol=1e-1).item()
     True
@@ -124,56 +151,73 @@ class HeterogeneousDegreeIntegral(DegreeIntegral):
     True
     >>> grad = jax.jacobian(compute_kbar)
     >>> np.asarray(grad(model).parameters.array)
-    array([[-1.6744738e+01, -6.1276048e-02, -7.5484417e-02, ...,
-            -4.8600473e-02,  6.8682708e-02,  2.8153904e-02],
-           [-6.1276048e-02, -1.0947376e+01, -1.4008153e-02, ...,
-            -6.6341758e-02,  6.1861079e-02,  3.3777410e-03],
-           [-7.5484417e-02, -1.4008153e-02, -2.3531334e+00, ...,
-             1.9964302e-01,  1.7936581e-01,  3.5689750e-03],
+    array([[ 2.8390756e+00,  4.3376803e-01, -1.8666738e-01, ...,
+            -6.6482192e-03, -7.0885383e-02, -1.5310521e-03],
+           [ 4.3376803e-01,  2.1771797e+01,  4.8721835e-02, ...,
+            -1.2081267e-02, -3.3174299e-02, -2.3468907e-03],
+           [-1.8666738e-01,  4.8721835e-02, -3.5076842e+00, ...,
+            -5.3534908e-03, -1.3598135e-01, -1.5307984e-03],
            ...,
-           [-2.9722819e-01, -3.1819928e-01, -1.0324293e-01, ...,
-             4.6899362e+00,  4.7270000e-02,  7.4549869e-02],
-           [-1.5679037e-02, -2.2483882e-03, -9.7606033e-03, ...,
-             4.7270000e-02,  1.4273865e+01,  3.4715172e-02],
-           [-5.2480883e-04, -5.5024851e-05, -4.2580199e-04, ...,
-             7.4549869e-02,  3.4715172e-02,  3.3579695e+00]],
+           [-8.5827827e-02,  2.9081929e-01, -1.3207673e-01, ...,
+             8.2676664e-02, -1.1980609e-02, -2.9447101e-04],
+           [-9.9787414e-02,  4.1642123e-01, -2.1446073e-01, ...,
+            -1.1980609e-02,  1.8283134e+00, -4.5314450e-03],
+           [ 3.6122240e-02,  1.2246166e-02,  1.1097690e-02, ...,
+            -2.9447101e-04, -4.5314450e-03, -1.9551054e-01]],
           shape=(100, 400), dtype=...)
+
+    Check that it works for other dimensions and volumes.
+    >>> model = (
+    ...     GRGG(n, Sphere(4, r=1.0)) +
+    ...     Similarity(rng.normal(n), rng.normal(n)**2) +
+    ...     Complementarity(rng.normal(n), rng.normal(n)**2)
+    ... )
+    >>> degree = DegreeIntegral.from_model(model)
+    >>> kbar, _ = degree.integrate()
+    >>> expected = jnp.stack(
+    ...     [model.nodes.sample_pmatrix(rng=rng).sum(axis=1) for _ in range(50)]
+    ... ).mean(0)
+    >>> jnp.allclose(kbar, expected, rtol=1e-1).item()
+    True
     """
 
     batch_size: int = eqx.field(static=True)
-    inner_sum: Callable[
-        [HeterogeneousCarryT, ...], tuple[HeterogeneousCarryT, jnp.ndarray]
-    ] = eqx.field(static=True, init=False, repr=False)
 
     def __init__(
         self, *args: Any, batch_size: int | None = None, **kwargs: Any
     ) -> None:
         super().__init__(*args, **kwargs)
         self.batch_size = self.model._get_batch_size(batch_size)
-        self.inner_sum = self._define_inner_sum()
 
     @property
     def constant(self) -> float:
         return super().constant / self.model.n_nodes
 
-    def integrand(self, theta: jnp.ndarray) -> jnp.ndarray:
-        """Compute the integrand at given angle(s) `x`."""
-        d = self.model.manifold.dim
-        g = theta * self.model.manifold.linear_size
-        if self.model.n_units > self.batch_size:
-            _, P = jax.lax.scan(
-                self.inner_sum,
-                (self.model, 0, g),
-                length=number_of_batches(self.model.n_units, self.batch_size),
-            )
-        else:
-            P = self.inner_sum(g)
-        integral = jnp.sin(theta) ** (d - 1) * P
-        return integral.reshape(-1)[: self.model.n_units]
+    def define_integrand(self) -> IntegrandT:
+        inner_sum = self._define_inner_sum()
+
+        @jax.jit
+        def integrand(theta: jnp.ndarray) -> jnp.ndarray:
+            """Compute the integrand at given angle(s) `x`."""
+            d = self.model.manifold.dim
+            g = theta * self.model.manifold.linear_size
+            if self.model.n_units > self.batch_size:
+                _, P = jax.lax.scan(
+                    inner_sum,
+                    (self.model, 0, g),
+                    length=number_of_batches(self.model.n_units, self.batch_size),
+                )
+            else:
+                P = inner_sum(g)
+            integral = jnp.sin(theta) ** (d - 1) * P
+            return integral.reshape(-1)[: self.model.n_units]
+
+        return integrand
 
     def _define_inner_sum(
         self,
-    ) -> Callable[[HeterogeneousCarryT, ...], tuple[HeterogeneousCarryT, jnp.ndarray]]:
+    ) -> InnerSumT | InnerSumScanT:
+        """Define the inner summation over nodes."""
         if self.model.n_units <= self.batch_size:
 
             @partial(jax.checkpoint)

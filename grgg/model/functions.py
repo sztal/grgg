@@ -1,17 +1,12 @@
-from abc import abstractmethod
-from collections.abc import Callable
-from functools import wraps
-from typing import Any
-
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
 from grgg import options
 from grgg._typing import Floats, Scalar, Vector
-from grgg.abc import AbstractModule
+from grgg.functions import AbstractFunction
 
-VectorLike = Scalar | Vector
+VectorOrScalar = Scalar | Vector
 
 __all__ = (
     "CouplingFunction",
@@ -19,60 +14,7 @@ __all__ = (
 )
 
 
-class AbstractModelFunction(AbstractModule):
-    """Abstract base class for model functions."""
-
-    function: Callable[[Floats, ...], Floats] = eqx.field(
-        init=False, repr=False, static=True
-    )
-    gradient: Callable[[Floats, ...], Floats] | None = eqx.field(
-        init=False, repr=False, static=True
-    )
-    hessian: Callable[[Floats, ...], Floats] | None = eqx.field(
-        init=False, repr=False, static=True
-    )
-
-    def __post_init__(self) -> None:
-        self.function = jax.jit(self.define_function())
-        if self.deriv_argnums is not None:
-            self.gradient = self.define_deriv(order=1)
-            self.hessian = self.define_deriv(order=2)
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Floats:
-        return self.function(*args, **kwargs)
-
-    @property
-    @abstractmethod
-    def deriv_argnums(self) -> tuple[int, ...]:
-        """Argument numbers with respect to which the derivatives are computed."""
-
-    @abstractmethod
-    def define_function(self) -> Callable[[Floats, ...], Floats]:
-        """Define the function."""
-
-    def define_deriv(self, order: int = 1) -> Callable[[Floats, ...], Floats]:
-        """Define the derivative function.
-
-        Parameters
-        ----------
-        order
-            Order of the derivative (1 for gradient, 2 for Hessian).
-        """
-        order = int(order)
-        if order not in (1, 2):
-            errmsg = "only first and second derivatives are supported"
-            raise NotImplementedError(errmsg)
-        builder = jax.grad if order == 1 else jax.hessian
-        deriv = jax.jit(builder(self.function, argnums=self.deriv_argnums))
-
-        @wraps(deriv)
-        def derivative(*args: Any, **kwargs: Any) -> Floats:
-            return jnp.array(deriv(*args, **kwargs))
-
-        return jax.jit(derivative)
-
-
-class CouplingFunction(AbstractModelFunction):
+class CouplingFunction(AbstractFunction):
     """Abstract base class for coupling functions.
 
     Attributes
@@ -88,22 +30,22 @@ class CouplingFunction(AbstractModelFunction):
     --------
     >>> from jax.test_util import check_grads
     >>> energies = jnp.linspace(-1, 3, 5)
-    >>> betas = jnp.linspace(0, 3, 5)
     >>> mus = jnp.linspace(-1, 3, 5)
+    >>> betas = jnp.linspace(0, 3, 5)
     >>> coupling = CouplingFunction(2, modified=False)
 
-    >>> check_grads(coupling, (energies, betas, mus), order=1)
-    >>> check_grads(coupling, (energies, betas, mus), order=2)
+    >>> check_grads(coupling, (energies, mus, betas), order=1)
+    >>> check_grads(coupling, (energies, mus, betas), order=2)
 
     >>> coupling = CouplingFunction(2, modified=True)
-    >>> check_grads(coupling, (energies, betas, mus), order=1)
-    >>> check_grads(coupling, (energies, betas, mus), order=2)
+    >>> check_grads(coupling, (energies, mus, betas), order=1)
+    >>> check_grads(coupling, (energies, mus, betas), order=2)
 
     Broadcasting is supported.
     >>> E = energies[:, None, None]
-    >>> B = betas[:, None] + betas
     >>> M = mus[:, None] + mus
-    >>> thetas = coupling(E, B, M)
+    >>> B = betas[:, None] + betas
+    >>> thetas = coupling(E, M, B)
     >>> thetas.shape
     (5, 5, 5)
     """
@@ -116,9 +58,25 @@ class CouplingFunction(AbstractModelFunction):
         converter=lambda x: (bool(x if x is not None else options.model.modified)),
     )
 
-    @property
-    def deriv_argnums(self) -> tuple[int, ...]:
-        return (1, 2)
+    def __call__(
+        self, energy: VectorOrScalar, mu: VectorOrScalar, beta: VectorOrScalar
+    ) -> Floats:
+        """Coupling function of the GRGG model.
+
+        Parameters
+        ----------
+        energy
+            Edge energies.
+        beta
+            Inverse temperature parameter(s).
+        mu
+            Chemical potential parameter(s).
+        """
+        theta = beta * self.dim * (energy - mu)
+        if self.modified:
+            const = jnp.where(jnp.isinf(beta), 0.0, jnp.exp(-beta) * mu * (beta + 1))
+            theta += const
+        return theta
 
     def equals(self, other: object) -> bool:
         return (
@@ -127,33 +85,8 @@ class CouplingFunction(AbstractModelFunction):
             and self.modified == other.modified
         )
 
-    def define_function(self) -> Callable[[VectorLike, VectorLike, VectorLike], Floats]:
-        """Define the coupling function."""
 
-        def coupling(energy: VectorLike, beta: VectorLike, mu: VectorLike) -> Floats:
-            """Coupling function of the GRGG model.
-
-            Parameters
-            ----------
-            energy
-                Edge energies.
-            beta
-                Inverse temperature parameter(s).
-            mu
-                Chemical potential parameter(s).
-            """
-            theta = beta * self.dim * (energy - mu)
-            if self.modified:
-                const = jnp.where(
-                    jnp.isinf(beta), 0.0, jnp.exp(-beta) * mu * (beta + 1)
-                )
-                theta += const
-            return theta
-
-        return coupling
-
-
-class ProbabilityFunction(AbstractModelFunction):
+class ProbabilityFunction(AbstractFunction):
     """GRGG edge probability function.
 
     Attributes
@@ -163,20 +96,22 @@ class ProbabilityFunction(AbstractModelFunction):
 
     Examples
     --------
+    >>> import jax.numpy as jnp
+    >>> from grgg.model.functions import ProbabilityFunction, CouplingFunction
     >>> from jax.test_util import check_grads
     >>> coupling = CouplingFunction(2)
     >>> probability = ProbabilityFunction(coupling)
     >>> energies = jnp.linspace(-1, 3, 5)
-    >>> betas = jnp.linspace(0, 3, 5)
     >>> mus = jnp.linspace(-1, 3, 5)
-    >>> check_grads(probability, (energies, betas, mus), order=1)
-    >>> check_grads(probability, (energies, betas, mus), order=2)
+    >>> betas = jnp.linspace(0, 3, 5)
+    >>> check_grads(probability, (energies, mus, betas), order=1)
+    >>> check_grads(probability, (energies, mus, betas), order=2)
 
     Broadcasting is supported.
     >>> E = energies[:, None, None]
-    >>> B = betas[:, None] + betas
     >>> M = mus[:, None] + mus
-    >>> ps = probability(E, B, M)
+    >>> B = betas[:, None] + betas
+    >>> ps = probability(E, M, B)
     >>> ps.shape
     (5, 5, 5)
 
@@ -190,10 +125,10 @@ class ProbabilityFunction(AbstractModelFunction):
 
     With other values of `mu`, the probability is still constant,
     but can take any value in (0, 1), depending on `mu`.
-    >>> p = probability(0, 0, 1)
+    >>> p = probability(0, 1, 0)
     >>> bool(jnp.allclose(p, 0.26894143))
     True
-    >>> bool(jnp.allclose(probability(energies, 0, 1), p))
+    >>> bool(jnp.allclose(probability(energies, 1, 0), p))
     True
 
     Now, the hard RGG model is recovered in the limit `beta = jnp.inf`.
@@ -203,7 +138,7 @@ class ProbabilityFunction(AbstractModelFunction):
     the role of the inverse temperature, controlling the sharpness of the
     transition between 0 and 1. The `energy = mu` case is handled separately,
     and the probability is set to 0.5.
-    >>> p = probability(energies, jnp.inf, 1)
+    >>> p = probability(energies, 1, jnp.inf)
     >>> bool(jnp.all(p[energies < 1] == 1.0))
     True
     >>> bool(jnp.all(p[energies > 1] == 0.0))
@@ -214,30 +149,23 @@ class ProbabilityFunction(AbstractModelFunction):
 
     coupling: CouplingFunction
 
-    @property
-    def deriv_argnums(self) -> tuple[int, ...]:
-        return (1, 2)
+    def __call__(
+        self, energy: VectorOrScalar, mu: VectorOrScalar, beta: VectorOrScalar
+    ) -> Floats:
+        """Edge probability function of the GRGG model.
+
+        Parameters
+        ----------
+        energy
+            Edge energies.
+        beta
+            Inverse temperature parameter(s).
+        mu
+            Chemical potential parameter(s).
+        """
+        theta = self.coupling(energy, mu, beta)
+        p = jax.scipy.special.expit(-theta)
+        return jnp.where(jnp.isnan(p), 0.5, p)  # Handle 0/0 case
 
     def equals(self, other: object) -> bool:
         return super().equals(other) and self.coupling.equals(other.coupling)
-
-    def define_function(self) -> Callable[[VectorLike, VectorLike, VectorLike], Floats]:
-        """Define the probability function."""
-
-        def probability(energy: VectorLike, beta: VectorLike, mu: VectorLike) -> Floats:
-            """Edge probability function of the GRGG model.
-
-            Parameters
-            ----------
-            energy
-                Edge energies.
-            beta
-                Inverse temperature parameter(s).
-            mu
-                Chemical potential parameter(s).
-            """
-            theta = self.coupling(energy, beta, mu)
-            p = jax.scipy.special.expit(-theta)
-            return jnp.where(jnp.isnan(p), 0.5, p)  # Handle 0/0 case
-
-        return probability

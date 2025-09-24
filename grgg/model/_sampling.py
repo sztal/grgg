@@ -41,7 +41,7 @@ class Sample:
     """
 
     A: sparray
-    X: np.ndarray
+    X: jnp.ndarray
 
     @cached_property
     def G(self) -> ig.Graph:
@@ -72,7 +72,7 @@ class Sampler(eqx.Module):
     nodes: "NodeView"
 
     def __init__(self, nodes: "NodeView") -> None:
-        if not isinstance(nodes.module, AbstractGRGG):
+        if not isinstance(nodes.model, AbstractGRGG):
             errmsg = (
                 "sampling can only be performed for GRGG models, not layer modules; "
                 "extract a layer-specific submodule to sample based on a single layer"
@@ -87,18 +87,22 @@ class Sampler(eqx.Module):
     @property
     def model(self) -> "GRGG":
         """Parent model module."""
-        return self.nodes.module
+        return self.nodes.model
 
     @property
     def n_nodes(self) -> int:
         """Number of nodes in the model."""
         return self.nodes.n_nodes
 
-    def sample(self, **kwargs: Any) -> Sample:
+    def sample(self, points: jnp.ndarray | None = None, **kwargs: Any) -> Sample:
         """Sample a graph from the model.
 
         Parameters
         ----------
+        points
+            Optional pre-sampled points on the manifold.
+            Must be of shape `(n_nodes, dim+1)`.
+            If `None`, points are sampled from the model.
         batch_size
             Batch size for processing node pairs.
             If less than or equal to 0, process all node pairs at once.
@@ -115,7 +119,7 @@ class Sampler(eqx.Module):
         >>> from grgg import GRGG, Similarity
         >>> from grgg.random import RandomGenerator
         >>> rng = RandomGenerator.from_seed(42)
-        >>> model = GRGG(100, 2) + Similarity(3.0, rng.normal(100))
+        >>> model = GRGG(100, 2) + Similarity(rng.normal(100), 3.0)
         >>> S = model.sample(rng=rng, batch_size=50)
         >>> S.A.shape
         (100, 100)
@@ -130,7 +134,7 @@ class Sampler(eqx.Module):
         (10, 3)
 
         Sampling from a quantized model is allowed as well,
-        even though the meaning of that operation is less clear.
+        even though the meaning of such an operation is less clear.
         >>> S = model.quantize(n_codes=16).sample(rng=rng)
         >>> S.A.shape
         (16, 16)
@@ -142,7 +146,8 @@ class Sampler(eqx.Module):
         Sample
             Sampled graph and associated data.
         """
-        points, i, j = (np.asarray(x) for x in self._sample(**kwargs))
+        points, i, j = self._sample(**kwargs)
+        i, j = jnp.asarray(i), jnp.asarray(j)
         n_nodes = len(points)
         A = csr_array((np.ones_like(i), (i, j)), shape=(n_nodes, n_nodes))
         A += A.T
@@ -150,6 +155,7 @@ class Sampler(eqx.Module):
 
     def _sample(
         self,
+        points: jnp.ndarray | None = None,
         *,
         batch_size: int | None = None,
         rng: RandomGenerator | int | None = None,
@@ -163,7 +169,15 @@ class Sampler(eqx.Module):
         batch_size = self.model._get_batch_size(batch_size)
         progress, pkw = self.model._get_progress(progress)
         rng = RandomGenerator.from_seed(rng)
-        points = self.nodes.sample_points(rng=rng)
+        if points is None:
+            points = self.nodes.sample_points(rng=rng)
+        else:
+            expected_shape = (nodes.n_nodes, self.model.manifold.embedding_dim)
+            if points.shape != expected_shape:
+                errmsg = (
+                    f"'points' must be of shape {expected_shape}, got {points.shape}"
+                )
+                raise ValueError(errmsg)
         n_nodes = nodes.n_nodes
         bslices = [
             (bs1, bs2)
@@ -173,8 +187,6 @@ class Sampler(eqx.Module):
         Ai = []
         Aj = []
         for bs1, bs2 in tqdm(bslices, disable=not progress, **pkw):
-            if bs1 > bs2:  # type: ignore
-                continue
             if bs1 == bs2:
                 i, j, M = _sample_diag(self, points, bs1, rng)
                 i = i[M]
@@ -186,8 +198,8 @@ class Sampler(eqx.Module):
             j += bs2.start
             Ai.append(i)
             Aj.append(j)
-        Ai = np.concatenate(Ai)
-        Aj = np.concatenate(Aj)
+        Ai = jnp.concatenate(Ai)
+        Aj = jnp.concatenate(Aj)
         return points, Ai, Aj
 
 

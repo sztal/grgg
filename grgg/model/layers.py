@@ -23,53 +23,41 @@ class AbstractLayer(AbstractModelModule):
 
     Attributes
     ----------
-    beta
-        Inverse temperature parameter(s).
     mu
         Chemical potential parameter(s).
+    beta
+        Inverse temperature parameter(s).
     log
         Whether log-energy should be used.
     eps
-        Small constant added to energies for numerical stability.
+        Small constant for lower bounding the energies for numerical stability.
 
     Examples
     --------
     >>> Similarity()
-    Similarity(beta=f...[], mu=f...[], log=...)
+    Similarity(mu=f...[], beta=f...[], log=...)
     """
 
-    beta: jnp.ndarray
     mu: jnp.ndarray
+    beta: jnp.ndarray
     log: bool = eqx.field(static=True)
-    eps: float = eqx.field(static=True, repr=False)
-    function: Callable[[Floats, Floats, Floats], Floats] | None = eqx.field(
-        static=True,
-        repr=False,
-        init=False,
-    )
     _model_getter: Callable[[], "GRGG"] | None = eqx.field(static=True, repr=False)
 
     def __init__(
         self,
-        beta: jnp.ndarray | None = None,
         mu: jnp.ndarray | None = None,
+        beta: jnp.ndarray | None = None,
         *,
         log: bool | None = None,
-        eps: float | None = None,
         _model_getter: Callable[[], "GRGG"] | None = None,
     ) -> None:
         """Initialize layer."""
-        self.beta = Beta.validate(beta)
         self.mu = Mu.validate(mu)
+        self.beta = Beta.validate(beta)
         self.log = bool(options.model.log if log is None else log)
-        self.eps = float(options.model.eps if eps is None else eps)
         self._model_getter = _model_getter
-        self.function = self.define_function(self.model) if self._model_getter else None
 
     def __check_init__(self) -> None:
-        if self.eps <= 0:
-            errmsg = "'eps' must be positive"
-            raise ValueError(errmsg)
         if self._model_getter is not None:
             self.parameters.validate(self.n_units)
 
@@ -85,12 +73,15 @@ class AbstractLayer(AbstractModelModule):
         mu
             Chemical potential parameter(s).
         """
-        return self._function(g, beta, mu)
+        energy = jnp.maximum(self.energy(g), self.eps)
+        if self.log:
+            energy = jnp.log(energy)
+        return self.model.probability(energy, beta, mu)
 
     @property
     def parameters(self) -> dict[str, jnp.ndarray]:
         """Layer parameters."""
-        return Parameters(beta=self.beta, mu=self.mu)
+        return Parameters(mu=self.mu, beta=self.beta)
 
     @property
     def model(self) -> "GRGG":
@@ -135,6 +126,11 @@ class AbstractLayer(AbstractModelModule):
         """The coupling function."""
         return self.probability.coupling
 
+    @property
+    def eps(self) -> float:
+        """Small constant for lower bounding the energies for numerical stability."""
+        return self.model.eps
+
     def equals(self, other: object) -> bool:
         """Check if two layers are equal."""
         return (
@@ -143,7 +139,6 @@ class AbstractLayer(AbstractModelModule):
             and jnp.array_equal(self.beta, other.beta)
             and self.probability.equals(other.probability)
             and self.log == other.log
-            and self.eps == other.eps
         )
 
     def attach(self, model: "GRGG") -> Self:
@@ -184,30 +179,6 @@ class AbstractLayer(AbstractModelModule):
         g
             Geodesic distances.
         """
-
-    def define_function(
-        self, model: "GRGG"
-    ) -> Callable[[Floats, Floats, Floats], Floats]:
-        """Define the layer function."""
-
-        def layer_function(g: Floats, beta: Floats, mu: Floats) -> Floats:
-            """Compute layer edge probabilities.
-
-            Parameters
-            ----------
-            g
-                Geodesic distances.
-            beta
-                Inverse temperature parameter(s).
-            mu
-                Chemical potential parameter(s).
-            """
-            energy = jnp.maximum(self.energy(g), self.eps)
-            if self.log:
-                energy = jnp.log(energy)
-            return model.probability(energy, beta, mu)
-
-        return layer_function
 
 
 class Similarity(AbstractLayer):

@@ -5,6 +5,7 @@ from typing import Self
 
 import equinox as eqx
 import jax.numpy as jnp
+from jax.lax import stop_gradient
 
 from grgg._typing import IntVector, Scalar, Vector
 from grgg.abc import AbstractModule
@@ -389,7 +390,7 @@ class ParameterGroups(AbstractModule, Sequence[Parameters]):
             else:
                 params.extend(group)
         self._groups = tuple(Parameters(**param) for param in params)
-        self.weights = jnp.asarray(weights).astype(float)
+        self.weights = stop_gradient(jnp.asarray(weights).astype(float))
 
     def __repr__(self) -> str:
         groups = "\n".join(f"    {repr(group)}" for group in self._groups)
@@ -453,16 +454,16 @@ class ParameterGroups(AbstractModule, Sequence[Parameters]):
         >>> from grgg import GRGG, Similarity, Complementarity
         >>> model = (
         ...     GRGG(2, 2) +
-        ...     Similarity(1.0, [0, 1]) +
-        ...     Complementarity([0, 1], 2)
+        ...     Similarity([0, 1], 1.0) +
+        ...     Complementarity(2, [0, 1])
         ... )
         >>> model.parameters.names
-        [('beta', 'mu'), ('beta', 'mu')]
+        [('mu', 'beta'), ('mu', 'beta')]
         >>> model.parameters.heterogeneous.names
         [('mu',), ('beta',)]
         >>> model = GRGG(2, 2) + Similarity
         >>> model.parameters.names
-        [('beta', 'mu')]
+        [('mu', 'beta')]
         >>> model.parameters.heterogeneous.names
         [()]
         """

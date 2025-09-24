@@ -5,6 +5,7 @@ import jax.numpy as jnp
 
 from grgg.abc import AbstractGRGG, AbstractModule
 from grgg.integrate import AbstractIntegral
+from grgg.manifolds import CompactManifold
 
 if TYPE_CHECKING:
     from grgg.model._views import NodePairView, NodeView
@@ -37,16 +38,17 @@ class AbstractModelIntegral(AbstractIntegral, AbstractModule):
         """The model the integral is defined on."""
 
     @property
+    def manifold(self) -> CompactManifold:
+        return self.model.manifold
+
+    @property
     def domain(self) -> tuple[float, float]:
         return (0, jnp.pi)
 
     @property
+    @abstractmethod
     def constant(self) -> float:
-        delta = self.model.delta
-        R = self.model.manifold.linear_size
-        d = self.model.manifold.dim
-        dV = self.model.manifold.__class__(d - 1).volume
-        return delta * R**d * dV
+        """The constant multiplier of the integral."""
 
     @property
     def defaults(self) -> dict[str, Any]:
@@ -103,18 +105,18 @@ class AbstractNodesIntegral(AbstractModelIntegral):
 
     @property
     def model(self) -> "GRGG":
-        return self.nodes.module
+        return self.nodes.model
 
     @classmethod
     def from_nodes(cls, nodes: "NodeView", *args: Any, **kwargs: Any) -> Self:
         """Construct a model integral from a model."""
-        if not isinstance(nodes.module, AbstractGRGG):
+        if not isinstance(nodes.model, AbstractGRGG):
             errmsg = (
                 f"model must be an instance of AbstractGRGG, "
-                f"got '{type(nodes.module).__name__}'"
+                f"got '{type(nodes.model).__name__}'"
             )
             raise TypeError(errmsg)
-        if nodes.module.is_heterogeneous:
+        if nodes.model.is_heterogeneous:
             return cls.heterogeneous_type(nodes, *args, **kwargs)
         return cls.homogeneous_type(nodes, *args, **kwargs)
 
@@ -142,18 +144,18 @@ class AbstractPairsIntegral(AbstractModelIntegral):
 
     @property
     def model(self) -> "GRGG":
-        return self.pairs.module
+        return self.pairs.model
 
     @classmethod
     def from_pairs(cls, pairs: "NodePairView", *args: Any, **kwargs: Any) -> Self:
         """Construct a model integral from a model."""
-        if not isinstance(pairs.module, AbstractGRGG):
+        if not isinstance(pairs.model, AbstractGRGG):
             errmsg = (
                 f"model must be an instance of AbstractGRGG, "
-                f"got '{type(pairs.module).__name__}'"
+                f"got '{type(pairs.model).__name__}'"
             )
             raise TypeError(errmsg)
-        if pairs.module.is_heterogeneous:
+        if pairs.model.is_heterogeneous:
             return cls.heterogeneous_type(pairs, *args, **kwargs)
         return cls.homogeneous_type(pairs, *args, **kwargs)
 

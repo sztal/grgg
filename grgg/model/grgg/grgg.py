@@ -1,10 +1,11 @@
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Iterable, Sequence
 from functools import singledispatchmethod
 from typing import TYPE_CHECKING, Any, Self
 
 import equinox as eqx
 import jax.numpy as jnp
 
+from grgg._options import options
 from grgg._typing import Floats
 from grgg.manifolds import CompactManifold, Sphere
 from grgg.model.abc import AbstractModel, ParamsT
@@ -46,7 +47,7 @@ class GRGG(AbstractModel, Sequence[Self]):
     >>> options.model.modified = False
     >>> model = GRGG(100, 2) + Similarity()
     >>> model
-    GRGG(100, Sphere(2, r=2.82), Similarity(beta=f32[], mu=f32[], log=False))
+    GRGG(100, Sphere(2, r=2.82), Similarity(mu=f32[], beta=f32[], log=False))
     >>> model.n_layers
     1
     >>> model.n_nodes
@@ -81,10 +82,11 @@ class GRGG(AbstractModel, Sequence[Self]):
     >>> probs_jac = jax.jacobian(probs)
     >>> deriv = probs_jac(model, g)
     >>> deriv
-    GRGG(100, Sphere(2, r=2.82), Similarity(beta=f32[2], mu=f32[2], log=False))
+    GRGG(100, Sphere(2, r=f32[2]), Similarity(mu=f32[2], beta=f32[2], log=False))
 
     Looks weird, but it is correct; :mod:`jax` returns the same structure as the input,
-    now with gradient arrays in place of the original scalar parameters.
+    now with gradient arrays in place of the original scalar parameters
+    (the sphere radius is now a zero vector as a side effect of the differentiation).
     We can see better by extracting parameter containers from the model.
     >>> np.asarray(deriv.parameters[0].beta)  # wrap in numpy to make the doctest work
     array([-4.9999999e-10, -5.0358325e-11], dtype=...)
@@ -95,26 +97,26 @@ class GRGG(AbstractModel, Sequence[Self]):
     in parameter containers.
     >>> deriv.parameters
     ParameterGroups(
-        Parameters(beta=f32[2], mu=f32[2])
+        Parameters(mu=f32[2], beta=f32[2])
         weights=f32[]
     )
 
     Now, let us extract a more explicit edge probability function from the model,
     which we can use to check the gradients using :mod:`scipy` and finite differences.
     >>> # extract model parameters
-    >>> beta, mu = model.parameters[0].values()
-    >>> np.asarray(model.probability(g, beta, mu))
+    >>> mu, beta = model.parameters[0].values()
+    >>> np.asarray(model.probability(g, mu, beta))
     array([5.0000000e-01, 2.8411642e-12], dtype=...)
 
     Now we can check finite differences using scipy.
     >>> from scipy.differentiate import jacobian
-    >>> params = np.array([beta, mu])
+    >>> params = np.array([mu, beta])
     >>> jac_g0 = jacobian(lambda x: model.probability(g[0], *x), params)
     >>> jac_g1 = jacobian(lambda x: model.probability(g[1], *x), params)
     >>> jac_fd = np.stack([jac_g0.df, jac_g1.df])
     >>> jac_fd
-    array([[ 0.000000e+00,  7.500019e-01],
-           [-5.035830e-11,  8.523494e-12]], dtype=...)
+    array([[ 7.500019e-01,  0.000000e+00],
+           [ 8.523494e-12, -5.035830e-11]], ...)
 
     So indeed, our jacobian computation is correct.
     >>> jnp.allclose(deriv.parameters.array, jac_fd).item()
@@ -128,9 +130,7 @@ class GRGG(AbstractModel, Sequence[Self]):
     manifold: CompactManifold
     layers: tuple[AbstractLayer, ...]
     probability: ProbabilityFunction = eqx.field(repr=False)
-    function: Callable[[Floats, Floats, Floats], Floats] = eqx.field(
-        repr=False, static=True
-    )
+    eps: float = eqx.field(static=True, repr=False)
 
     def __init__(
         self,
@@ -139,6 +139,7 @@ class GRGG(AbstractModel, Sequence[Self]):
         layers: AbstractLayer | Sequence[AbstractLayer] = (),
         *more_layers: AbstractLayer,
         probability: ProbabilityFunction | None = None,
+        eps: float | None = None,
         **kwargs: Any,
     ) -> None:
         """Initialization method.
@@ -165,11 +166,24 @@ class GRGG(AbstractModel, Sequence[Self]):
         self.probability = probability or ProbabilityFunction(
             CouplingFunction(self.manifold.dim, **kwargs)
         )
-        self.function = self._define_function()
         # self.integrate = Integration(self)
         # Initialize layers
         layers = [layer() if isinstance(layer, type) else layer for layer in layers]
         self.layers = tuple(layer.detach().attach(self) for layer in layers)
+        # Other settings
+        self.eps = float(options.model.eps if eps is None else eps)
+
+    def __check_init__(self) -> None:
+        if self.n_nodes <= 0:
+            errmsg = "'n_nodes' must be positive"
+            raise ValueError(errmsg)
+        for layer in self.layers:
+            if layer._model_getter is None or layer.model is not self:
+                errmsg = "all layers must be linked to the model"
+                raise ValueError(errmsg)
+        if self.eps <= 0:
+            errmsg = "'eps' must be positive"
+            raise ValueError(errmsg)
 
     def __repr__(self) -> str:
         cn = self.__class__.__name__
@@ -192,8 +206,23 @@ class GRGG(AbstractModel, Sequence[Self]):
     def __len__(self) -> int:
         return len(self.layers)
 
-    def __call__(self, g: Floats, beta: Floats, mu: Floats) -> Floats:
-        return self.function(g, beta, mu)
+    def __call__(self, g: Floats, mu: Floats, beta: Floats) -> Floats:
+        """Compute the multilayer edge probabilities.
+
+        Parameters
+        ----------
+        g
+            Geodesic distances.
+        beta
+            Beta parameters.
+        mu
+            Mu parameters.
+        """
+        g, mu, beta = self._preprocess_inputs(g, mu, beta)
+        P = 1.0
+        for i, layer in enumerate(self.layers):
+            P *= 1 - layer(g, mu[i], beta[i])
+        return 1 - P
 
     def __add__(self, layer: AbstractLayer) -> Self:
         """Add a layer to the GRGG model using the `+` operator.
@@ -202,7 +231,7 @@ class GRGG(AbstractModel, Sequence[Self]):
         --------
         >>> from grgg import GRGG, Complementarity
         >>> GRGG(100, 1) + Complementarity()
-        GRGG(100, Sphere(1, r=15.92), Complementarity(beta=f32[], mu=f32[], log=True))
+        GRGG(100, Sphere(1, r=15.92), Complementarity(mu=f32[], beta=f32[], log=True))
         """
         return self.add_layer(layer)
 
@@ -250,6 +279,8 @@ class GRGG(AbstractModel, Sequence[Self]):
             super().equals(other)
             and self.n_nodes == other.n_nodes
             and self.manifold.equals(other.manifold)
+            and self.probability.equals(other.probability)
+            and self.eps == other.eps
             and len(self.layers) == len(other.layers)
             and all(
                 l1.equals(l2) for l1, l2 in zip(self.layers, other.layers, strict=True)
@@ -270,7 +301,7 @@ class GRGG(AbstractModel, Sequence[Self]):
         --------
         Add a default complementarity layer and check that it is linked to the model.
         >>> from grgg import GRGG, Complementarity
-        >>> model = GRGG(100, 1).add_layer(Complementarity())
+        >>> model = GRGG(100, 1).add_layer(Complementarity)
         >>> model.layers[0].model is model
         True
         """
@@ -292,28 +323,6 @@ class GRGG(AbstractModel, Sequence[Self]):
         """
         layers = tuple(layer for i, layer in enumerate(self.layers) if i != index)
         return self.replace(layers=layers)
-
-    def define_function(self) -> Callable[[Floats, Floats, Floats], Floats]:
-        """Define the model function."""
-
-        def model_function(g: Floats, beta: Floats, mu: Floats) -> Floats:
-            """Compute the multilayer edge probabilities.
-
-            Parameters
-            ----------
-            g
-                Geodesic distances.
-            beta
-                Beta parameters.
-            mu
-                Mu parameters.
-            """
-            P = 1.0
-            for i, layer in enumerate(self.layers):
-                P *= 1 - layer.function(g, beta[i], mu[i])
-            return 1 - P
-
-        return model_function
 
     def set_parameters(
         self, parameters: Iterable[ParamsT] = (), *more_parameters: ParamsT
@@ -337,14 +346,14 @@ class GRGG(AbstractModel, Sequence[Self]):
         ...     Similarity()
         ... )
         >>> new_params = [
-        ...     {"beta": 0.5, "mu": 0.1},
-        ...     {"beta": 1.0, "mu": 0.2},
+        ...     {"mu": 0.1, "beta": 0.5},
+        ...     {"mu": 0.2, "beta": 1.0},
         ... ]
         >>> updated_model = model.set_parameters(new_params)
-        >>> updated_model.layers[0].beta.item(), updated_model.layers[0].mu.item()
-        (0.5, 0.1)
-        >>> updated_model.layers[1].beta.item(), updated_model.layers[1].mu.item()
-        (1.0, 0.2)
+        >>> updated_model.layers[0].mu.item(), updated_model.layers[0].beta.item()
+        (0.1, 0.5)
+        >>> updated_model.layers[1].mu.item(), updated_model.layers[1].beta.item()
+        (0.2, 1.0)
         >>> updated_model.equals(model)
         False
         """
@@ -415,13 +424,13 @@ class GRGG(AbstractModel, Sequence[Self]):
         >>> n = 1000
         >>> model = (
         ...     GRGG(n, 1) +
-        ...     Complementarity(rng.normal(n)**2, rng.normal(n)) +
-        ...     Similarity(rng.normal(n)**2, rng.normal(n))
+        ...     Complementarity(rng.normal(n), rng.normal(n)**2) +
+        ...     Similarity(rng.normal(n), rng.normal(n)**2)
         ... )
         >>> quantized = model.quantize(n_codes=100)
         >>> quantized
         QuantizedGRGG(100, Sphere(1, r=159.15), ...)
-        >>> quantized.manifold.volume  # quantization does not change the manifold
+        >>> quantized.manifold.volume.item()  # the manifold is not changed
         1000.0
         >>> quantized.n_nodes  # the true number of nodes is unchanged
         1000

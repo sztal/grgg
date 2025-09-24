@@ -1,14 +1,11 @@
 from abc import abstractmethod
-from collections.abc import Callable, Mapping, Sequence
-from functools import wraps
+from collections.abc import Mapping, Sequence
 from typing import Any, Self
 
 import equinox as eqx
-import jax
 import jax.numpy as jnp
 
 from grgg._options import options
-from grgg._typing import Floats
 from grgg.abc import AbstractModule
 from grgg.utils import parse_switch_flag
 
@@ -63,19 +60,9 @@ class AbstractModelModule(AbstractModule):
     def set_parameters(self, parameters: ParamsT | Sequence[ParamsT]) -> Self:
         """Get shallow copy with update parameter values."""
 
-    @abstractmethod
-    def define_function(self) -> Callable[[Floats, Floats, Floats], Floats]:
-        """Define the module function."""
-
-    def _define_function(self) -> Callable[[Floats, Floats, Floats], Floats]:
-        function = jax.jit(self.define_function())
-
-        @wraps(function)
-        def wrapper(*args: Floats) -> Floats:
-            args = tuple(jnp.asarray(a) for a in args)
-            return function(*args)
-
-        return jax.jit(wrapper)
+    def _preprocess_inputs(self, *inputs: jnp.ndarray) -> jnp.ndarray:
+        """Preprocess inputs to ensure it is all :mod:`jax` arrays."""
+        return tuple(jnp.asarray(input) for input in inputs)
 
     def _get_batch_size(self, value: int | None = None) -> int:
         """Get batch size from value or options."""

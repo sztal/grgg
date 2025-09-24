@@ -2,7 +2,7 @@ import math
 from abc import abstractmethod
 from collections.abc import Mapping, Sequence
 from dataclasses import replace
-from functools import partial, singledispatchmethod
+from functools import singledispatchmethod
 from typing import TYPE_CHECKING, Any, Self
 
 import equinox as eqx
@@ -24,7 +24,7 @@ if TYPE_CHECKING:
 class AbstractModelView(eqx.Module):
     """Abstract base class for node indexers."""
 
-    module: "AbstractModelModule"
+    model: "AbstractModelModule"
     coords: CartesianCoordinates = eqx.field(repr=False, kw_only=True)
     _index: IndexArg | tuple[IndexArg, ...] | None = eqx.field(
         static=False, repr=False, kw_only=True
@@ -32,12 +32,12 @@ class AbstractModelView(eqx.Module):
 
     def __init__(
         self,
-        module: "AbstractModelModule",
+        model: "AbstractModelModule",
         *,
         coords: CartesianCoordinates | None = None,
         _index: IndexArg | tuple[IndexArg, ...] | None = None,
     ) -> None:
-        self.module = module
+        self.model = model
         self._index = self._index_input(_index)
         coords = coords if coords is not None else CartesianCoordinates(self.full_shape)
         if self._index is not None:
@@ -104,7 +104,7 @@ class AbstractModelView(eqx.Module):
 
     @property
     def n_nodes(self) -> int:
-        return self.module.n_units
+        return self.model.n_units
 
     @property
     def index(self) -> int | slice | Sequence[int] | None:
@@ -163,12 +163,12 @@ class NodeView(AbstractModelView):
 
     @property
     def full_shape(self) -> tuple[int, ...]:
-        return (self.module.n_units,)
+        return (self.model.n_units,)
 
     @property
     def pairs(self) -> "NodePairView":
         """Node pairs view from the current nodes' view."""
-        pairs = NodePairView(self.module)
+        pairs = NodePairView(self.model)
         if self.index is not None:
             index = self.index
             index = index[0] if isinstance(index, tuple) else index
@@ -192,12 +192,12 @@ class NodeView(AbstractModelView):
     @property
     def beta(self) -> jnp.ndarray:
         """Beta parameter outer product."""
-        return self._get_param(self.module.parameters, "beta")
+        return self._get_param(self.model.parameters, "beta")
 
     @property
     def mu(self) -> jnp.ndarray:
         """Mu parameter outer product."""
-        return self._get_param(self.module.parameters, "mu")
+        return self._get_param(self.model.parameters, "mu")
 
     def reset(self) -> None:
         """Reset the current node selection."""
@@ -208,7 +208,7 @@ class NodeView(AbstractModelView):
 
         `**kwargs`* are passed to :meth:`~grgg.manifolds.Manifold.sample_points`.
         """
-        return self.module.manifold.sample_points(self.n_nodes, **kwargs)
+        return self.model.manifold.sample_points(self.n_nodes, **kwargs)
 
     def sample_pmatrix(
         self,
@@ -245,7 +245,7 @@ class NodeView(AbstractModelView):
         self = self.materialize(copy=False).nodes if self.is_active else self
         if points is None:
             points = self.sample_points(**kwargs)
-        g = self.module.manifold.distances(points, condensed=True)
+        g = self.model.manifold.distances(points, condensed=True)
         i, j = jnp.triu_indices(len(points), k=1)
         p = self.pairs[i, j].probs(g)
         return p if condensed else squareform(p)
@@ -272,16 +272,16 @@ class NodeView(AbstractModelView):
         >>> submodel = model.nodes[:10].materialize()
         >>> submodel.n_nodes
         10
-        >>> submodel.manifold.volume
+        >>> submodel.manifold.volume.item()
         100.0
-        >>> submodel.layers[0].mu.shape
+        >>> submodel.layers[0].beta.shape
         (10,)
         """
-        if not isinstance(self.module, AbstractGRGG):
+        if not isinstance(self.model, AbstractGRGG):
             errmsg = "only views of the full GRGG model can be materialized"
             raise TypeError(errmsg)
         if self._index is None:
-            return self.module
+            return self.model
         index = self.index
         if isinstance(index, tuple):
             if len(index) != 1:
@@ -291,7 +291,7 @@ class NodeView(AbstractModelView):
         if isinstance(index, jnp.ndarray) and index.ndim > 1:
             errmsg = "only 1D array indexing is supported when materializing node views"
             raise IndexError(errmsg)
-        model = self.module.copy(deep=True) if copy else self.module
+        model = self.model.copy(deep=True) if copy else self.model
         layers = [
             layer.copy()
             .detach()
@@ -344,18 +344,18 @@ class NodeView(AbstractModelView):
 
         Degree calculations are supported for quantized models too.
         By default, the output is dequantized.
-        >>> rng = RandomGenerator(0)
+        >>> rng = RandomGenerator(17)
         >>> n = 100
-        >>> model = GRGG(n, 2, Similarity(rng.normal(n)**2, rng.normal(n)))
+        >>> model = GRGG(n, 2, Similarity(rng.normal(n), rng.normal(n)**2))
         >>> qmodel = model.quantize(n_codes=32, random_state=17)
         >>> D = model.nodes.degree()
         >>> Q = qmodel.nodes.degree()
         >>> Q.shape
         (100,)
         >>> jnp.corrcoef(D, Q)[0, 1].item()  # correlation with non-quantized degrees
-        0.9631980
+        0.9181299
         >>> jnp.abs((D - Q) / D).mean().item()  # mean relative error
-        0.1664205
+        0.1894010
 
         If `dequantize=False`, the output is not dequantized.
         >>> Q = qmodel.nodes.degree(dequantize=False)
@@ -365,10 +365,10 @@ class NodeView(AbstractModelView):
         init_kwargs, kwargs = split_kwargs_by_signature(DegreeIntegral, **kwargs)
         integrator = DegreeIntegral.from_nodes(self, **init_kwargs)
         integral = integrator.integrate(*args, **kwargs)[0]
-        if self.module.is_homogeneous:
+        if self.model.is_homogeneous:
             return jnp.full((self.n_nodes,), integral) if full_shape else integral
-        if self.module.is_quantized and dequantize:
-            integral = self.module.dequantize_arrays(integral)[0]
+        if self.model.is_quantized and dequantize:
+            integral = self.model.dequantize_arrays(integral)[0]
         return integral
 
     @singledispatchmethod
@@ -401,7 +401,7 @@ class NodePairView(AbstractModelView):
     Indexing in the homogeneous case always returns scalars.
     >>> import jax.numpy as jnp
     >>> from grgg import GRGG, Similarity, Complementarity
-    >>> model = GRGG(100, 2, Similarity(2, 1), Complementarity(1, 0))
+    >>> model = GRGG(100, 2, Similarity(1, 2), Complementarity(0, 1))
     >>> model.pairs[0, 1].beta
     [Array(2., ...), Array(1., ...]
     >>> model.pairs[[0, 1], [1, 0]].mu
@@ -412,7 +412,7 @@ class NodePairView(AbstractModelView):
     Array(2., ...)
 
     In the heterogeneous case, indexing may return larger arrays.
-    >>> model = GRGG(3, 2, Similarity([1,2,3], [4,5,6]))
+    >>> model = GRGG(3, 2, Similarity([4,5,6], [1,2,3]))
     >>> model.pairs[0, 1].beta
     [Array(3., ...)]
     >>> model.pairs[...].mu
@@ -439,18 +439,18 @@ class NodePairView(AbstractModelView):
 
     @property
     def full_shape(self) -> tuple[int, int]:
-        n = self.module.n_units
+        n = self.model.n_units
         return (n, n)
 
     @property
     def beta(self) -> LazyOuter | list[LazyOuter]:
         """Beta parameter outer product."""
-        return self._get_param(self.module.parameters, "beta")
+        return self._get_param(self.model.parameters, "beta")
 
     @property
     def mu(self) -> LazyOuter | list[LazyOuter]:
         """Mu parameter outer product."""
-        return self._get_param(self.module.parameters, "mu")
+        return self._get_param(self.model.parameters, "mu")
 
     def probs(self, g: jnp.ndarray, adjust_quantized: bool = False) -> jnp.ndarray:
         """Compute pairwise connection probabilities.
@@ -484,14 +484,14 @@ class NodePairView(AbstractModelView):
         >>> tol = {"rtol": 1e-4, "atol": 1e-4}
 
         Check similarity layer.
-        >>> beta, mu = model.parameters[0].values()
+        >>> mu, beta = model.parameters[0].values()
         >>> sim_probs = model[0].pairs.probs(g)
         >>> expected = expit(-d*beta*(g - mu))
         >>> jnp.allclose(sim_probs, expected, **tol).item()
         True
 
         Check complementarity layer.
-        >>> beta, mu = model.parameters[1].values()
+        >>> mu, beta = model.parameters[1].values()
         >>> comp_probs = model[1].pairs.probs(g)
         >>> expected = expit(-d*beta*(gmax - g - mu))
         >>> jnp.allclose(comp_probs, expected, **tol).item()
@@ -514,8 +514,8 @@ class NodePairView(AbstractModelView):
 
         Check similarity layer.
         >>> params = model.parameters[0]
-        >>> beta = params.outer.beta[...]
         >>> mu = params.outer.mu[...]
+        >>> beta = params.outer.beta[...]
         >>> sim_probs = model[0].pairs.probs(g[:, None, None])
         >>> expected = expit(-d*beta*(g[:, None, None] - mu))
         >>> i, j = model.pairs.coords[...]  # zero out diagonals
@@ -527,8 +527,8 @@ class NodePairView(AbstractModelView):
 
         Check complementarity layer.
         >>> params = model.parameters[1]
-        >>> beta = params.outer.beta[...]
         >>> mu = params.outer.mu[...]
+        >>> beta = params.outer.beta[...]
         >>> comp_probs = model[1].pairs.probs(g[:, None, None])
         >>> expected = expit(-d*beta*(gmax - g[:, None, None] - mu))
         >>> i, j = model.pairs.coords[...]  # zero out diagonals
@@ -554,8 +554,8 @@ class NodePairView(AbstractModelView):
 
         Check similarity layer.
         >>> params = model.parameters[0]
-        >>> beta = params.outer.beta[i, j]
         >>> mu = params.outer.mu[i, j]
+        >>> beta = params.outer.beta[i, j]
         >>> sim_probs = model[0].pairs[i, j].probs(g[:, None])
         >>> expected = expit(-d*beta*(g[:, None] - mu))
         >>> sim_probs.shape == expected.shape
@@ -565,8 +565,8 @@ class NodePairView(AbstractModelView):
 
         Check complementarity layer.
         >>> params = model.parameters[1]
-        >>> beta = params.outer.beta[i, j]
         >>> mu = params.outer.mu[i, j]
+        >>> beta = params.outer.beta[i, j]
         >>> comp_probs = model[1].pairs[i, j].probs(g[:, None])
         >>> expected = expit(-d*beta*(gmax - g[:, None] - mu))
         >>> comp_probs.shape == expected.shape
@@ -622,8 +622,8 @@ class NodePairView(AbstractModelView):
         >>> n = 100
         >>> model = (
         ...     GRGG(n, 2) +
-        ...     Similarity(rng.normal(n)**2, rng.normal(n)) +
-        ...     Complementarity(rng.normal(n)**2, rng.normal(n))
+        ...     Similarity(rng.normal(n), rng.normal(n)**2) +
+        ...     Complementarity(rng.normal(n), rng.normal(n)**2)
         ... )
         >>> probs = model.pairs.expected_probs()
         >>> probs.shape
@@ -632,21 +632,20 @@ class NodePairView(AbstractModelView):
         Arbitrary indexing is supported.
         >>> model.pairs[1, None, :10].expected_probs().shape
         (1, 10)
+
+        Check that it is consistent with expected node degrees.
+        >>> degrees = model.nodes.degree()
+        >>> expected_probs = model.pairs.expected_probs()
+        >>> jnp.allclose(degrees, expected_probs.sum(axis=1)).item()
+        True
         """
-        init_kwargs, kwargs = split_kwargs_by_signature(
-            EdgeProbabilityIntegral, **kwargs
+        return _pairs_expected_probs(
+            self,
+            *args,
+            full_shape=full_shape,
+            dequantize=dequantize,
+            **kwargs,
         )
-        integrator = EdgeProbabilityIntegral.from_pairs(self, **init_kwargs)
-        integral = integrator.integrate(*args, **kwargs)[0]
-        if self.module.is_homogeneous and full_shape:
-            n = self.module.n_units
-            p = jnp.full(n * (n - 1) // 2, integral)
-            return squareform(p)
-        if self.module.is_homogeneous or not self.module.is_quantized or not dequantize:
-            return integral
-        # Dequantize branch
-        errmsg = "Dequantization for expected probabilities is not implemented yet."
-        raise NotImplementedError(errmsg)
 
     def edge_distance_density(
         self, g: jnp.ndarray, *args: Any, **kwargs: Any
@@ -666,7 +665,7 @@ class NodePairView(AbstractModelView):
         >>> from grgg import GRGG, Similarity, RandomGenerator
         >>> rng = RandomGenerator(42)
         >>> n = 100
-        >>> model = GRGG(n, 2, Similarity(rng.normal(n)**2, rng.normal(n)))
+        >>> model = GRGG(n, 2, Similarity(rng.normal(n), rng.normal(n)**2))
         >>> gmax = model.manifold.diameter
         >>> g = jnp.linspace(0, gmax, 10)
         >>> density = model.pairs.edge_distance_density(g[:, None, None])
@@ -677,12 +676,39 @@ class NodePairView(AbstractModelView):
         >>> density = model.pairs[0, :10].edge_distance_density(g)
         >>> density.shape
         (10,)
+
+        Check that the density integrates to 1.
+        >>> g = jnp.linspace(0, gmax, 2000)[:, None, None]
+        >>> density = model.pairs.edge_distance_density(g)
+        >>> integral = jnp.trapezoid(density, g, axis=0)
+        >>> jnp.all(jnp.all(integral.diagonal() == 0)).item()  # self-loops are 0's
+        True
+        >>> offdiag = integral[~jnp.eye(n, dtype=bool)]
+        >>> jnp.allclose(offdiag, 1.0, rtol=1e-2).item()
+        True
+
+        Check that it is consistent with empirical average distance of edges.
+        >>> def sample_edge_distances(model):
+        ...     sample = model.nodes.sample(rng=rng)
+        ...     D = model.manifold.distances(sample.X, condensed=False)
+        ...     D = jnp.where(sample.A.toarray() == 0, jnp.nan, D)
+        ...     return D
+        >>>
+
+        For heterogeneous models, the rate of convergence to theoretical expectation
+        may be much slower. Here we check that the relative error is below 20% for
+        200 samples, but one can check that the error decreases with more samples.
+        >>> Eg = (g*density).sum(0) / density.sum(0)
+        >>> Mg = jnp.stack([sample_edge_distances(model) for _ in range(200)])
+        >>> Mg = jnp.nanmean(Mg, axis=0)
+        >>> eg = Eg[jnp.tril_indices_from(Eg, k=-1)]
+        >>> mg = Mg[jnp.tril_indices_from(Mg, k=-1)]
+        >>> mask = ~jnp.isnan(mg)
+        >>> relerr = jnp.linalg.norm(eg[mask] - mg[mask]) / jnp.linalg.norm(eg[mask])
+        >>> relerr.item() < 0.2
+        True
         """
-        pairs_kwargs, kwargs = split_kwargs_by_signature(self.probs, **kwargs)
-        expected_probs = self.expected_probs(*args, **kwargs)
-        probs = self.probs(g, **pairs_kwargs)
-        gdensity = self.module.manifold.distance_density(g)
-        return probs * gdensity / expected_probs
+        return _pairs_edge_distance_density(self, g, *args, **kwargs)
 
     @singledispatchmethod
     def _get_param(self, params: Mapping, name: str) -> LazyOuter:
@@ -695,37 +721,6 @@ class NodePairView(AbstractModelView):
     def _(self, params: Sequence, name: str) -> list[jnp.ndarray]:
         return [self._get_param(p, name) for p in params]
 
-    def _get_probs(
-        self,
-        params: Sequence,
-        g: jnp.ndarray,
-        *,
-        adjust_quantized: bool = False,
-    ) -> list[jnp.ndarray]:
-        if not isinstance(self.module, AbstractGRGG):
-            errmsg = "only views of the full GRGG model can compute probabilities"
-            raise TypeError(errmsg)
-        beta = jnp.stack([self._get_param(p, "beta") for p in params])
-        mu = jnp.stack([self._get_param(p, "mu") for p in params])
-        probs = self.module.function(g, beta, mu)
-        if self.module.is_homogeneous or (
-            self.module.is_quantized and not adjust_quantized
-        ):
-            return probs
-        try:
-            i, j = self._get_ij()
-        except ValueError:
-            # This must be a single integer index
-            if adjust_quantized and self.module.is_quantized:
-                w = self.module.parameters.weights[self.index]
-                return probs.at[self.index].mul(1 / w * (w - 1))
-            return probs.at[self.index].set(0.0)
-        if adjust_quantized and self.module.is_quantized:
-            weights = self.module.parameters.weights
-            wi = weights[i]
-            return jnp.where(i == j, probs / wi * (wi - 1), probs)
-        return jnp.where(i == j, 0.0, probs)
-
     def _get_ij(self) -> tuple[jnp.ndarray, jnp.ndarray]:
         args = tuple(a for a in (self._index or ()) if a is not None)
         coords = self.reindex[args].coords[...]
@@ -734,11 +729,73 @@ class NodePairView(AbstractModelView):
         return coords
 
 
-@partial(eqx.filter_jit)
+@eqx.filter_jit
 def _pairs_probs(
     pairs: NodePairView,
     g: jnp.ndarray,
-    **kwargs: Any,
+    *,
+    adjust_quantized: bool = False,
 ) -> jnp.ndarray:
     """Compute pairwise connection probabilities."""
-    return pairs._get_probs(pairs.module.parameters.aligned, g, **kwargs)
+    if not isinstance(pairs.model, AbstractGRGG):
+        errmsg = "only views of the full GRGG model can compute probabilities"
+        raise TypeError(errmsg)
+    params = pairs.model.parameters.aligned
+    mu = jnp.stack([pairs._get_param(p, "mu") for p in params])
+    beta = jnp.stack([pairs._get_param(p, "beta") for p in params])
+    probs = pairs.model(g, mu, beta)
+    if pairs.model.is_homogeneous or (
+        pairs.model.is_quantized and not adjust_quantized
+    ):
+        return probs
+    try:
+        i, j = pairs._get_ij()
+    except ValueError:
+        # This must be a single integer index
+        if adjust_quantized and pairs.model.is_quantized:
+            w = pairs.model.parameters.weights[pairs.index]
+            return probs.at[pairs.index].mul(1 / w * (w - 1))
+        return probs.at[pairs.index].set(0.0)
+    if adjust_quantized and pairs.model.is_quantized:
+        weights = pairs.model.parameters.weights
+        wi = weights[i]
+        return jnp.where(i == j, probs / wi * (wi - 1), probs)
+    return jnp.where(i == j, 0.0, probs)
+
+
+@eqx.filter_jit
+def _pairs_expected_probs(
+    pairs: NodePairView,
+    *args: Any,
+    full_shape: bool = False,
+    dequantize: bool = True,
+    **kwargs: Any,
+) -> jnp.ndarray:
+    """Compute expected pairwise connection probabilities."""
+    init_kwargs, kwargs = split_kwargs_by_signature(EdgeProbabilityIntegral, **kwargs)
+    integrator = EdgeProbabilityIntegral.from_pairs(pairs, **init_kwargs)
+    integral = integrator.integrate(*args, **kwargs)[0]
+    if pairs.model.is_homogeneous and full_shape:
+        n = pairs.model.n_units
+        p = jnp.full(n * (n - 1) // 2, integral)
+        return squareform(p)
+    if pairs.model.is_homogeneous or not pairs.model.is_quantized or not dequantize:
+        return integral
+    # Dequantize branch
+    errmsg = "Dequantization for expected probabilities is not implemented yet."
+    raise NotImplementedError(errmsg)
+
+
+@eqx.filter_jit
+def _pairs_edge_distance_density(
+    pairs: NodePairView,
+    g: jnp.ndarray,
+    *args: Any,
+    **kwargs: Any,
+) -> jnp.ndarray:
+    """Compute edge distance density."""
+    pairs_kwargs, kwargs = split_kwargs_by_signature(pairs.probs, **kwargs)
+    expected_probs = pairs.expected_probs(*args, **kwargs)
+    probs = pairs.probs(g, **pairs_kwargs)
+    gdensity = pairs.model.manifold.distance_density(g)
+    return jnp.where(expected_probs == 0, 0.0, probs * gdensity / expected_probs)

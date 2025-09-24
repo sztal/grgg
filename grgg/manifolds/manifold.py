@@ -3,13 +3,65 @@ from collections.abc import Callable
 from typing import Self
 
 import equinox as eqx
+import jax.numpy as jnp
 
 from grgg._typing import Matrix, Scalar, Vector
 from grgg.abc import AbstractModule
 from grgg.random import RandomGenerator
 from grgg.utils import pairwise
 
+from .functions import (
+    ManifoldCosineLawFunction,
+    ManifoldDistanceDensityFunction,
+    ManifoldMetricFunction,
+    ManifoldVolumeFunction,
+)
+
 DistanceFunctionT = Callable[[Matrix, Matrix | None, ...], Vector | Matrix]
+
+__all__ = ("Manifold", "CompactManifold")
+
+
+class ManifoldComputeNamespace(AbstractModule):
+    """Namespace for manifold computations.
+
+    Attributes
+    ----------
+    volume
+        Manifold volume function.
+    metric
+        Manifold metric function.
+    distance_density
+        Manifold distance density function.
+    """
+
+    volume: ManifoldVolumeFunction
+    metric: ManifoldMetricFunction
+    distance_density: ManifoldDistanceDensityFunction
+    cosine_law: ManifoldCosineLawFunction
+
+    def equals(self, other: object) -> bool:
+        return (
+            super().equals(other)
+            and self.volume.equals(other.volume)
+            and self.metric.equals(other.metric)
+            and self.distance_density.equals(other.distance_density)
+            and self.cosine_law.equals(other.cosine_law)
+        )
+
+    @classmethod
+    def from_manifold(cls, manifold: "Manifold") -> Self:
+        """Create a compute namespace for the specified manifold."""
+        volume = ManifoldVolumeFunction.from_manifold(manifold)
+        metric = ManifoldMetricFunction.from_manifold(manifold)
+        distance_density = ManifoldDistanceDensityFunction.from_manifold(manifold)
+        cosine_law = ManifoldCosineLawFunction.from_manifold(manifold)
+        return cls(
+            volume=volume,
+            metric=metric,
+            distance_density=distance_density,
+            cosine_law=cosine_law,
+        )
 
 
 class Manifold(AbstractModule):
@@ -21,14 +73,18 @@ class Manifold(AbstractModule):
         Dimension of the manifold.
     """
 
-    dim: int = eqx.field(static=True)
-    _distances: DistanceFunctionT = eqx.field(static=True, repr=False)
+    dim: int = eqx.field(static=True, converter=int)
+    compute: ManifoldComputeNamespace = eqx.field(repr=False)
+    _distances: DistanceFunctionT = eqx.field(static=True, repr=False, init=False)
 
     def __init__(
-        self, dim: int, *, _distances: DistanceFunctionT | None = None
+        self, dim: int, *, compute: ManifoldComputeNamespace | None = None
     ) -> None:
         self.dim = int(dim)
-        self._distances = pairwise(self.metric) if _distances is None else _distances
+        if compute is None:
+            compute = ManifoldComputeNamespace.from_manifold(self)
+        self.compute = compute
+        self._distances = pairwise(self.metric)
 
     def __check_init__(self) -> None:
         if self.dim < 0:
@@ -65,11 +121,15 @@ class Manifold(AbstractModule):
 
     @abstractmethod
     def equals(self, other: object) -> bool:
-        return super().equals(other) and self.dim == other.dim
+        return (
+            super().equals(other)
+            and self.dim == other.dim
+            and self.compute.equals(other.compute)
+        )
 
-    @abstractmethod
     def metric(self, x: Vector, y: Vector) -> Scalar:
         """Geodesic distance between two points on the manifold."""
+        return self.compute.metric(x, y, self.dim, self.linear_size)
 
     def distances(
         self,
@@ -121,7 +181,6 @@ class Manifold(AbstractModule):
     def _sample_points(self, n: int, rng: RandomGenerator) -> Matrix:
         """Implementation of point sampling."""
 
-    @abstractmethod
     def distance_density(self, g: float) -> float:
         """Probability density of the distance between two random points.
 
@@ -130,6 +189,28 @@ class Manifold(AbstractModule):
         g
             Geodesic distance between two points.
         """
+        return self.compute.distance_density(g, self.dim, self.linear_size)
+
+    def cosine_law(
+        self, theta: jnp.ndarray, g_ij: jnp.ndarray, g_ik: jnp.ndarray
+    ) -> jnp.ndarray:
+        """Cosine law to compute the third side of a triangle on the manifold.
+
+        Parameters
+        ----------
+        theta
+            Angle between sides `(i, j)` and `(i, k)` geodesics.
+        g_ij
+            Length of `(i, j)` geodesic.
+        g_ik
+            Length of `(i, k)` geodesic.
+
+        Returns
+        -------
+        g_jk
+            Length of `(j, k)` geodesic.
+        """
+        return self.compute.cosine_law(theta, g_ij, g_ik, self.linear_size)
 
 
 class CompactManifold(Manifold):

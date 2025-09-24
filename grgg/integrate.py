@@ -48,8 +48,8 @@ class AbstractIntegral(eqx.Module):
         return quadax.quadcc
 
     @abstractmethod
-    def integrand(self, x: jnp.ndarray, *args: Any, **kwargs: Any) -> jnp.ndarray:
-        """Compute the integrand at given points `x`."""
+    def define_integrand(self) -> IntegrandT:
+        """Define the integrand function."""
 
     def integrate(
         self,
@@ -57,6 +57,7 @@ class AbstractIntegral(eqx.Module):
         limits: tuple[float, float] | None = None,
         method: IntegratorT | None = None,
         breakpoints: Sequence[float] | None = None,
+        pass_options: bool = False,
         **kwargs: Any,
     ) -> IntegrationResultT:
         """Compute the integral.
@@ -71,17 +72,56 @@ class AbstractIntegral(eqx.Module):
             Integration method to use. If `None`, uses `self.default_integrator`.
         breakpoints
             Breakpoints to focus the integration. If `None`, uses `self.breakpoints`.
+        pass_options
+            If `True`, passes `**kwargs` options as a an extra last item in `args`
+            to the integrand function (so it must accept it). This is useful for passing
+            options to inner computations in multi-dimensional integrals.
         **kwargs
             Additional keyword arguments passed to the integrator.
         """
-        if limits is None:
-            limits = self.domain
-        if method is None:
-            method = self.default_integrator
-        if breakpoints is None:
-            breakpoints = self.breakpoints
-        interval = jnp.array([limits[0], *breakpoints, limits[1]])
-        options = {**self.defaults, **kwargs}
-        integrand = eqx.filter_jit(self.integrand)
+        method, interval, options = self.make_options(
+            limits, method=method, breakpoints=breakpoints, **kwargs
+        )
+        integrand = eqx.filter_jit(self.define_integrand())
+        if pass_options:
+            args = (*args, options)
         integral, info = method(integrand, interval, args, **options)
         return self.constant * integral, info
+
+    def make_options(
+        self,
+        limits: tuple[float, float] | None = None,
+        method: IntegratorT | None = None,
+        breakpoints: Sequence[float] | None = None,
+        **kwargs: Any,
+    ) -> tuple[IntegratorT, jnp.ndarray, dict[str, Any]]:
+        """Create integrator options.
+
+        Parameters
+        ----------
+        limits
+            Integration limits as a tuple `(a, b)`. If `None`, uses `self.domain`.
+        method
+            Integration method to use. If `None`, uses `self.default_integrator`.
+        breakpoints
+            Breakpoints to focus the integration.
+        **kwargs
+            Additional keyword arguments passed to the integrator.
+
+        Returns
+        -------
+        method
+            The integration method to use.
+        interval
+            The integration interval with breakpoints included.
+        options
+            The integrator options.
+        """
+        if method is None:
+            method = self.default_integrator
+        if limits is None:
+            limits = self.domain
+        lo, up = limits
+        interval = jnp.array([lo, *(breakpoints or ()), up])
+        options = {**self.defaults, **kwargs}
+        return method, interval, options
