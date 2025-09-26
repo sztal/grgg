@@ -1,3 +1,5 @@
+import math
+
 import jax
 import jax.numpy as jnp
 
@@ -24,19 +26,18 @@ class EdgeProbabilityIntegral(AbstractPairsIntegral):
 
     @property
     def constant(self) -> float:
-        delta = self.model.delta
-        R = self.model.manifold.linear_size
-        d = self.model.manifold.dim
-        dV = self.model.manifold.__class__(d - 1).volume
-        return delta * R**d * dV / self.model.n_nodes
+        d = self.manifold.dim
+        num = math.gamma((d + 1) / 2)
+        den = math.sqrt(math.pi) * math.gamma(d / 2)
+        return num / den
 
     def define_integrand(self) -> IntegrandT:
         @jax.jit
         def integrand(theta: jnp.ndarray) -> jnp.ndarray:
-            d = self.model.manifold.dim
-            R = self.model.manifold.linear_size
+            R = self.manifold.linear_size
+            d = self.manifold.dim
             p = self.pairs.probs(theta * R)
-            return jnp.sin(theta) ** (d - 1) * p
+            return p * jnp.sin(theta) ** (d - 1)
 
         return integrand
 
@@ -90,6 +91,7 @@ class HomogeneousEdgeProbabilityIntegral(EdgeProbabilityIntegral):
     >>> prob = integral.integrate()[0]
     >>> prob.item()
     0.04122784
+
     >>> P = jnp.array(
     ...     [model.sample_pmatrix(rng=rng, condensed=True).mean() for _ in range(100)]
     ... )
