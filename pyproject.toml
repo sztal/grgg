@@ -18,8 +18,6 @@ dependencies = [
     "numpy>=2.2",
     "scipy>=1.16.0",
     "scikit-learn>=1.7.1",
-    "python-igraph>=0.11.9",
-    "pathcensus>=1.0",
     "jax>=0.7.1",
     "jaxtyping>=0.3.2",
     "equinox>=0.13.0",
@@ -32,6 +30,8 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
+igraph = ["python-igraph>=0.11.9"]
+pathcensus = ["pathcensus>=1.0"]
 dev = [
     "setuptools-scm>=8",
     "ipython>=8.0",
@@ -52,7 +52,7 @@ dev = [
     "networkx>=3.5",
     "matplotlib>=3.10.3",
     "seaborn>=0.13.2",
-    "grgg[test,lint,mypy]",
+    "grgg[test,lint,mypy,igraph,pathcensus]",
 ]
 lint = ["ruff>=0.1.9"]
 mypy = ["mypy>=1.8.0"]

@@ -1,12 +1,11 @@
 import math
 from typing import Any, ClassVar, Self
 
+import equinox as eqx
 import jax.numpy as jnp
-from jax.lax import stop_gradient
 
-from grgg._typing import Matrix, Scalar, Vector
-from grgg.random import RandomGenerator
-from grgg.utils import format_array
+from grgg._typing import Real, RealMatrix, RealVector
+from grgg.utils.random import RandomGenerator
 
 from .manifold import (
     CompactManifold,
@@ -34,9 +33,9 @@ class Sphere(CompactManifold):
     >>> sphere = Sphere(2, r=3.0)
     >>> sphere
     Sphere(2, r=3.00)
-    >>> sphere.volume.item()
+    >>> sphere.volume
     113.09733552923255
-    >>> sphere.diameter.item()
+    >>> sphere.diameter
     9.42477796076938
     >>> points = sphere.sample_points(10, rng=42)
     >>> points.shape
@@ -53,29 +52,22 @@ class Sphere(CompactManifold):
     True
     """
 
-    r: Scalar
+    r: float = eqx.field(static=True)
 
-    def __init__(self, dim: int, r: Scalar = 1.0, **kwargs: Any) -> None:
+    def __init__(self, dim: int, r: float = 1.0, **kwargs: Any) -> None:
         super().__init__(dim=dim, **kwargs)
-        r = jnp.asarray(r, dtype=float)
-        self.r = stop_gradient(r)
+        self.r = float(r)
 
     def __check_init__(self) -> None:
-        if not jnp.isscalar(self.r):
-            errmsg = "radius must be a scalar"
+        if self.r < 0:
+            errmsg = "radius cannot be negative"
             raise ValueError(errmsg)
-
-    #     if self.r < 0:
-    #         errmsg = "radius cannot be negative"
-    #         raise ValueError(errmsg)
 
     def __copy__(self) -> Self:
         return type(self)(self.dim, self.r)
 
     def _repr_params(self) -> str:
-        if self.r.size == 1:
-            return f"r={self.r:.2f}"
-        return f"r={format_array(self.r)}"
+        return f"r={self.r:.2f}"
 
     @property
     def radius(self) -> float:
@@ -88,7 +80,7 @@ class Sphere(CompactManifold):
         return self.r
 
     @property
-    def volume(self) -> Scalar:
+    def volume(self) -> Real:
         """Surface volume of the sphere."""
         return self.compute.volume(self.dim, self.r)
 
@@ -103,7 +95,7 @@ class Sphere(CompactManifold):
         Examples
         --------
         >>> sphere = Sphere(2).with_volume(20)
-        >>> sphere.volume.item()
+        >>> sphere.volume
         20.0
         """
         d = self.embedding_dim
@@ -113,11 +105,11 @@ class Sphere(CompactManifold):
     def equals(self, other: object) -> bool:
         return super().equals(other) and self.r == other.r
 
-    def metric(self, x: Vector, y: Vector) -> Scalar:
+    def metric(self, x: RealVector, y: RealVector) -> Real:
         """Geodesic distance between points on the sphere."""
         return self.compute.metric(x, y, self.dim, self.r)
 
-    def _sample_points(self, n: int, rng: RandomGenerator) -> Matrix:
+    def _sample_points(self, n: int, rng: RandomGenerator) -> RealMatrix:
         """Implementation of point sampling."""
         points = rng.normal((n, self.embedding_dim))
         points /= jnp.linalg.norm(points, axis=1, keepdims=True)
@@ -144,7 +136,7 @@ class SphereMetric(ManifoldMetricFunction):
 
     manifold_type: ClassVar[type[Sphere]] = Sphere
 
-    def unit(self, x: Vector, y: Vector, dim: int) -> jnp.ndarray:
+    def unit(self, x: RealVector, y: RealVector, dim: int) -> jnp.ndarray:
         embedding_dim = dim + 1
         if len(x) != embedding_dim or len(y) != embedding_dim:
             errmsg = "points have incompatible number of coordinates"

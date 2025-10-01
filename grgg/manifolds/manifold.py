@@ -5,10 +5,10 @@ from typing import Self
 import equinox as eqx
 import jax.numpy as jnp
 
-from grgg._typing import Matrix, Scalar, Vector
-from grgg.abc import AbstractModule
-from grgg.random import RandomGenerator
-from grgg.utils import pairwise
+from grgg._typing import Real, RealMatrix, RealVector
+from grgg.abc.modules import AbstractModule
+from grgg.utils.misc import pairwise
+from grgg.utils.random import RandomGenerator
 
 from .functions import (
     ManifoldCosineLawFunction,
@@ -17,7 +17,9 @@ from .functions import (
     ManifoldVolumeFunction,
 )
 
-DistanceFunctionT = Callable[[Matrix, Matrix | None, ...], Vector | Matrix]
+DistanceFunctionT = Callable[
+    [RealMatrix, RealMatrix | None, ...], RealVector | RealMatrix
+]
 
 __all__ = ("Manifold", "CompactManifold")
 
@@ -127,17 +129,17 @@ class Manifold(AbstractModule):
             and self.compute.equals(other.compute)
         )
 
-    def metric(self, x: Vector, y: Vector) -> Scalar:
+    def metric(self, x: RealVector, y: RealVector) -> Real:
         """Geodesic distance between two points on the manifold."""
         return self.compute.metric(x, y, self.dim, self.linear_size)
 
     def distances(
         self,
-        X: Matrix,
-        Y: Matrix | None = None,
+        X: RealMatrix,
+        Y: RealMatrix | None = None,
         *,
         condensed: bool = True,
-    ) -> Vector | Matrix:
+    ) -> RealVector | RealMatrix:
         """Compute pairwise distances between points on the manifold.
 
         Parameters
@@ -156,7 +158,7 @@ class Manifold(AbstractModule):
 
     def sample_points(
         self, n: int, *, rng: RandomGenerator | int | None = None
-    ) -> Matrix:
+    ) -> RealMatrix:
         """Sample points uniformly from the manifold.
 
         Parameters
@@ -178,7 +180,7 @@ class Manifold(AbstractModule):
         return self._sample_points(n, rng)
 
     @abstractmethod
-    def _sample_points(self, n: int, rng: RandomGenerator) -> Matrix:
+    def _sample_points(self, n: int, rng: RandomGenerator) -> RealMatrix:
         """Implementation of point sampling."""
 
     def distance_density(self, g: float) -> float:

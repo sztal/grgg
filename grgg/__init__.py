@@ -1,8 +1,9 @@
 from .__about__ import __version__
 from ._options import options
 from .manifolds import Sphere
-from .model import GRGG, Complementarity, Similarity
-from .random import RandomGenerator
+from .models.ergm.geometric import GRGG, Complementarity, Similarity
+from .models.ergm.random_graphs import UndirectedRandomGraph
+from .utils.random import RandomGenerator
 
 __all__ = (
     "GRGG",

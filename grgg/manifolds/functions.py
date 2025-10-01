@@ -4,13 +4,15 @@ from typing import TYPE_CHECKING, Any, Self
 
 import jax.numpy as jnp
 
-from grgg._typing import Matrix, Vector
-from grgg.functions import AbstractFunction
+from grgg._typing import RealMatrix, RealVector
+from grgg.abc.modules import AbstractFunction
 
 if TYPE_CHECKING:
     from .manifold import Manifold
 
-DistanceFunctionT = Callable[[Matrix, Matrix | None, ...], Vector | Matrix]
+DistanceFunctionT = Callable[
+    [RealMatrix, RealMatrix | None, ...], RealVector | RealMatrix
+]
 
 
 class ManifoldFunction(AbstractFunction):
@@ -54,7 +56,7 @@ class ManifoldMetricFunction(ManifoldFunction):
     """Manifold metric function."""
 
     def __call__(
-        self, x: Vector, y: Vector, dim: int, linear_size: float = 1.0
+        self, x: RealVector, y: RealVector, dim: int, linear_size: float = 1.0
     ) -> jnp.ndarray:
         """Compute the metric (geodesic distance)."""
         x = x / linear_size
@@ -62,7 +64,7 @@ class ManifoldMetricFunction(ManifoldFunction):
         return self.unit(x, y, dim) * linear_size
 
     @abstractmethod
-    def unit(self, x: Vector, y: Vector, dim: int) -> jnp.ndarray:
+    def unit(self, x: RealVector, y: RealVector, dim: int) -> jnp.ndarray:
         """Metric on the manifold with unit linear size."""
 
 
