@@ -3,10 +3,10 @@ from typing import Any
 import jax
 
 from grgg._typing import Reals
-from grgg.statistics import DegreeStatistic
+from grgg.statistics import Degree
 
 
-class UndirectedRandomGraphDegreeStatistic(DegreeStatistic):
+class UndirectedRandomGraphDegreeStatistic(Degree):
     """Degree statistic for undirected random graphs."""
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa

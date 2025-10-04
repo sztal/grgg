@@ -4,7 +4,7 @@ from typing import Any, ClassVar, Self
 from .abc import MV, AbstractErgmNodeMotifStatistic
 
 
-class QWedgeMotifStatistic(AbstractErgmNodeMotifStatistic):
+class QWedgeMotif(AbstractErgmNodeMotifStatistic):
     """Quadrangle wedge path motif statistic.
 
     Attributes

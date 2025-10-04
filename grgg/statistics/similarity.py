@@ -1,11 +1,11 @@
 from functools import singledispatchmethod
 from typing import Any, ClassVar, Self
 
-from grgg.statistics.abc import VT, AbstractErgmNodeLocalStructureStatistic
+from .abc import VT, AbstractErgmNodeLocalStructureStatistic
 
 
-class TClustering(AbstractErgmNodeLocalStructureStatistic):
-    """Triangle clustering statistic.
+class StructuralSimilarity(AbstractErgmNodeLocalStructureStatistic):
+    """Structural similarity statistic.
 
     Attributes
     ----------
@@ -17,7 +17,7 @@ class TClustering(AbstractErgmNodeLocalStructureStatistic):
 
     module: VT
 
-    label: ClassVar[str] = "tclust"
+    label: ClassVar[str] = "similarity"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
     @singledispatchmethod

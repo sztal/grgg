@@ -46,9 +46,9 @@ class AbstractModelView[T](AbstractModelModule[T]):
         """Get a model parameter by index or name."""
 
     @abstractmethod
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         """Check equality with another view."""
-        return super().equals(other) and self.model.equals(other.model)
+        return super()._equals(other) and self.model.equals(other.model)
 
     @abstractmethod
     def materialize(self, *, copy: bool = False) -> T:

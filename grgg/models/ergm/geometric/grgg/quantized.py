@@ -83,11 +83,11 @@ class QuantizedGRGG(GRGG):
     def parameters(self) -> ParameterGroups:
         return super().parameters.replace(weights=self.quantizer.counts)
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         if isinstance(other, GRGG):
             return other.equals(self)
         return (
-            super().equals(other)
+            super()._equals(other)
             and self.quantizer.equals(other.quantizer)
             and self._quantized_names == other._quantized_names
         )

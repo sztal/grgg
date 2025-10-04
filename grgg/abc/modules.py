@@ -4,15 +4,23 @@ from dataclasses import replace
 from typing import Any, Self
 
 import equinox as eqx
+import jax.numpy as jnp
 
 __all__ = ("AbstractModule", "AbstractCallable", "AbstractFunction")
 
 
 class AbstractModule(eqx.Module):
-    """Abstract base class for model elements."""
+    """Abstract base class for general modules."""
+
+    def equals(self, other: object) -> bool:
+        """Check equality with another model element."""
+        result = self._equals(other)
+        if isinstance(result, jnp.ndarray):
+            result = result.item()
+        return bool(result)
 
     @abstractmethod
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         """Check equality with another model element."""
         t1 = type(self)
         t2 = type(other)
@@ -54,5 +62,5 @@ class AbstractCallable(AbstractModule):
 class AbstractFunction(AbstractCallable):
     """Abstract base class for model functions."""
 
-    def equals(self, other: Any) -> bool:
-        return super().equals(other)
+    def _equals(self, other: Any) -> bool:
+        return super()._equals(other)

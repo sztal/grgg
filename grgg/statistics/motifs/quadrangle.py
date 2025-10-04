@@ -4,7 +4,7 @@ from typing import Any, ClassVar, Self
 from .abc import MV, AbstractErgmNodeMotifStatistic
 
 
-class QuadrangleMotifStatistic(AbstractErgmNodeMotifStatistic):
+class QuadrangleMotif(AbstractErgmNodeMotifStatistic):
     """Quadrangle motif statistic.
 
     Attributes

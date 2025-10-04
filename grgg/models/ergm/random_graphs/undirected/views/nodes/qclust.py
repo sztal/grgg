@@ -1,18 +1,23 @@
 from typing import Any
 
 from grgg._typing import Reals
-from grgg.statistics import QClusteringStatistic
+from grgg.statistics import QClustering
 
 
-class UndirectedRandomGraphQClusteringStatistic(QClusteringStatistic):
-    """Degree statistic for undirected random graphs."""
+class UndirectedRandomGraphQClustering(QClustering):
+    """Quadrangle clustering statistic for undirected random graphs."""
+
+    @staticmethod
+    def m1_from_motifs(quadrangles: Reals, qwedges: Reals) -> Reals:
+        """Compute the first moment of the statistic from motifs counts."""
+        return 2 * quadrangles / qwedges
 
     def _m1(self, **kwargs: Any) -> Reals:
         """Compute the first moment of the statistic."""
-        kw1, kw2 = self.split_compute_kwargs(**kwargs)
+        kw1, kw2 = self.split_compute_kwargs(same_seed=True, **kwargs)
         quadrangles = self.nodes.motifs.quadrangle(**kw1)
         qwedges = self.nodes.motifs.qwedge(**kw2)
-        return 2 * quadrangles / qwedges
+        return self.m1_from_motifs(quadrangles, qwedges)
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
         """Compute q-clustering for a homogeneous undirected random graph.
@@ -41,12 +46,7 @@ class UndirectedRandomGraphQClusteringStatistic(QClusteringStatistic):
         """
         return self._m1(**kwargs)
 
-    def _heterogeneous_m1(
-        self,
-        *,
-        batch_size: int | None = None,
-        **kwargs: Any,  # noqa
-    ) -> Reals:
+    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
         """Compute q-clustering for a heterogeneous undirected random graph.
 
         Examples
@@ -76,4 +76,4 @@ class UndirectedRandomGraphQClusteringStatistic(QClusteringStatistic):
         >>> jnp.allclose(qc, qclust[vids]).item()
         True
         """
-        return self._m1(batch_size=batch_size, **kwargs)
+        return self._m1(**kwargs)

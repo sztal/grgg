@@ -1,13 +1,17 @@
-from .degree import DegreeStatistic
+from .complementarity import StructuralComplementarity
+from .degree import Degree
 from .motifs import (
-    QHeadMotifStatistic,
-    QuadrangleMotifStatistic,
-    QWedgeMotifStatistic,
-    THeadMotifStatistic,
-    TriangleMotifStatistic,
-    TWedgeMotifStatistic,
+    QHeadMotif,
+    QuadrangleMotif,
+    QWedgeMotif,
+    THeadMotif,
+    TriangleMotif,
+    TWedgeMotif,
 )
-from .qclosure import QClosureStatistic
-from .qclust import QClusteringStatistic
-from .tclosure import TClosureStatistic
-from .tclust import TClusteringStatistic
+from .qclosure import QClosure
+from .qclust import QClustering
+from .qstats import QStatistics
+from .similarity import StructuralSimilarity
+from .tclosure import TClosure
+from .tclust import TClustering
+from .tstats import TStatistics

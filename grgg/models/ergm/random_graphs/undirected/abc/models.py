@@ -55,9 +55,9 @@ class AbstractUndirectedRandomGraph[T, P, V, E, S](AbstractRandomGraph[T, P, V, 
         """Node parameter."""
         return self.parameters.mu
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         return (
-            super().equals(other)
+            super()._equals(other)
             and self.n_nodes == other.n_nodes
             and self.mu.equals(other.mu)
             and self.coupling.equals(other.coupling)

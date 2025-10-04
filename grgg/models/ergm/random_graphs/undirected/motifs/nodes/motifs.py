@@ -2,22 +2,20 @@ from typing import TYPE_CHECKING, Any, TypeVar
 
 from grgg.models.ergm.abc import AbstractErgmNodeMotifs
 from grgg.statistics.motifs import (
-    QHeadMotifStatistic,
-    QuadrangleMotifStatistic,
-    QWedgeMotifStatistic,
-    THeadMotifStatistic,
-    TriangleMotifStatistic,
-    TWedgeMotifStatistic,
+    QHeadMotif,
+    QuadrangleMotif,
+    QWedgeMotif,
+    THeadMotif,
+    TriangleMotif,
+    TWedgeMotif,
 )
 
-from .statistics import (
-    UndirectedRandomGraphQHeadMotifStatistic,
-    UndirectedRandomGraphQuadrangleMotifStatistic,
-    UndirectedRandomGraphQWedgeMotifStatistic,
-    UndirectedRandomGraphTHeadMotifStatistic,
-    UndirectedRandomGraphTriangleMotifStatistic,
-    UndirectedRandomGraphTWedgeMotifStatistic,
-)
+from .qhead import UndirectedRandomGraphQHeadMotif
+from .quadrangle import UndirectedRandomGraphQuadrangleMotif
+from .qwedge import UndirectedRandomGraphQWedgeMotif
+from .thead import UndirectedRandomGraphTHeadMotif
+from .triangle import UndirectedRandomGraphTriangleMotif
+from .twedge import UndirectedRandomGraphTWedgeMotif
 
 if TYPE_CHECKING:
     from grgg.models.ergm.random_graphs.undirected.model import UndirectedRandomGraph
@@ -40,67 +38,67 @@ class UndirectedRandomGraphNodeMotifs[V](AbstractErgmNodeMotifs[V]):
 # Register motif statistics ----------------------------------------------------------
 
 
-@TriangleMotifStatistic.from_module.register
+@TriangleMotif.from_module.register
 @classmethod
 def _(
     cls,  # noqa
     module: UndirectedRandomGraphNodeMotifs,  # noqa
     *args: Any,
     **kwargs: Any,
-) -> UndirectedRandomGraphTriangleMotifStatistic:
-    return UndirectedRandomGraphTriangleMotifStatistic(module, *args, **kwargs)
+) -> UndirectedRandomGraphTriangleMotif:
+    return UndirectedRandomGraphTriangleMotif(module, *args, **kwargs)
 
 
-@TWedgeMotifStatistic.from_module.register
+@TWedgeMotif.from_module.register
 @classmethod
 def _(
     cls,  # noqa
     module: UndirectedRandomGraphNodeMotifs,  # noqa
     *args: Any,
     **kwargs: Any,
-) -> UndirectedRandomGraphTWedgeMotifStatistic:
-    return UndirectedRandomGraphTWedgeMotifStatistic(module, *args, **kwargs)
+) -> UndirectedRandomGraphTWedgeMotif:
+    return UndirectedRandomGraphTWedgeMotif(module, *args, **kwargs)
 
 
-@THeadMotifStatistic.from_module.register
+@THeadMotif.from_module.register
 @classmethod
 def _(
     cls,  # noqa
     module: UndirectedRandomGraphNodeMotifs,  # noqa
     *args: Any,
     **kwargs: Any,
-) -> UndirectedRandomGraphTHeadMotifStatistic:
-    return UndirectedRandomGraphTHeadMotifStatistic(module, *args, **kwargs)
+) -> UndirectedRandomGraphTHeadMotif:
+    return UndirectedRandomGraphTHeadMotif(module, *args, **kwargs)
 
 
-@QuadrangleMotifStatistic.from_module.register
+@QuadrangleMotif.from_module.register
 @classmethod
 def _(
     cls,  # noqa
     module: UndirectedRandomGraphNodeMotifs,  # noqa
     *args: Any,
     **kwargs: Any,
-) -> UndirectedRandomGraphQuadrangleMotifStatistic:
-    return UndirectedRandomGraphQuadrangleMotifStatistic(module, *args, **kwargs)
+) -> UndirectedRandomGraphQuadrangleMotif:
+    return UndirectedRandomGraphQuadrangleMotif(module, *args, **kwargs)
 
 
-@QWedgeMotifStatistic.from_module.register
+@QWedgeMotif.from_module.register
 @classmethod
 def _(
     cls,  # noqa
     module: UndirectedRandomGraphNodeMotifs,  # noqa
     *args: Any,
     **kwargs: Any,
-) -> UndirectedRandomGraphQWedgeMotifStatistic:
-    return UndirectedRandomGraphQWedgeMotifStatistic(module, *args, **kwargs)
+) -> UndirectedRandomGraphQWedgeMotif:
+    return UndirectedRandomGraphQWedgeMotif(module, *args, **kwargs)
 
 
-@QHeadMotifStatistic.from_module.register
+@QHeadMotif.from_module.register
 @classmethod
 def _(
     cls,  # noqa
     module: UndirectedRandomGraphNodeMotifs,  # noqa
     *args: Any,
     **kwargs: Any,
-) -> UndirectedRandomGraphQHeadMotifStatistic:
-    return UndirectedRandomGraphQHeadMotifStatistic(module, *args, **kwargs)
+) -> UndirectedRandomGraphQHeadMotif:
+    return UndirectedRandomGraphQHeadMotif(module, *args, **kwargs)

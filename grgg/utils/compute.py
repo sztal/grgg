@@ -104,7 +104,7 @@ def MapReduce(
     *,
     reverse: bool = False,
     unroll: int = 1,
-    n_samples: int = -1,
+    n_samples: int = 0,
     replace: bool = False,
     p: jnp.ndarray | None = None,
     rng: RandomGenerator | Integers | None = None,
@@ -169,7 +169,6 @@ def MapReduce(
     In this simple case we recover the total exactly, since our sampling weights
     were exactly proportional to the output.
     """
-    # ruff: noqa: C901
     if not isinstance(f, Callable):
         args = (init,) if f is None else (f, init)
         kwargs = {
@@ -184,26 +183,13 @@ def MapReduce(
 
     init = jnp.array(0.0) if init is None else jnp.asarray(init)
 
-    if n_samples < 0:
+    scan_func = (
+        _define_unweighted_scan_func(reduction, f)
+        if n_samples <= 0
+        else _define_weighted_scan_func(reduction, f)
+    )
 
-        def scan_func(carry: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
-            new_carry = reduction(carry, f(x))
-            return new_carry, None
-    else:
-
-        def scan_func(carry: jnp.ndarray, x: jnp.ndarray) -> jnp.ndarray:
-            x, w = x
-            new_carry = reduction(carry, w * f(x))
-            return new_carry, None
-
-    if isinstance(rng, RandomGenerator):
-        key = rng.key
-    elif isinstance(rng, jnp.ndarray):
-        key = rng
-    else:
-        key = RandomGenerator.make_key(rng)
-
-    key = jax.random.split(key, num=1)[0]
+    rng = RandomGenerator.from_seed(rng)
     _p = p
 
     def scan_loop(
@@ -217,17 +203,15 @@ def MapReduce(
             **kwargs,
         }
         q = None
-        if n_samples >= 0:
-            if _p is None:
+        if n_samples > 0:
+            if _p is None or jnp.isscalar(_p):
                 n_total = xs.shape[0]
-                xs = jax.random.choice(key, xs, (n_samples,), replace=replace)
+                xs = rng.choice(xs, (n_samples,), replace=replace)
                 q = n_total / n_samples
             else:
                 # Importance sampling
-                p = jax.lax.stop_gradient(_p)
-                indices = jax.random.choice(
-                    key, xs.shape[0], (n_samples,), p=p, replace=replace
-                )
+                p = jax.lax.stop_gradient(_p / _p.sum())
+                indices = rng.choice(xs.shape[0], (n_samples,), p=p, replace=replace)
                 xs = jnp.take(xs, indices, axis=0)
                 q = 1 / (p[indices] * n_samples)
         if jnp.isscalar(q):
@@ -237,3 +221,22 @@ def MapReduce(
         return reduced
 
     return scan_loop
+
+
+def _define_unweighted_scan_func(
+    reduction: ReductionT, f: MapFuctionT
+) -> ScanLoopBodyT:
+    def _scan_func(carry: jnp.ndarray, x: jnp.ndarray) -> tuple[jnp.ndarray, None]:
+        new_carry = reduction(carry, f(x))
+        return new_carry, None
+
+    return _scan_func
+
+
+def _define_weighted_scan_func(reduction: ReductionT, f: MapFuctionT) -> ScanLoopBodyT:
+    def _scan_func(carry: jnp.ndarray, x: jnp.ndarray) -> tuple[jnp.ndarray, None]:
+        x, w = x
+        new_carry = reduction(carry, w * f(x))
+        return new_carry, None
+
+    return _scan_func

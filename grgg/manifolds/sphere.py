@@ -102,8 +102,8 @@ class Sphere(CompactManifold):
         r = (volume * math.gamma(d / 2) / (2 * math.pi ** (d / 2))) ** (1 / (d - 1))
         return type(self)(self.dim, r)
 
-    def equals(self, other: object) -> bool:
-        return super().equals(other) and self.r == other.r
+    def _equals(self, other: object) -> bool:
+        return super()._equals(other) and self.r == other.r
 
     def metric(self, x: RealVector, y: RealVector) -> Real:
         """Geodesic distance between points on the sphere."""

@@ -4,7 +4,7 @@ from typing import Any, ClassVar, Self
 from .abc import MV, AbstractErgmNodeMotifStatistic
 
 
-class QHeadMotifStatistic(AbstractErgmNodeMotifStatistic):
+class QHeadMotif(AbstractErgmNodeMotifStatistic):
     """Quadrangle head path motif statistic.
 
     Attributes
@@ -18,7 +18,6 @@ class QHeadMotifStatistic(AbstractErgmNodeMotifStatistic):
     module: MV
 
     label: ClassVar[str] = "qhead"
-    supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
     @singledispatchmethod
     @classmethod

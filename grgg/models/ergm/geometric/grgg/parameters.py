@@ -294,9 +294,9 @@ class Parameters(AbstractParametersContainer, Mapping[str, jnp.ndarray]):
             errmsg = "all parameter arrays must have the same length or be scalars"
             raise ValueError(errmsg)
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         return (
-            super().equals(other)
+            super()._equals(other)
             and len(self) == len(other)
             and all(
                 k1 == k2 and jnp.array_equal(v1, v2)
@@ -469,9 +469,9 @@ class ParameterGroups(AbstractModule, Sequence[Parameters]):
         """
         return [group.names for group in self._groups]
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         return (
-            super().equals(other)
+            super()._equals(other)
             and len(self) == len(other)
             and all(
                 g1.equals(g2)

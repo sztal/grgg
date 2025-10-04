@@ -134,9 +134,9 @@ class AbstractParameter(AbstractModule, Sequence[jnp.ndarray]):
         """Lazy outer sum of the parameter values."""
         return LazyOuter(self.data, self.data, op=jnp.add)
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         return (
-            super().equals(other)
+            super()._equals(other)
             and self.name == other.name
             and self.constraints == other.constraints
             and jnp.array_equal(self.data, other.data)
@@ -266,9 +266,9 @@ class AbstractParameters(AbstractModule, Sequence[AbstractParameter]):
         """Indexer for subsetting parameters."""
         return _ParametersIndexer(self)
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         return (
-            super().equals(other)
+            super()._equals(other)
             and self.names == other.names
             and all(
                 p1.equals(p2)

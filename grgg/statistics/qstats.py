@@ -4,8 +4,8 @@ from typing import Any, ClassVar, Self
 from grgg.statistics.abc import VT, AbstractErgmNodeLocalStructureStatistic
 
 
-class TClustering(AbstractErgmNodeLocalStructureStatistic):
-    """Triangle clustering statistic.
+class QStatistics(AbstractErgmNodeLocalStructureStatistic):
+    """Quadrangle-based statistic.
 
     Attributes
     ----------
@@ -17,7 +17,7 @@ class TClustering(AbstractErgmNodeLocalStructureStatistic):
 
     module: VT
 
-    label: ClassVar[str] = "tclust"
+    label: ClassVar[str] = "qstats"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
     @singledispatchmethod

@@ -55,8 +55,8 @@ class AbstractModelIntegral(AbstractIntegral, AbstractModule):
     def defaults(self) -> dict[str, Any]:
         return super().defaults
 
-    def equals(self, other: object) -> bool:
-        if not super().equals(other):
+    def _equals(self, other: object) -> bool:
+        if not super()._equals(other):
             return False
         dct1 = self.__dict__.copy()
         mod1 = dct1.pop("model", None)

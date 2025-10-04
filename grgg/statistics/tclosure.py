@@ -1,10 +1,10 @@
 from functools import singledispatchmethod
 from typing import Any, ClassVar, Self
 
-from grgg.statistics.abc import VT, AbstractErgmNodeStatistic
+from grgg.statistics.abc import VT, AbstractErgmNodeLocalStructureStatistic
 
 
-class TClosureStatistic(AbstractErgmNodeStatistic):
+class TClosure(AbstractErgmNodeLocalStructureStatistic):
     """Triangle closure statistic.
 
     Attributes

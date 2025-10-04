@@ -1,10 +1,10 @@
 from functools import singledispatchmethod
 from typing import Any, ClassVar, Self
 
-from grgg.statistics.abc import VT, AbstractErgmNodeStatistic
+from .abc import VT, AbstractErgmNodeLocalStructureStatistic
 
 
-class QClosureStatistic(AbstractErgmNodeStatistic):
+class QClosure(AbstractErgmNodeLocalStructureStatistic):
     """Quadrangle closure statistic.
 
     Attributes

@@ -52,8 +52,8 @@ class ShapedIndexExpression(Shaped):
         shape = tuple(int(s) for s in shape)
         self.shape = shape
 
-    def equals(self, other: object) -> bool:
-        return super().equals(other) and self.shape == other.shape
+    def _equals(self, other: object) -> bool:
+        return super()._equals(other) and self.shape == other.shape
 
     def __getitem__(
         self,
@@ -277,8 +277,8 @@ class IndexableShape(Shaped):
             shape = ShapedIndexExpression(shape)
         self.index_expr = shape
 
-    def equals(self, other: object) -> bool:
-        return super().equals(other) and self.index_expr.equals(other.index_expr)
+    def _equals(self, other: object) -> bool:
+        return super()._equals(other) and self.index_expr.equals(other.index_expr)
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -373,8 +373,8 @@ class CartesianCoordinates(Shaped):
             shape = IndexableShape(shape)
         self.index = shape
 
-    def equals(self, other: object) -> bool:
-        return super().equals(other) and self.index.equals(other.index)
+    def _equals(self, other: object) -> bool:
+        return super()._equals(other) and self.index.equals(other.index)
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -525,9 +525,9 @@ class MultiIndexRavel(Shaped):
         self.mode = mode
         self.order = order
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         return (
-            super().equals(other)
+            super()._equals(other)
             and self.index.equals(other.index)
             and self.mode == other.mode
             and self.order == other.order

@@ -130,10 +130,10 @@ class AbstractLayer(AbstractRandomGraph):
         """Small constant for lower bounding the energies for numerical stability."""
         return self.model.eps
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         """Check if two layers are equal."""
         return (
-            super().equals(other)
+            super()._equals(other)
             and jnp.array_equal(self.mu, other.mu)
             and jnp.array_equal(self.beta, other.beta)
             and self.probability.equals(other.probability)

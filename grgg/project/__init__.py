@@ -17,7 +17,7 @@ def make_paths(root: str | Path | None = None) -> SimpleNamespace:
     )
     paths = SimpleNamespace(
         root=root,
-        figures=root / "figures",
+        figures=root / "analyses" / "figures",
         data=root / "data",
         raw=root / "data" / "raw",
         proc=root / "data" / "proc",

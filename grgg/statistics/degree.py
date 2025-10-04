@@ -4,7 +4,7 @@ from typing import Any, ClassVar, Self
 from grgg.statistics.abc import VT, AbstractErgmNodeStatistic
 
 
-class DegreeStatistic(AbstractErgmNodeStatistic):
+class Degree(AbstractErgmNodeStatistic):
     """Degree statistic.
 
     Attributes

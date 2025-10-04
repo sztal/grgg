@@ -7,20 +7,22 @@ from grgg.models.ergm.random_graphs.undirected.motifs.nodes.motifs import (
     UndirectedRandomGraphNodeMotifs,
 )
 from grgg.statistics import (
-    DegreeStatistic,
-    QClosureStatistic,
-    QClusteringStatistic,
-    TClosureStatistic,
-    TClusteringStatistic,
+    Degree,
+    QClosure,
+    QClustering,
+    StructuralComplementarity,
+    StructuralSimilarity,
+    TClosure,
+    TClustering,
 )
 
-from .statistics import (
-    UndirectedRandomGraphDegreeStatistic,
-    UndirectedRandomGraphQClosureStatistic,
-    UndirectedRandomGraphQClusteringStatistic,
-    UndirectedRandomGraphTClosureStatistic,
-    UndirectedRandomGraphTClusteringStatistic,
-)
+from .complementarity import UndirectedRandomGraphStructuralComplementarity
+from .degree import UndirectedRandomGraphDegreeStatistic
+from .qclosure import UndirectedRandomGraphQClosure
+from .qclust import UndirectedRandomGraphQClustering
+from .similarity import UndirectedRandomGraphStructuralSimilarity
+from .tclosure import UndirectedRandomGraphTClosure
+from .tclust import UndirectedRandomGraphTClustering
 
 if TYPE_CHECKING:
     from grgg.models.ergm.random_graphs.undirected.model import UndirectedRandomGraph
@@ -46,7 +48,7 @@ class UndirectedRandomGraphNodeView[T, MV](
 # Register statistics implementations ------------------------------------------------
 
 
-@DegreeStatistic.from_module.register
+@Degree.from_module.register
 @classmethod
 def _(
     cls,  # noqa
@@ -55,37 +57,55 @@ def _(
     return UndirectedRandomGraphDegreeStatistic(nodes)
 
 
-@TClusteringStatistic.from_module.register
+@TClustering.from_module.register
 @classmethod
 def _(
     cls,  # noqa
     nodes: UndirectedRandomGraphNodeView,  # noqa
-) -> UndirectedRandomGraphTClusteringStatistic:
-    return UndirectedRandomGraphTClusteringStatistic(nodes)
+) -> UndirectedRandomGraphTClustering:
+    return UndirectedRandomGraphTClustering(nodes)
 
 
-@TClosureStatistic.from_module.register
+@TClosure.from_module.register
 @classmethod
 def _(
     cls,  # noqa
     nodes: UndirectedRandomGraphNodeView,  # noqa
-) -> UndirectedRandomGraphTClosureStatistic:
-    return UndirectedRandomGraphTClosureStatistic(nodes)
+) -> UndirectedRandomGraphTClosure:
+    return UndirectedRandomGraphTClosure(nodes)
 
 
-@QClusteringStatistic.from_module.register
+@StructuralSimilarity.from_module.register
 @classmethod
 def _(
     cls,  # noqa
     nodes: UndirectedRandomGraphNodeView,  # noqa
-) -> UndirectedRandomGraphQClusteringStatistic:
-    return UndirectedRandomGraphQClusteringStatistic(nodes)
+) -> UndirectedRandomGraphStructuralSimilarity:
+    return UndirectedRandomGraphStructuralSimilarity(nodes)
 
 
-@QClosureStatistic.from_module.register
+@QClustering.from_module.register
 @classmethod
 def _(
     cls,  # noqa
     nodes: UndirectedRandomGraphNodeView,  # noqa
-) -> UndirectedRandomGraphQClosureStatistic:
-    return UndirectedRandomGraphQClosureStatistic(nodes)
+) -> UndirectedRandomGraphQClustering:
+    return UndirectedRandomGraphQClustering(nodes)
+
+
+@QClosure.from_module.register
+@classmethod
+def _(
+    cls,  # noqa
+    nodes: UndirectedRandomGraphNodeView,  # noqa
+) -> UndirectedRandomGraphQClosure:
+    return UndirectedRandomGraphQClosure(nodes)
+
+
+@StructuralComplementarity.from_module.register
+@classmethod
+def _(
+    cls,  # noqa
+    nodes: UndirectedRandomGraphNodeView,  # noqa
+) -> UndirectedRandomGraphStructuralComplementarity:
+    return UndirectedRandomGraphStructuralComplementarity(nodes)

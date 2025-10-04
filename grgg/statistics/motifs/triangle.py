@@ -4,7 +4,7 @@ from typing import Any, ClassVar, Self
 from .abc import MV, AbstractErgmNodeMotifStatistic
 
 
-class TriangleMotifStatistic(AbstractErgmNodeMotifStatistic):
+class TriangleMotif(AbstractErgmNodeMotifStatistic):
     """Triangle motif statistic.
 
     Attributes

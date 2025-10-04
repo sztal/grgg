@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 import equinox as eqx
 
@@ -66,6 +66,8 @@ class AbstractErgmNodeMotifStatistic[MV](
     AbstractErgmNodeStatistic[MV], AbstractErgmViewMotifStatistic[MV]
 ):
     """Abstract base class for node motif statistics."""
+
+    supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
     @property
     def nodes(self) -> MV:

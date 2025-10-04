@@ -3,9 +3,10 @@ from functools import singledispatchmethod
 from typing import TYPE_CHECKING, Any, Self, TypeVar
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 
-from grgg._typing import Integers, Reals
+from grgg._typing import Reals
 from grgg.abc import AbstractModule
 from grgg.utils.compute import MapReduce
 from grgg.utils.misc import split_kwargs_by_signature
@@ -28,7 +29,7 @@ ET = TypeVar("ET", bound="E")
 __all__ = ("AbstractStatistic",)
 
 
-ComputeKwargsT = tuple[bool, Integers, dict[str, Any], dict[str, Any]]
+ComputeKwargsT = tuple[RandomGenerator, dict[str, Any], dict[str, Any]]
 
 
 class AbstractStatistic[MT](AbstractModule):
@@ -77,7 +78,6 @@ class AbstractStatistic[MT](AbstractModule):
         """Create a statistic from a model."""
         raise cls.unsupported_module_exception(module)
 
-    @abstractmethod
     def moment(self, n: int, *args: Any, **kwargs: Any) -> Reals:
         """Compute the n-th moment of the statistic.
 
@@ -86,6 +86,18 @@ class AbstractStatistic[MT](AbstractModule):
         ValueError
             If the n-th moment is not supported.
         """
+        if n not in self.supported_moments:
+            raise self.unsupported_moment_exception(n)
+        moment = self._moment(n, *args, **kwargs)
+        return self.postprocess(moment)
+
+    def postprocess(self, moment: Reals) -> Reals:
+        """Post-process the computed moment, e.g., to ensure non-negativity.
+
+        This is mostly useful for sampling-based estimates that may sometimes produce
+        results that are out of theoretical bounds.
+        """
+        return moment
 
     def _moment(self, n: int, *args: Any, **kwargs: Any) -> Reals:
         """Compute the n-th moment of the statistic for the model."""
@@ -117,9 +129,9 @@ class AbstractStatistic[MT](AbstractModule):
         errmsg = f"'{cn}' does not support module of type '{type(module)}'"
         return TypeError(errmsg)
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         return (
-            super().equals(other)
+            super()._equals(other)
             and self.label == other.label
             and self.supported_moments == other.supported_moments
             and self.module.equals(other.module)
@@ -127,20 +139,52 @@ class AbstractStatistic[MT](AbstractModule):
 
     def prepare_compute_kwargs(self, **kwargs: Any) -> ComputeKwargsT:
         """Split kwargs into those for :class:`grgg.utils.compute.MapReduce`
-        and those for other purposes.
+        and those for other purposes and configure the random generator appropriately,
+        so it may be distributed across many computation loops.
+
+        Returns
+        -------
+        rng
+            A random generator or `None`.
+        mr_kwargs
+            Keyword arguments for :class:`grgg.utils.compute.MapReduce`.
+        loop_kwargs
+            Keyword arguments for outer loops, usually :func:`jax.lax.map`.
         """
-        key = RandomGenerator.make_key(kwargs.pop("rng", None))
-        mr_kwargs, other_kwargs = split_kwargs_by_signature(MapReduce, **kwargs)
-        use_sampling = False
-        return use_sampling, key, mr_kwargs, other_kwargs
+        mr_kwargs, loop_kwargs = split_kwargs_by_signature(MapReduce, **kwargs)
+        rng = RandomGenerator.from_seed(mr_kwargs.pop("rng", None))
+        if self.use_sampling:
+            # Make sure each sampling call gets a different key
+            # and the original rng is not used again, but mutated
+            # a single time.
+            rng = rng.child
+        loop_kwargs["batch_size"] = self.model._get_batch_size(
+            loop_kwargs.get("batch_size")
+        )
+        return rng, mr_kwargs, loop_kwargs
 
     def split_compute_kwargs(
-        self, n: int = 2, **kwargs: Any
+        self, n: int = 2, *, same_seed: bool = False, **kwargs: Any
     ) -> tuple[dict[str, Any], ...]:
-        """Split kwargs into mutliple copies with different PRNG keys."""
-        rng = kwargs.pop("rng", None)
+        """Split compute kwargs for using in multiple routines.
+
+        Parameters
+        ----------
+        n
+            Number of splits.
+        same_seed
+            Whether to keep the same PRNG seed for all splits.
+        **kwargs
+            Keyword arguments to split.
+        """
+        rng, kwargs, _ = self.prepare_compute_kwargs(**kwargs)
+        if rng is None and same_seed:
+            rng = RandomGenerator()
         if rng is not None:
-            rngs = RandomGenerator(rng).split(n)
+            if same_seed:
+                rngs = tuple(rng.copy() for _ in range(n))
+            else:
+                rngs = RandomGenerator(rng).split(n)
             return tuple({**kwargs, "rng": rng} for rng in rngs)
         return tuple(kwargs.copy() for _ in range(n))
 
@@ -148,20 +192,37 @@ class AbstractStatistic[MT](AbstractModule):
 class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
     """Abstract base class for ERGM statistics."""
 
-    def prepare_compute_kwargs(self, **kwargs: Any) -> ComputeKwargsT:
-        """Split kwargs into those for :class:`grgg.utils.compute.MapReduce`
-        and those for :class:`grgg.utils.compute.Sampled`.
+    n_samples: int = eqx.field(static=True, default=0, kw_only=True, converter=int)
+    _importance_weights: eqx.AbstractVar[Reals]
 
-        The appropriate degree-based importance weights are added to the
-        sampling kwargs if sampling is used and no weights are provided.
-        """
-        _, key, mr_kwargs, other_kwargs = super().prepare_compute_kwargs(**kwargs)
-        # Set up weights for importance sampling if needed
-        use_sampling = mr_kwargs.get("n_samples", -1) >= 0
-        if use_sampling and "p" not in mr_kwargs:
-            degree = self.model.nodes.degree()
-            mr_kwargs["p"] = degree / degree.sum()
-        return use_sampling, key, mr_kwargs, other_kwargs
+    @property
+    def use_sampling(self) -> bool:
+        return self.model.is_heterogeneous and self.n_samples > 0
+
+    @property
+    def importance_weights(self) -> Reals:
+        """Importance sampling weights."""
+        return jax.lax.stop_gradient(self._importance_weights)
+
+    def moment(
+        self, n: int, *args: Any, n_samples: int = 0, repeat: int = 1, **kwargs: Any
+    ) -> Reals:
+        """Compute the n-th moment of the statistic for the nodes."""
+        if n_samples > 0:
+            return self.replace(n_samples=n_samples).moment(
+                n, *args, repeat=repeat, **kwargs
+            )
+        if not self.use_sampling or repeat <= 1:
+            return super().moment(n, *args, **kwargs)
+        moments = jnp.stack(
+            [self.moment(n, *args, repeat=1, **kwargs) for _ in range(repeat)]
+        )
+        return moments
+
+    def prepare_compute_kwargs(self, **kwargs: Any) -> ComputeKwargsT:
+        rng, mr_kwargs, loop_kwargs = super().prepare_compute_kwargs(**kwargs)
+        mr_kwargs = {"n_samples": self.n_samples, **mr_kwargs}
+        return rng, mr_kwargs, loop_kwargs
 
 
 class AbstractErgmViewStatistic[QT](AbstractErgmStatistic[QT]):
@@ -175,9 +236,7 @@ class AbstractErgmViewStatistic[QT](AbstractErgmStatistic[QT]):
 
     def moment(self, n: int, *args: Any, **kwargs: Any) -> Reals:
         """Compute the n-th moment of the statistic for the nodes."""
-        if n not in self.supported_moments:
-            raise self.unsupported_moment_exception(n)
-        m = self._moment(n, *args, **kwargs)
+        m = super().moment(n, *args, **kwargs)
         if self.model.is_homogeneous and self.view.is_active:
             return jnp.full(self.view.shape, m)
         return m
@@ -195,6 +254,17 @@ class AbstractErgmNodeStatistic[VT](AbstractErgmViewStatistic[VT]):
     @property
     def pairs(self) -> "ET":
         return self.model.pairs
+
+    @property
+    def _importance_weights(self) -> Reals:
+        return self.model.nodes.degree() if self.use_sampling else jnp.array(1.0)
+
+
+class AbstractErgmNodeLocalStructureStatistic[VT](AbstractErgmNodeStatistic[VT]):
+    """Abstract base class for node local structure statistics."""
+
+    def postprocess(self, moment: Reals) -> Reals:
+        return jnp.clip(moment, 0, jnp.inf)
 
 
 class AbstractErgmNodePairStatistic[ET](AbstractErgmViewStatistic[ET]):

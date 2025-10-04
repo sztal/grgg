@@ -4,7 +4,7 @@ from typing import Any, ClassVar, Self
 from .abc import MV, AbstractErgmNodeMotifStatistic
 
 
-class TWedgeMotifStatistic(AbstractErgmNodeMotifStatistic):
+class TWedgeMotif(AbstractErgmNodeMotifStatistic):
     """Triangle wedge path motif statistic.
 
     Attributes

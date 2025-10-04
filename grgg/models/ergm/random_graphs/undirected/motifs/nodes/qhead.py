@@ -4,11 +4,11 @@ import jax
 import jax.numpy as jnp
 
 from grgg._typing import Integer, Integers, Real, Reals
-from grgg.statistics.motifs import QHeadMotifStatistic
+from grgg.statistics.motifs import QHeadMotif
 from grgg.utils.compute import MapReduce
 
 
-class UndirectedRandomGraphQHeadMotifStatistic(QHeadMotifStatistic):
+class UndirectedRandomGraphQHeadMotif(QHeadMotif):
     """Q-head motif statistic for undirected random graphs.
 
     Examples
@@ -23,6 +23,16 @@ class UndirectedRandomGraphQHeadMotifStatistic(QHeadMotifStatistic):
     >>> model = UndirectedRandomGraph(n, mu=rng.normal(n) - 3)
     >>> Q_exact = model.nodes.motifs.qhead()
     >>> Q_approx = model.nodes.motifs.qhead(n_samples=10, rng=rng)
+    >>>
+    >>> def error(X, Y):
+    ...     return jnp.linalg.norm(X - Y) / jnp.linalg.norm(X)
+    >>>
+    >>> err = error(Q_exact, Q_approx)
+    >>> (err < 0.25).item()
+    True
+    >>> cor = jnp.corrcoef(Q_exact, Q_approx)[0, 1]
+    >>> (cor > 0.95).item()
+    True
     """
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
@@ -31,17 +41,15 @@ class UndirectedRandomGraphQHeadMotifStatistic(QHeadMotifStatistic):
         p = self.model.pairs.probs()
         return (n - 1) * (n - 2) * (n - 3) * p**3
 
-    def _heterogeneous_m1(
-        self,
-        *,
-        batch_size: int | None = None,
-        **kwargs: Any,
-    ) -> Reals:
+    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
         """Q-head count implementation for heterogeneous undirected random graphs."""
-        batch_size = self.model._get_batch_size(batch_size)
         n = self.model.n_nodes
         vids = jnp.arange(n)
-        use_sampling, key, mr_kwargs, _ = self.prepare_compute_kwargs(**kwargs)
+        rng, mr_kwargs, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
+        weights = self.importance_weights
+        # Computations with inner loops must pass the explicit key
+        # other wise jax gets confused
+        key = rng.key if rng is not None else None
 
         @jax.jit
         def sum_l(i: Integer, j: Integer, k: Integer) -> Real:
@@ -53,33 +61,29 @@ class UndirectedRandomGraphQHeadMotifStatistic(QHeadMotifStatistic):
         @jax.jit
         def sum_k(i: Integer, j: Integer, key: Integers | None) -> Real:
             """Sum over k of p_ik * sum_l"""
-            key_k = jax.random.fold_in(key, j) if use_sampling else None
+            key_k = jax.random.fold_in(key, j) if key is not None else None
+            v = jnp.delete(vids, jnp.array([i, j]), assume_unique_indices=True)
+            w = weights[v] if self.use_sampling else None
 
-            @MapReduce(rng=key_k, **mr_kwargs)
+            @MapReduce(rng=key_k, p=w, **mr_kwargs)
             def compute(k: Integer) -> Real:
-                return jax.lax.cond(
-                    (k == i) | (k == j),
-                    lambda: 0.0,
-                    lambda: self.model.pairs[j, k].probs() * sum_l(i, j, k),
-                )
+                return self.model.pairs[j, k].probs() * sum_l(i, j, k)
 
-            return compute(vids)
+            return compute(v)
 
         @jax.jit
         def sum_j(i: Integer) -> Real:
             """Sum over j of p_ij * sum_k"""
-            key_j = jax.random.fold_in(key, i) if use_sampling else None
+            key_j = jax.random.fold_in(key, i) if self.use_sampling else None
+            v = jnp.delete(vids, i, assume_unique_indices=True)
+            w = weights[v] if self.use_sampling else None
 
-            @MapReduce(rng=key_j, **mr_kwargs)
+            @MapReduce(rng=key_j, p=w, **mr_kwargs)
             def compute(j: Integer) -> Real:
-                return jax.lax.cond(
-                    j == i,
-                    lambda: 0.0,
-                    lambda: self.model.pairs[i, j].probs() * sum_k(i, j, key=key_j),
-                )
+                return self.model.pairs[i, j].probs() * sum_k(i, j, key_j)
 
-            return compute(vids)
+            return compute(v)
 
         indices = self.view.coords[0].flatten()
-        qheads = jax.lax.map(sum_j, indices, batch_size=batch_size)
+        qheads = jax.lax.map(sum_j, indices, **loop_kwargs)
         return qheads

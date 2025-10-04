@@ -1,18 +1,23 @@
 from typing import Any
 
 from grgg._typing import Reals
-from grgg.statistics import TClosureStatistic
+from grgg.statistics import TClosure
 
 
-class UndirectedRandomGraphTClosureStatistic(TClosureStatistic):
-    """Degree statistic for undirected random graphs."""
+class UndirectedRandomGraphTClosure(TClosure):
+    """Triangle closure statistic for undirected random graphs."""
+
+    @staticmethod
+    def m1_from_motifs(triangles: Reals, theads: Reals) -> Reals:
+        """Compute the first moment of the statistic from motifs counts."""
+        return 2 * triangles / theads
 
     def _m1(self, **kwargs: Any) -> Reals:
         """Compute the first moment of the statistic."""
-        kw1, kw2 = self.split_compute_kwargs(**kwargs)
+        kw1, kw2 = self.split_compute_kwargs(same_seed=True, **kwargs)
         triangles = self.nodes.motifs.triangle(**kw1)
         theads = self.nodes.motifs.thead(**kw2)
-        return 2 * triangles / theads
+        return self.m1_from_motifs(triangles, theads)
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:
         """Compute t-closure for a homogeneous undirected random graph.
@@ -41,12 +46,7 @@ class UndirectedRandomGraphTClosureStatistic(TClosureStatistic):
         """
         return self._m1(**kwargs)
 
-    def _heterogeneous_m1(
-        self,
-        *,
-        batch_size: int | None = None,
-        **kwargs: Any,  # noqa
-    ) -> Reals:
+    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
         """Compute t-closure for a heterogeneous undirected random graph.
 
         Examples
@@ -76,4 +76,4 @@ class UndirectedRandomGraphTClosureStatistic(TClosureStatistic):
         >>> jnp.allclose(tc, tclosure[vids]).item()
         True
         """
-        return self._m1(batch_size=batch_size, **kwargs)
+        return self._m1(**kwargs)

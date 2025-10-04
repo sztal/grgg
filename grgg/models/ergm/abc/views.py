@@ -9,11 +9,13 @@ import jax.numpy as jnp
 from grgg._typing import Integers, IntVector
 from grgg.models.abc import AbstractModelView, AbstractParameter, AbstractParameters
 from grgg.statistics import (
-    DegreeStatistic,
-    QClosureStatistic,
-    QClusteringStatistic,
-    TClosureStatistic,
-    TClusteringStatistic,
+    Degree,
+    QClosure,
+    QClustering,
+    StructuralComplementarity,
+    StructuralSimilarity,
+    TClosure,
+    TClustering,
 )
 from grgg.utils.indexing import CartesianCoordinates, IndexArg, Shaped
 
@@ -158,9 +160,9 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         """Reset the view."""
         return self.replace(_index=None)
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         """Check equality with another view."""
-        return super().equals(other) and _indices_equal(self._index, other._index)
+        return super()._equals(other) and _indices_equal(self._index, other._index)
 
     def _index_input(
         self, index: IndexArg | tuple[IndexArg, ...] | None
@@ -254,29 +256,39 @@ class AbstractErgmNodeView[T, MV](AbstractErgmView[T, MV]):
     # Statistics ---------------------------------------------------------------------
 
     @property
-    def degree(self) -> DegreeStatistic:
+    def degree(self) -> Degree:
         """Degree statistic for the nodes in the view."""
-        return DegreeStatistic.from_module(self)
+        return Degree.from_module(self)
 
     @property
-    def tclust(self) -> TClusteringStatistic:
+    def tclust(self) -> TClustering:
         """Triangle clustering statistic for the nodes in the view."""
-        return TClusteringStatistic.from_module(self)
+        return TClustering.from_module(self)
 
     @property
-    def tclosure(self) -> TClosureStatistic:
+    def tclosure(self) -> TClosure:
         """Triangle closure statistic for the nodes in the view."""
-        return TClosureStatistic.from_module(self)
+        return TClosure.from_module(self)
 
     @property
-    def qclust(self) -> QClusteringStatistic:
+    def similarity(self) -> StructuralSimilarity:
+        """Structural similarity statistic for the nodes in the view."""
+        return StructuralSimilarity.from_module(self)
+
+    @property
+    def qclust(self) -> QClustering:
         """Quadrangle clustering statistic for the nodes in the view."""
-        return QClusteringStatistic.from_module(self)
+        return QClustering.from_module(self)
 
     @property
-    def qclosure(self) -> QClosureStatistic:
+    def qclosure(self) -> QClosure:
         """Quadrangle closure statistic for the nodes in the view."""
-        return QClosureStatistic.from_module(self)
+        return QClosure.from_module(self)
+
+    @property
+    def complementarity(self) -> StructuralComplementarity:
+        """Complementarity statistic for the nodes in the view."""
+        return StructuralComplementarity.from_module(self)
 
 
 class AbstractErgmNodePairView[T, ME](AbstractErgmView[T, ME]):

@@ -260,10 +260,10 @@ class GRGG(AbstractUndirectedRandomGraph, Sequence[Self]):
             return ParameterGroups(groups, weights=self.quantizer.counts)
         return ParameterGroups(groups)
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         """Check if two models are equal."""
         return (
-            super().equals(other)
+            super()._equals(other)
             and self.n_nodes == other.n_nodes
             and self.manifold.equals(other.manifold)
             and self.probability.equals(other.probability)

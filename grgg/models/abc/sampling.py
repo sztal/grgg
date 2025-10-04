@@ -25,5 +25,5 @@ class AbstractModelSampler[T](AbstractModelModule[T]):
     def sample(self, *args: Any, **kwargs: Any) -> T:
         """Sample from the model."""
 
-    def equals(self, other: object) -> bool:
-        return super().equals(other) and self.model.equals(other.model)
+    def _equals(self, other: object) -> bool:
+        return super()._equals(other) and self.model.equals(other.model)

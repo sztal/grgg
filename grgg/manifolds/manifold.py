@@ -42,9 +42,9 @@ class ManifoldComputeNamespace(AbstractModule):
     distance_density: ManifoldDistanceDensityFunction
     cosine_law: ManifoldCosineLawFunction
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         return (
-            super().equals(other)
+            super()._equals(other)
             and self.volume.equals(other.volume)
             and self.metric.equals(other.metric)
             and self.distance_density.equals(other.distance_density)
@@ -122,9 +122,9 @@ class Manifold(AbstractModule):
         """Create a manifold instance with the specified volume."""
 
     @abstractmethod
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         return (
-            super().equals(other)
+            super()._equals(other)
             and self.dim == other.dim
             and self.compute.equals(other.compute)
         )

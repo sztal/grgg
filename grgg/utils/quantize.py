@@ -152,9 +152,9 @@ class ArrayQuantizer(AbstractModule):
         inverse = split_by(index, codes[order])
         return cls(codebook, codes, inverse, shape[1:])
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         return (
-            super().equals(other)
+            super()._equals(other)
             and jnp.array_equal(self.codebook, other.codebook)
             and all(
                 jnp.array_equal(a, b)

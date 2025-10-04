@@ -1,18 +1,23 @@
 from typing import Any
 
 from grgg._typing import Reals
-from grgg.statistics import QClosureStatistic
+from grgg.statistics import QClosure
 
 
-class UndirectedRandomGraphQClosureStatistic(QClosureStatistic):
-    """Degree statistic for undirected random graphs."""
+class UndirectedRandomGraphQClosure(QClosure):
+    """Quadrangle closure statistic for undirected random graphs."""
+
+    @staticmethod
+    def m1_from_motifs(quadrangles: Reals, qheads: Reals) -> Reals:
+        """Compute the first moment of the statistic from motifs counts."""
+        return 2 * quadrangles / qheads
 
     def _m1(self, **kwargs: Any) -> Reals:
         """Compute the first moment of the statistic."""
-        kw1, kw2 = self.split_compute_kwargs(**kwargs)
+        kw1, kw2 = self.split_compute_kwargs(same_seed=True, **kwargs)
         quadrangles = self.nodes.motifs.quadrangle(**kw1)
         qheads = self.nodes.motifs.qhead(**kw2)
-        return 2 * quadrangles / qheads
+        return self.m1_from_motifs(quadrangles, qheads)
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
         """Compute q-closure for a homogeneous undirected random graph.
@@ -41,12 +46,7 @@ class UndirectedRandomGraphQClosureStatistic(QClosureStatistic):
         """
         return self._m1(**kwargs)
 
-    def _heterogeneous_m1(
-        self,
-        *,
-        batch_size: int | None = None,
-        **kwargs: Any,  # noqa
-    ) -> Reals:
+    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
         """Compute q-closure for a heterogeneous undirected random graph.
 
         Examples
@@ -76,4 +76,4 @@ class UndirectedRandomGraphQClosureStatistic(QClosureStatistic):
         >>> jnp.allclose(qc, qclosure[vids]).item()
         True
         """
-        return self._m1(batch_size=batch_size, **kwargs)
+        return self._m1(**kwargs)

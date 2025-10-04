@@ -1,18 +1,23 @@
 from typing import Any
 
 from grgg._typing import Reals
-from grgg.statistics import TClusteringStatistic
+from grgg.statistics import TClustering
 
 
-class UndirectedRandomGraphTClusteringStatistic(TClusteringStatistic):
-    """Degree statistic for undirected random graphs."""
+class UndirectedRandomGraphTClustering(TClustering):
+    """Triangle clustering statistic for undirected random graphs."""
+
+    @staticmethod
+    def m1_from_motifs(triangles: Reals, twedges: Reals) -> Reals:
+        """Compute the first moment of the statistic from motifs counts."""
+        return 2 * triangles / twedges
 
     def _m1(self, **kwargs: Any) -> Reals:
         """Compute the first moment of the statistic."""
-        kw1, kw2 = self.split_compute_kwargs(**kwargs)
+        kw1, kw2 = self.split_compute_kwargs(same_seed=True, **kwargs)
         triangles = self.nodes.motifs.triangle(**kw1)
         twedges = self.nodes.motifs.twedge(**kw2)
-        return 2 * triangles / twedges
+        return self.m1_from_motifs(triangles, twedges)
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
         """Compute t-clustering for a homogeneous undirected random graph.
@@ -41,12 +46,7 @@ class UndirectedRandomGraphTClusteringStatistic(TClusteringStatistic):
         """
         return self._m1()
 
-    def _heterogeneous_m1(
-        self,
-        *,
-        batch_size: int | None = None,
-        **kwargs: Any,  # noqa
-    ) -> Reals:
+    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
         """Compute t-clustering for a heterogeneous undirected random graph.
 
         Examples
@@ -75,4 +75,4 @@ class UndirectedRandomGraphTClusteringStatistic(TClusteringStatistic):
         >>> jnp.allclose(tc, tclust[vids]).item()
         True
         """
-        return self._m1(batch_size=batch_size, **kwargs)
+        return self._m1(**kwargs)

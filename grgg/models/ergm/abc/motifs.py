@@ -4,12 +4,12 @@ import equinox as eqx
 
 from grgg.abc import AbstractModule
 from grgg.statistics.motifs import (
-    QHeadMotifStatistic,
-    QuadrangleMotifStatistic,
-    QWedgeMotifStatistic,
-    THeadMotifStatistic,
-    TriangleMotifStatistic,
-    TWedgeMotifStatistic,
+    QHeadMotif,
+    QuadrangleMotif,
+    QWedgeMotif,
+    THeadMotif,
+    TriangleMotif,
+    TWedgeMotif,
 )
 
 if TYPE_CHECKING:
@@ -34,8 +34,8 @@ class AbstractErgmMotifs[U](AbstractModule):
         """The model the motifs are computed for."""
         return self.view.model
 
-    def equals(self, other: object) -> bool:
-        return super().equals(other) and self.view.equals(other.view)
+    def _equals(self, other: object) -> bool:
+        return super()._equals(other) and self.view.equals(other.view)
 
 
 class AbstractErgmNodeMotifs[V](AbstractErgmMotifs[V]):
@@ -49,34 +49,34 @@ class AbstractErgmNodeMotifs[V](AbstractErgmMotifs[V]):
         return self.view
 
     @property
-    def triangle(self) -> TriangleMotifStatistic:
+    def triangle(self) -> TriangleMotif:
         """Triangle motif statistic for the nodes in the view."""
-        return TriangleMotifStatistic.from_module(self)
+        return TriangleMotif.from_module(self)
 
     @property
-    def twedge(self) -> TWedgeMotifStatistic:
+    def twedge(self) -> TWedgeMotif:
         """Triangle wedge motif statistic for the nodes in the view."""
-        return TWedgeMotifStatistic.from_module(self)
+        return TWedgeMotif.from_module(self)
 
     @property
-    def thead(self) -> THeadMotifStatistic:
+    def thead(self) -> THeadMotif:
         """Triangle head motif statistic for the nodes in the view."""
-        return THeadMotifStatistic.from_module(self)
+        return THeadMotif.from_module(self)
 
     @property
-    def quadrangle(self) -> QuadrangleMotifStatistic:
+    def quadrangle(self) -> QuadrangleMotif:
         """Quadrangle motif statistic for the nodes in the view."""
-        return QuadrangleMotifStatistic.from_module(self)
+        return QuadrangleMotif.from_module(self)
 
     @property
-    def qwedge(self) -> QWedgeMotifStatistic:
+    def qwedge(self) -> QWedgeMotif:
         """Quadrangle wedge motif statistic for the nodes in the view."""
-        return QWedgeMotifStatistic.from_module(self)
+        return QWedgeMotif.from_module(self)
 
     @property
-    def qhead(self) -> QHeadMotifStatistic:
+    def qhead(self) -> QHeadMotif:
         """Quadrangle head motif statistic for the nodes in the view."""
-        return QHeadMotifStatistic.from_module(self)
+        return QHeadMotif.from_module(self)
 
 
 class AbstractErgmNodePairMotifs[E](AbstractErgmMotifs[E]):

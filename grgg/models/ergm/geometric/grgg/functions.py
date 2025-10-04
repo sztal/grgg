@@ -78,9 +78,9 @@ class CouplingFunction(AbstractFunction):
             theta += const
         return theta
 
-    def equals(self, other: object) -> bool:
+    def _equals(self, other: object) -> bool:
         return (
-            super().equals(other)
+            super()._equals(other)
             and self.dim == other.dim
             and self.modified == other.modified
         )
@@ -167,5 +167,5 @@ class ProbabilityFunction(AbstractFunction):
         p = jax.scipy.special.expit(-theta)
         return jnp.where(jnp.isnan(p), 0.5, p)  # Handle 0/0 case
 
-    def equals(self, other: object) -> bool:
-        return super().equals(other) and self.coupling.equals(other.coupling)
+    def _equals(self, other: object) -> bool:
+        return super()._equals(other) and self.coupling.equals(other.coupling)

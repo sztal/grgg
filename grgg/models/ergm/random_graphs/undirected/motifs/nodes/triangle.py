@@ -4,11 +4,11 @@ import jax
 import jax.numpy as jnp
 
 from grgg._typing import Integer, Real, Reals
-from grgg.statistics.motifs import TriangleMotifStatistic
+from grgg.statistics.motifs import TriangleMotif
 from grgg.utils.compute import MapReduce
 
 
-class UndirectedRandomGraphTriangleMotifStatistic(TriangleMotifStatistic):
+class UndirectedRandomGraphTriangleMotif(TriangleMotif):
     """Triangle motif statistic for undirected random graphs."""
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
@@ -17,17 +17,15 @@ class UndirectedRandomGraphTriangleMotifStatistic(TriangleMotifStatistic):
         p = self.model.pairs.probs()
         return (n - 1) * (n - 2) * p**3 / 2
 
-    def _heterogeneous_m1(
-        self,
-        *,
-        batch_size: int | None = None,
-        **kwargs: Any,  # noqa
-    ) -> Reals:
+    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
         """Triangle count implementation for heterogeneous undirected random graphs."""
-        batch_size = self.model._get_batch_size(batch_size)
         n = self.model.n_nodes
         vids = jnp.arange(n)
-        use_sampling, key, mr_kwargs, _ = self.prepare_compute_kwargs(**kwargs)
+        rng, mr_kwargs, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
+        weights = self.importance_weights
+        # Computations with inner loops must pass the explicit key
+        # other wise jax gets confused
+        key = rng.key if rng is not None else None
 
         @jax.jit
         def sum_k(i: Integer, j: Integer) -> Real:
@@ -39,18 +37,16 @@ class UndirectedRandomGraphTriangleMotifStatistic(TriangleMotifStatistic):
         @jax.jit
         def sum_j(i: Integer) -> Real:
             """Sum over j of p_ij * sum_k(p_ik * p_jk)."""
-            key_k = jax.random.fold_in(key, i) if use_sampling else None
+            key_j = jax.random.fold_in(key, i) if self.use_sampling else None
+            v = jnp.delete(vids, i, assume_unique_indices=True)
+            w = weights[v] if self.use_sampling else None
 
-            @MapReduce(rng=key_k, **mr_kwargs)
+            @MapReduce(rng=key_j, p=w, **mr_kwargs)
             def compute(j: Integer) -> Real:
-                return jax.lax.cond(
-                    j == i,
-                    lambda: 0.0,
-                    lambda: (self.model.pairs[i, j].probs() * sum_k(i, j)),
-                )
+                return self.model.pairs[i, j].probs() * sum_k(i, j)
 
-            return compute(vids)
+            return compute(v)
 
         indices = self.nodes.coords[0].flatten()
-        triangles = jax.vmap(sum_j)(indices)
+        triangles = jax.lax.map(sum_j, indices, **loop_kwargs)
         return triangles / 2

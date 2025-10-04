@@ -58,8 +58,8 @@ class GeometricSampler(AbstractModelSampler):
             errmsg = f"'{cn}' requires the model to be geometric"
             raise TypeError(errmsg)
 
-    def equals(self, other: object) -> bool:
-        return super().equals(other) and self.nodes.equals(other.nodes)
+    def _equals(self, other: object) -> bool:
+        return super()._equals(other) and self.nodes.equals(other.nodes)
 
     def sample(
         self, points: jnp.ndarray | None = None, **kwargs: Any
