@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, Any, Self, TypeVar
 
 import jax.numpy as jnp
 
-from grgg.utils.indexing import IndexArg
+from grgg.utils.indexing import IndexArgT
 
 from .modules import AbstractModelModule
 
@@ -25,11 +25,11 @@ class AbstractModelView[T](AbstractModelModule[T]):
 
     @property
     @abstractmethod
-    def _default_index(self) -> IndexArg | tuple[IndexArg, ...]:
+    def _default_index(self) -> IndexArgT | tuple[IndexArgT, ...]:
         """Default index for the view."""
 
     @abstractmethod
-    def __getitem__(self, args: IndexArg | tuple[IndexArg, ...]) -> Self:
+    def __getitem__(self, args: IndexArgT | tuple[IndexArgT, ...]) -> Self:
         """Indexing method."""
 
     @abstractmethod

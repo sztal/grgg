@@ -9,12 +9,11 @@ from typing import Self
 import equinox as eqx
 import jax.numpy as jnp
 from jax import lax
-import numpy as np
 from grgg.abc import AbstractModule
 
 __all__ = ("MultiIndexRavel", "IndexableShape", "CartesianCoordinates")
 
-IndexArg = int | slice | EllipsisType | Sequence[int] | jnp.ndarray | np.ndarray
+IndexArgT = int | slice | EllipsisType | Sequence[int] | jnp.ndarray
 
 
 class Shaped(AbstractModule):
@@ -57,15 +56,15 @@ class ShapedIndexExpression(Shaped):
 
     def __getitem__(
         self,
-        args: IndexArg | tuple[IndexArg, ...],
-    ) -> tuple[IndexArg, ...]:
+        args: IndexArgT | tuple[IndexArgT, ...],
+    ) -> tuple[IndexArgT, ...]:
         # ruff: noqa
         if not isinstance(args, tuple):
             args = (args,)
         args = self._handle_ellipses(args)
         if (
             len(args) == 1
-            and isinstance(args[0], jnp.ndarray | np.ndarray)
+            and isinstance(args[0], jnp.ndarray)
             and args[0].shape == self.shape
         ):
             return args[0].nonzero()
@@ -97,15 +96,15 @@ class ShapedIndexExpression(Shaped):
                         )
                         raise IndexError(errmsg)
                     a = a.nonzero()
-                elif not np.issubdtype(a.dtype, np.integer):
+                elif not jnp.issubdtype(a.dtype, jnp.integer):
                     errmsg = f"invalid index type '{a.dtype}'"
                     raise IndexError(errmsg)
             parsed.extend(a) if isinstance(a, tuple) else parsed.append(a)
         return tuple(parsed)
 
     def _handle_scalar(self, a: int, n: int) -> int:
-        if not isinstance(a, int | jnp.integer | np.integer) and not (
-            isinstance(a, jnp.ndarray | np.ndarray) and jnp.isscalar(a)
+        if not isinstance(a, int | jnp.integer) and not (
+            isinstance(a, jnp.ndarray) and jnp.isscalar(a)
         ):
             errmsg = f"expected integer index, got '{type(a)}'"
             raise TypeError(errmsg)
@@ -115,7 +114,7 @@ class ShapedIndexExpression(Shaped):
         #     raise IndexError(errmsg)
         return a
 
-    def _handle_ellipses(self, args: tuple[IndexArg, ...]) -> tuple[IndexArg, ...]:
+    def _handle_ellipses(self, args: tuple[IndexArgT, ...]) -> tuple[IndexArgT, ...]:
         if args is Ellipsis:
             return self[(slice(None),) * self.ndim]
         if not isinstance(args, tuple):
@@ -136,7 +135,7 @@ class ShapedIndexExpression(Shaped):
             pass
         return args
 
-    def _with_newaxes(self, args: tuple[IndexArg, ...]) -> Self:
+    def _with_newaxes(self, args: tuple[IndexArgT, ...]) -> Self:
         """Return a new ShapedIndexExpression with new axes added.
 
         Parameters
@@ -174,7 +173,7 @@ class ShapedIndexExpression(Shaped):
             raise IndexError(errmsg)
         return shape_exp
 
-    def _is_advanced_indexing_contiguous(self, args: tuple[IndexArg, ...]) -> bool:
+    def _is_advanced_indexing_contiguous(self, args: tuple[IndexArgT, ...]) -> bool:
         """Check if advanced indexing in args is contiguous.
 
         Parameters
@@ -285,14 +284,14 @@ class IndexableShape(Shaped):
         """Shape of the array-like object."""
         return self.index_expr.shape
 
-    def __getitem__(self, args: IndexArg | tuple[IndexArg, ...]) -> tuple[int, ...]:
+    def __getitem__(self, args: IndexArgT | tuple[IndexArgT, ...]) -> tuple[int, ...]:
         if not isinstance(args, tuple):
             args = (args,)
         if not args or len(args) == 1 and args[0] is Ellipsis:
             return self.shape
-        if len(args) == 1 and isinstance(args[0], jnp.ndarray | np.ndarray):
+        if len(args) == 1 and isinstance(args[0], jnp.ndarray):
             dtype = args[0].dtype
-            if jnp.issubdtype(dtype, jnp.bool) or np.issubdtype(dtype, bool):
+            if jnp.issubdtype(dtype, jnp.bool):
                 return self[args[0].nonzero()]
         args = self.index_expr[args]
         shape = self.index_expr._with_newaxes(args).shape
@@ -333,8 +332,8 @@ class IndexableShape(Shaped):
         return sum(broadcasted_shapes, start=())
 
     def _split_into_basic_and_advanced(
-        self, args: tuple[IndexArg, ...]
-    ) -> tuple[tuple[IndexArg, ...], tuple[IndexArg, ...]]:
+        self, args: tuple[IndexArgT, ...]
+    ) -> tuple[tuple[IndexArgT, ...], tuple[IndexArgT, ...]]:
         basic = []
         advanced = []
         for a in args:
@@ -397,7 +396,7 @@ class CartesianCoordinates(Shaped):
         return self.index
 
     def __getitem__(
-        self, args: IndexArg | tuple[IndexArg, ...]
+        self, args: IndexArgT | tuple[IndexArgT, ...]
     ) -> tuple[jnp.ndarray, ...]:
         args = self.index_expr[args]
         # Broadcast advanced indices
@@ -559,7 +558,7 @@ class MultiIndexRavel(Shaped):
         return CartesianCoordinates(self.index)
 
     def __getitem__(
-        self, args: IndexArg | tuple[IndexArg, ...]
+        self, args: IndexArgT | tuple[IndexArgT, ...]
     ) -> tuple[jnp.ndarray, ...]:
         if not isinstance(args, tuple):
             args = (args,)

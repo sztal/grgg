@@ -16,16 +16,12 @@ class UndirectedRandomGraphTStatistics(TStatistics):
     @staticmethod
     def m1_from_motifs(triangles: Reals, twedges: Reals, theads: Reals) -> Reals:
         """Compute the first moment of the statistic from motifs counts."""
-        tclust = UndirectedRandomGraphTClustering.m1_from_motifs(
-            triangles, twedges, theads
-        )
-        tclosure = UndirectedRandomGraphTClosure.m1_from_motifs(
-            triangles, twedges, theads
-        )
+        tclust = UndirectedRandomGraphTClustering.m1_from_motifs(triangles, twedges)
+        tclosure = UndirectedRandomGraphTClosure.m1_from_motifs(triangles, theads)
         similarity = UndirectedRandomGraphStructuralSimilarity.m1_from_motifs(
             triangles, twedges, theads
         )
-        return jnp.stack([tclust, tclosure, similarity], axis=-1)
+        return jnp.stack([tclust, tclosure, similarity])
 
     def _m1(self, **kwargs: Any) -> Reals:
         """Compute the first moment of the statistic."""

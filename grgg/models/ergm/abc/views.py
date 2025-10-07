@@ -12,12 +12,14 @@ from grgg.statistics import (
     Degree,
     QClosure,
     QClustering,
+    QStatistics,
     StructuralComplementarity,
     StructuralSimilarity,
     TClosure,
     TClustering,
+    TStatistics,
 )
-from grgg.utils.indexing import CartesianCoordinates, IndexArg, Shaped
+from grgg.utils.indexing import CartesianCoordinates, IndexArgT, Shaped
 
 from .motifs import (
     AbstractErgmMotifs,
@@ -46,7 +48,9 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
 
     model: eqx.AbstractVar[T]
     _coords: CartesianCoordinates = eqx.field(repr=False, init=False)
-    _index: IndexArg | tuple[IndexArg, ...] | None = eqx.field(static=False, repr=False)
+    _index: IndexArgT | tuple[IndexArgT, ...] | None = eqx.field(
+        static=False, repr=False
+    )
 
     motifs_cls: eqx.AbstractClassVar[type[M]]
 
@@ -54,7 +58,7 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         self,
         model: T,
         *,
-        _index: IndexArg | tuple[IndexArg, ...] | None = None,
+        _index: IndexArgT | tuple[IndexArgT, ...] | None = None,
     ) -> None:
         self.model = model
         self._index = self._index_input(_index)
@@ -86,7 +90,7 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         raise IndexError(errmsg)
 
     @property
-    def _default_index(self) -> IndexArg | tuple[IndexArg, ...]:
+    def _default_index(self) -> IndexArgT | tuple[IndexArgT, ...]:
         if self.model.is_homogeneous:
             return self._index_input(self._default_homogeneous_index)
         return self._index_input(self._default_heterogeneous_index)
@@ -134,7 +138,7 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         return self.motifs_cls(self)
 
     @property
-    def index(self) -> IndexArg | tuple[IndexArg, ...]:
+    def index(self) -> IndexArgT | tuple[IndexArgT, ...]:
         """Current index or default index if 'None' is set."""
         return self._index if self._index is not None else self._default_index
 
@@ -165,13 +169,15 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         return super()._equals(other) and _indices_equal(self._index, other._index)
 
     def _index_input(
-        self, index: IndexArg | tuple[IndexArg, ...] | None
-    ) -> IndexArg | tuple[IndexArg, ...] | None:
+        self, index: IndexArgT | tuple[IndexArgT, ...] | None
+    ) -> IndexArgT | tuple[IndexArgT, ...] | None:
         """Process input index."""
         if index is None:
             return None
         if index is Ellipsis:
             index = ()
+        if jnp.isscalar(index):
+            index = jnp.array(index)
         _index = index if isinstance(index, tuple) else (index,)
         return _index
 
@@ -290,6 +296,16 @@ class AbstractErgmNodeView[T, MV](AbstractErgmView[T, MV]):
         """Complementarity statistic for the nodes in the view."""
         return StructuralComplementarity.from_module(self)
 
+    @property
+    def tstats(self) -> jnp.ndarray:
+        """Triangle statistics for the nodes in the view."""
+        return TStatistics.from_module(self)
+
+    @property
+    def qstats(self) -> jnp.ndarray:
+        """Quadrangle statistics for the nodes in the view."""
+        return QStatistics.from_module(self)
+
 
 class AbstractErgmNodePairView[T, ME](AbstractErgmView[T, ME]):
     """Abstract base class for node pair views."""
@@ -340,8 +356,8 @@ class AbstractErgmNodePairView[T, ME](AbstractErgmView[T, ME]):
 
 
 def _indices_equal(
-    a: IndexArg | tuple[IndexArg, ...] | None,
-    b: IndexArg | tuple[IndexArg, ...] | None,
+    a: IndexArgT | tuple[IndexArgT, ...] | None,
+    b: IndexArgT | tuple[IndexArgT, ...] | None,
 ) -> bool:
     if a is None and b is None:
         return True

@@ -36,12 +36,7 @@ class UndirectedRandomGraphDegreeStatistic(Degree):
         """
         return self.model.pairs.probs() * (self.model.n_nodes - 1)
 
-    def _heterogeneous_m1(
-        self,
-        *,
-        batch_size: int | None = None,
-        **kwargs: Any,  # noqa
-    ) -> Reals:
+    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
         """Expected degree for heterogeneous undirected random graph models.
 
         Examples
@@ -66,7 +61,7 @@ class UndirectedRandomGraphDegreeStatistic(Degree):
         >>> jnp.allclose(D, K[vids], rtol=1e-1).item()
         True
         """
-        batch_size = self.model._get_batch_size(batch_size)
+        *_, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
         indices = self.nodes.coords
         f = jax.jit(lambda i: self.model.pairs[i].probs().sum())
-        return jax.lax.map(f, indices, batch_size=batch_size)
+        return jax.lax.map(f, indices, **loop_kwargs)

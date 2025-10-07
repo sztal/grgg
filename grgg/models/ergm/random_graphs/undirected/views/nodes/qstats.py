@@ -14,26 +14,22 @@ class UndirectedRandomGraphQStatistics(QStatistics):
     """Quadrangle-based statistic for undirected random graphs."""
 
     @staticmethod
-    def m1_from_motifs(quadrangles: Reals, fwedges: Reals, fheads: Reals) -> Reals:
+    def m1_from_motifs(quadrangles: Reals, qwedges: Reals, qheads: Reals) -> Reals:
         """Compute the first moment of the statistic from motifs counts."""
-        qclust = UndirectedRandomGraphQClustering.m1_from_motifs(
-            quadrangles, fwedges, fheads
-        )
-        qclosure = UndirectedRandomGraphQClosure.m1_from_motifs(
-            quadrangles, fwedges, fheads
-        )
+        qclust = UndirectedRandomGraphQClustering.m1_from_motifs(quadrangles, qwedges)
+        qclosure = UndirectedRandomGraphQClosure.m1_from_motifs(quadrangles, qheads)
         complementarity = UndirectedRandomGraphStructuralComplementarity.m1_from_motifs(
-            quadrangles, fwedges, fheads
+            quadrangles, qwedges, qheads
         )
-        return jnp.stack([qclust, qclosure, complementarity], axis=-1)
+        return jnp.stack([qclust, qclosure, complementarity])
 
     def _m1(self, **kwargs: Any) -> Reals:
         """Compute the first moment of the statistic."""
         kw1, kw2, kw3 = self.split_compute_kwargs(3, same_seed=True, **kwargs)
         quadrangles = self.nodes.motifs.quadrangle(**kw1)
-        fwedges = self.nodes.motifs.fwedge(**kw2)
-        fheads = self.nodes.motifs.fhead(**kw3)
-        return self.m1_from_motifs(quadrangles, fwedges, fheads)
+        qwedges = self.nodes.motifs.qwedge(**kw2)
+        qheads = self.nodes.motifs.qhead(**kw3)
+        return self.m1_from_motifs(quadrangles, qwedges, qheads)
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:
         return self._m1(**kwargs)

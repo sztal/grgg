@@ -11,7 +11,7 @@ __all__ = ("UndirectedRandomGraphParameters",)
 class UndirectedRandomGraphParameters(AbstractParameters):
     """Parameters for undirected random graph models."""
 
-    params: tuple[Mu] = eqx.field(default_factory=lambda: (Mu(),))
+    parameters: tuple[Mu] = eqx.field(default_factory=lambda: (Mu(),))
     definition: ClassVar[tuple[type[Mu]]] = (Mu,)
 
     def _check_names(self) -> None:

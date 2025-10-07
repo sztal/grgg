@@ -122,7 +122,7 @@ def _sample_diag(
     rng: RandomGenerator,
 ) -> tuple[IntVector, IntVector, BoolVector]:
     """Sample edges for the diagonal block."""
-    i, j = np.triu_indices(batch_size, k=1)
+    i, j = jnp.triu_indices(batch_size, k=1)
     i += s
     j += s
     p = sampler.model.pairs[i, j].probs()

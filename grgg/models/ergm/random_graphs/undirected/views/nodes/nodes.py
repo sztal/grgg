@@ -10,19 +10,23 @@ from grgg.statistics import (
     Degree,
     QClosure,
     QClustering,
+    QStatistics,
     StructuralComplementarity,
     StructuralSimilarity,
     TClosure,
     TClustering,
+    TStatistics,
 )
 
 from .complementarity import UndirectedRandomGraphStructuralComplementarity
 from .degree import UndirectedRandomGraphDegreeStatistic
 from .qclosure import UndirectedRandomGraphQClosure
 from .qclust import UndirectedRandomGraphQClustering
+from .qstats import UndirectedRandomGraphQStatistics
 from .similarity import UndirectedRandomGraphStructuralSimilarity
 from .tclosure import UndirectedRandomGraphTClosure
 from .tclust import UndirectedRandomGraphTClustering
+from .tstats import UndirectedRandomGraphTStatistics
 
 if TYPE_CHECKING:
     from grgg.models.ergm.random_graphs.undirected.model import UndirectedRandomGraph
@@ -84,6 +88,15 @@ def _(
     return UndirectedRandomGraphStructuralSimilarity(nodes)
 
 
+@TStatistics.from_module.register
+@classmethod
+def _(
+    cls,  # noqa
+    nodes: UndirectedRandomGraphNodeView,  # noqa
+) -> UndirectedRandomGraphTStatistics:
+    return UndirectedRandomGraphTStatistics(nodes)
+
+
 @QClustering.from_module.register
 @classmethod
 def _(
@@ -109,3 +122,12 @@ def _(
     nodes: UndirectedRandomGraphNodeView,  # noqa
 ) -> UndirectedRandomGraphStructuralComplementarity:
     return UndirectedRandomGraphStructuralComplementarity(nodes)
+
+
+@QStatistics.from_module.register
+@classmethod
+def _(
+    cls,  # noqa
+    nodes: UndirectedRandomGraphNodeView,  # noqa
+) -> UndirectedRandomGraphQStatistics:
+    return UndirectedRandomGraphQStatistics(nodes)

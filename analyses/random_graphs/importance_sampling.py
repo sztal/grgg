@@ -81,16 +81,17 @@ theme(
 )
 rng = RandomGenerator(303)  # Random generator with a fixed seed for reproducibility
 
+N_REPS = 5  # Number of repetitions for sampling-based estimators
+
 FIGS = paths.figures / "random_graphs" / "importance-sampling"
 FIGS.mkdir(parents=True, exist_ok=True)
 
 
-def define_stat(n, func):
+def define_stat(func):
     def compute_stats(n_samples=-1, *args, n_reps=1, **kwargs):
-        output = jnp.empty((n_reps, n))
-        for i in range(n_reps):
-            result = func(*args, n_samples=n_samples, **kwargs)
-            output = output.at[i].set(result)
+        output = jnp.stack(
+            [func(*args, n_samples=n_samples, **kwargs) for _ in range(n_reps)]
+        )
         return output
 
     return compute_stats
@@ -586,7 +587,10 @@ fig.savefig(FIGS / "motifs-1000-high-degree-heterogeneous.pdf")
 
 n = 100
 n_samples_grid = [1, 10, 20, 50, 90]
-statistics = ["tclust", "tclosure", "qclust", "qclosure"]
+statgroups = {
+    "tstats": ["tclust", "tclosure", "similarity"],
+    "qstats": ["qclust", "qclosure", "complementarity"],
+}
 
 # %% [markdown]
 # #### Low average degree, degree heterogeneity
@@ -598,12 +602,22 @@ model.nodes.degree().mean()
 
 # %% ---------------------------------------------------------------------------------
 
-statistics = {stat: define_stat(n, getattr(model.nodes, stat)) for stat in statistics}
-exact = {stat: f() for stat, f in statistics.items()}
-approx = {
-    stat: jnp.stack([f(n_samples=n_i, n_reps=5) for n_i in tqdm(n_samples_grid)])
-    for stat, f in statistics.items()
-}
+statistics = {stat: define_stat(getattr(model.nodes, stat)) for stat in statgroups}
+exact = {}
+for group, names in statgroups.items():
+    stats = statistics[group]()
+    for i, name in enumerate(names):
+        exact[name] = stats[..., i, :]
+approx = {}
+for group, names in statgroups.items():
+    stats = jnp.stack(
+        [
+            statistics[group](n_samples=n_i, n_reps=N_REPS)
+            for n_i in tqdm(n_samples_grid)
+        ]
+    )
+    for i, name in enumerate(names):
+        approx[name] = stats[..., i, :]
 
 # %% [markdown]
 #
@@ -611,13 +625,13 @@ approx = {
 # %% ---------------------------------------------------------------------------------
 
 fig, axes = plt.subplots(
-    nrows=len(statistics),
+    nrows=len(exact),
     ncols=len(n_samples_grid),
-    figsize=(10, 8),
+    figsize=(10, 12),
     sharex=False,
     sharey=False,
 )
-for stat, axrow in zip(statistics, axes, strict=True):
+for stat, axrow in zip(exact, axes, strict=True):
     E = exact[stat]
     axrow[0].set_ylabel(stat, fontsize="x-large")
     for n_samples, X, ax in zip(
@@ -646,7 +660,7 @@ for stat, axrow in zip(statistics, axes, strict=True):
 kbar = model.nodes.degree().mean()
 fig.text(
     0.12,
-    0.955,
+    0.97,
     rf"$n = {n}, \langle{{k}}\rangle \approx {kbar:.1f}$,"
     "\n"
     "degree-"
@@ -671,12 +685,22 @@ model.nodes.degree().mean()
 
 # %% ---------------------------------------------------------------------------------
 
-statistics = {stat: define_stat(n, getattr(model.nodes, stat)) for stat in statistics}
-exact = {stat: f() for stat, f in statistics.items()}
-approx = {
-    stat: jnp.stack([f(n_samples=n_i, n_reps=5) for n_i in tqdm(n_samples_grid)])
-    for stat, f in statistics.items()
-}
+statistics = {stat: define_stat(getattr(model.nodes, stat)) for stat in statgroups}
+exact = {}
+for group, names in statgroups.items():
+    stats = statistics[group]()
+    for i, name in enumerate(names):
+        exact[name] = stats[..., i, :]
+approx = {}
+for group, names in statgroups.items():
+    stats = jnp.stack(
+        [
+            statistics[group](n_samples=n_i, n_reps=N_REPS)
+            for n_i in tqdm(n_samples_grid)
+        ]
+    )
+    for i, name in enumerate(names):
+        approx[name] = stats[..., i, :]
 
 # %% [markdown]
 #
@@ -686,13 +710,13 @@ approx = {
 # %% ---------------------------------------------------------------------------------
 
 fig, axes = plt.subplots(
-    nrows=len(statistics),
+    nrows=len(exact),
     ncols=len(n_samples_grid),
-    figsize=(10, 8),
+    figsize=(10, 12),
     sharex=False,
     sharey=False,
 )
-for stat, axrow in zip(statistics, axes, strict=True):
+for stat, axrow in zip(exact, axes, strict=True):
     E = exact[stat]
     axrow[0].set_ylabel(stat, fontsize="x-large")
     for n_samples, X, ax in zip(
@@ -721,7 +745,7 @@ for stat, axrow in zip(statistics, axes, strict=True):
 kbar = model.nodes.degree().mean()
 fig.text(
     0.12,
-    0.955,
+    0.97,
     rf"$n = {n}, \langle{{k}}\rangle \approx {kbar:.1f}$,"
     "\n"
     "degree-"
@@ -743,7 +767,7 @@ fig.savefig(FIGS / "stats-100-high-degree-heterogeneous.pdf")
 
 n = 1000
 n_samples_grid = [1, 10, 20, 50, 100]
-statistics = ["tclust", "tclosure", "qclust", "qclosure"]
+statistics = ["tstats", "qstats"]
 
 # %% [markdown]
 # #### Low average degree, degree heterogeneity
@@ -755,12 +779,22 @@ model.nodes.degree().mean()
 
 # %% ---------------------------------------------------------------------------------
 
-statistics = {stat: define_stat(n, getattr(model.nodes, stat)) for stat in statistics}
-exact = {stat: f() for stat, f in statistics.items()}
-approx = {
-    stat: jnp.stack([f(n_samples=n_i, n_reps=5) for n_i in tqdm(n_samples_grid)])
-    for stat, f in statistics.items()
-}
+statistics = {stat: define_stat(getattr(model.nodes, stat)) for stat in statgroups}
+exact = {}
+for group, names in statgroups.items():
+    stats = statistics[group]()
+    for i, name in enumerate(names):
+        exact[name] = stats[..., i, :]
+approx = {}
+for group, names in statgroups.items():
+    stats = jnp.stack(
+        [
+            statistics[group](n_samples=n_i, n_reps=N_REPS)
+            for n_i in tqdm(n_samples_grid)
+        ]
+    )
+    for i, name in enumerate(names):
+        approx[name] = stats[..., i, :]
 
 # %% [markdown]
 #
@@ -770,13 +804,13 @@ approx = {
 # %% ---------------------------------------------------------------------------------
 
 fig, axes = plt.subplots(
-    nrows=len(statistics),
+    nrows=len(exact),
     ncols=len(n_samples_grid),
-    figsize=(10, 8),
+    figsize=(10, 12),
     sharex=False,
     sharey=False,
 )
-for stat, axrow in zip(statistics, axes, strict=True):
+for stat, axrow in zip(exact, axes, strict=True):
     E = exact[stat]
     axrow[0].set_ylabel(stat, fontsize="x-large")
     for n_samples, X, ax in zip(
@@ -805,7 +839,7 @@ for stat, axrow in zip(statistics, axes, strict=True):
 kbar = model.nodes.degree().mean()
 fig.text(
     0.12,
-    0.955,
+    0.97,
     rf"$n = {n}, \langle{{k}}\rangle \approx {kbar:.1f}$,"
     "\n"
     "degree-"
@@ -830,12 +864,22 @@ model.nodes.degree().mean()
 
 # %% ---------------------------------------------------------------------------------
 
-statistics = {stat: define_stat(n, getattr(model.nodes, stat)) for stat in statistics}
-exact = {stat: f() for stat, f in statistics.items()}
-approx = {
-    stat: jnp.stack([f(n_samples=n_i, n_reps=5) for n_i in tqdm(n_samples_grid)])
-    for stat, f in statistics.items()
-}
+statistics = {stat: define_stat(getattr(model.nodes, stat)) for stat in statgroups}
+exact = {}
+for group, names in statgroups.items():
+    stats = statistics[group]()
+    for i, name in enumerate(names):
+        exact[name] = stats[..., i, :]
+approx = {}
+for group, names in statgroups.items():
+    stats = jnp.stack(
+        [
+            statistics[group](n_samples=n_i, n_reps=N_REPS)
+            for n_i in tqdm(n_samples_grid)
+        ]
+    )
+    for i, name in enumerate(names):
+        approx[name] = stats[..., i, :]
 
 # %% [markdown]
 #
@@ -845,19 +889,19 @@ approx = {
 # %% ---------------------------------------------------------------------------------
 
 fig, axes = plt.subplots(
-    nrows=len(statistics),
+    nrows=len(exact),
     ncols=len(n_samples_grid),
-    figsize=(10, 8),
+    figsize=(10, 12),
     sharex=False,
     sharey=False,
 )
-for stat, axrow in zip(statistics, axes, strict=True):
+for stat, axrow in zip(exact, axes, strict=True):
     E = exact[stat]
     axrow[0].set_ylabel(stat, fontsize="x-large")
     for n_samples, X, ax in zip(
         n_samples_grid, approx[stat], axrow.flatten(), strict=True
     ):
-        e, x = (_.flatten() for _ in jnp.broadcast_arrays(E, X))
+        e, x = (x.flatten() for x in jnp.broadcast_arrays(E, X))
         # x = X.mean(0)
         # e = E.flatten()
         ax.scatter(e, x, alpha=0.2)
@@ -880,7 +924,7 @@ for stat, axrow in zip(statistics, axes, strict=True):
 kbar = model.nodes.degree().mean()
 fig.text(
     0.12,
-    0.955,
+    0.97,
     rf"$n = {n}, \langle{{k}}\rangle \approx {kbar:.1f}$,"
     "\n"
     "degree-"

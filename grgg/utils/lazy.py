@@ -10,9 +10,9 @@ from jaxtyping import DTypeLike
 
 from grgg._typing import Integers, RealVector
 
-from .indexing import CartesianCoordinates, IndexArg
+from .indexing import CartesianCoordinates, IndexArgT
 
-IndexCallableT = Callable[[IndexArg | tuple[IndexArg, ...]], jnp.ndarray]
+IndexCallableT = Callable[[IndexArgT | tuple[IndexArgT, ...]], jnp.ndarray]
 
 
 class LazyArray(eqx.Module):
