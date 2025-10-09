@@ -13,11 +13,6 @@ from grgg.abc import AbstractModule
 __all__ = ("RandomGenerator",)
 
 
-def is_prng_key(key: object) -> bool:
-    """Check if the input is a JAX PRNG key."""
-    return isinstance(key, jnp.ndarray) and isinstance(key.dtype, jax._src.prng.KeyTy)
-
-
 class RandomGenerator(AbstractModule):
     """Random generator compatible with :mod:`jax`.
 
@@ -93,6 +88,13 @@ class RandomGenerator(AbstractModule):
         return self.replace(key=sub_key)
 
     @classmethod
+    def is_prng_key(cls, key: object) -> bool:
+        """Check if the input is a JAX PRNG key."""
+        return isinstance(key, jnp.ndarray) and isinstance(
+            key.dtype, jax._src.prng.KeyTy
+        )
+
+    @classmethod
     def make_key(cls, key: jax.Array | int | Self | None = None) -> jax.Array:
         """Preprocess the input key.
 
@@ -109,7 +111,7 @@ class RandomGenerator(AbstractModule):
         if (
             jnp.isscalar(key)
             and not isinstance(key, jax._src.prng.PRNGKeyArray)
-            and not is_prng_key(key)
+            and not cls.is_prng_key(key)
         ):
             key = jax.random.key(key)
         return key

@@ -9,7 +9,31 @@ from grgg.utils.compute import MapReduce
 
 
 class UndirectedRandomGraphQuadrangleMotif(QuadrangleMotif):
-    """Quadrangle motif statistic for undirected random graphs."""
+    """Quadrangle motif statistic for undirected random graphs.
+
+    Examples
+    --------
+    Here we show that the importance sampling estimator for the quadrangle motif is
+    effective.
+    >>> import jax
+    >>> import jax.numpy as jnp
+    >>> from grgg import UndirectedRandomGraph, RandomGenerator
+    >>> n = 100
+    >>> rng = RandomGenerator(303)
+    >>> model = UndirectedRandomGraph(n, mu=rng.normal(n) - 3)
+    >>> Q_exact = model.nodes.motifs.quadrangle()
+    >>> Q_approx = model.nodes.motifs.quadrangle(n_samples=10, rng=rng)
+    >>>
+    >>> def error(X, Y):
+    ...     return jnp.linalg.norm(X - Y) / jnp.linalg.norm(X)
+    >>>
+    >>> err = error(Q_exact, Q_approx)
+    >>> (err < 0.25).item()
+    True
+    >>> cor = jnp.corrcoef(Q_exact, Q_approx)[0, 1]
+    >>> (cor > 0.95).item()
+    True
+    """
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
         """Quadrangle count for homogeneous undirected random graphs."""
@@ -21,11 +45,8 @@ class UndirectedRandomGraphQuadrangleMotif(QuadrangleMotif):
         """Quadrangle count for heterogeneous undirected random graphs."""
         n = self.model.n_nodes
         vids = jnp.arange(n)
-        rng, mr_kwargs, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
+        key, mr_kwargs, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
         weights = self.importance_weights
-        # Computations with inner loops must pass the explicit key
-        # other wise jax gets confused
-        key = rng.key if rng is not None else None
 
         @jax.jit
         def sum_l(i: Integer, j: Integer, k: Integer) -> Real:

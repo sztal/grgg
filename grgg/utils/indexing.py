@@ -1,639 +1,609 @@
-"""This module reverse-engineers Numpy-style indexing in an abstract array-free context
+"""This module reverse-engineers Numpy-style indexing in an abstract array-free manner
 to allow for lazy evaluation of indexing operations and indexed computations.
+
+Most importantly, all indexing operations are compatible with JAX transformations
+like JIT compilation, vectorization, and automatic differentiation.
+
+Examples
+--------
+>>> import jax
+>>> import jax.numpy as jnp
+>>> import equinox as eqx
+>>> from grgg.utils.indexing import IndexExpression
+>>> X = jnp.arange(3 * 5 * 6).reshape(3, 5, 6).astype(float)
+>>> expr = IndexExpression(X.shape)
+>>>
+>>> @eqx.filter_jit
+... def compute_sum(X, index):
+...     expr = IndexExpression(X.shape)
+...     return jnp.sum(X[index.coords])
+>>>
+>>> index = expr.dynamic[:5, [0, 2], 1]
+>>> compute_sum(X, index)
+Array(222., ...)
+>>> grad = jax.grad(compute_sum)(X, index)
+>>> grad.shape
+(3, 5, 6)
+>>> grad
+Array([[[0., 1., 0., 0., 0., 0.],
+        [0., 0., 0., 0., 0., 0.],
+        [0., 1., 0., 0., 0., 0.],
+        [0., 0., 0., 0., 0., 0.],
+        [0., 0., 0., 0., 0., 0.]],
+       [[0., 1., 0., 0., 0., 0.],
+        [0., 0., 0., 0., 0., 0.],
+        [0., 1., 0., 0., 0., 0.],
+        [0., 0., 0., 0., 0., 0.],
+        [0., 0., 0., 0., 0., 0.]],
+       [[0., 1., 0., 0., 0., 0.],
+        [0., 0., 0., 0., 0., 0.],
+        [0., 1., 0., 0., 0., 0.],
+        [0., 0., 0., 0., 0., 0.],
+        [0., 0., 0., 0., 0., 0.]]], ...)
+
+In general, arbitrary indexing is supported.
+>>> X = jnp.arange(3 * 5 * 6).reshape(3, 5, 6)
+>>> expr = IndexExpression(X.shape)
+>>> expr
+IndexExpression(3, 5, 6)
+>>> args = expr[:, 2, None, [0, 2], None]  # utility for generating index args
+>>> args
+(slice(0, 3, 1),
+    Array(2, ...),
+    None,
+    Array([0, 2], ...),
+    None)
+>>> index = expr.dynamic[args]
+>>> index
+DynamicIndex(DynamicSlice(0, 3, 1), 2, None, i32[2], None)
+>>> jnp.array_equal(X[args], X[index.coords]).item()
+True
+>>> args = expr[1, 4]
+>>> index = expr.dynamic[args]
+>>> jnp.array_equal(X[args], X[index.coords]).item()
+True
+>>> args = expr[..., 2, None, [0, 2]]
+>>> index = expr.dynamic[args]
+>>> jnp.array_equal(X[args], X[index.coords]).item()
+True
+>>> args = expr[jnp.ix_(jnp.array([1, 3]), jnp.array([0, 2]))]
+>>> index = expr.dynamic[args]
+>>> jnp.array_equal(X[args], X[index.coords]).item()
+True
+>>> args = expr[X > 10]
+>>> index = expr.dynamic[args]
+>>> jnp.array_equal(X[args], X[index.coords]).item()
+True
+>>> args = expr[[True, False, True], None, 1, [0, 3]]
+>>> index = expr.dynamic[args]
+>>> jnp.array_equal(X[args], X[index.coords]).item()
+True
+>>> args = expr[...]
+>>> index = expr.dynamic[args]
+>>> jnp.array_equal(X[args], X[index.coords]).item()
+True
+>>> args = expr[()]
+>>> index = expr.dynamic[args]
+>>> jnp.array_equal(X[args], X[index.coords]).item()
+True
 """
 import math
 from collections.abc import Sequence
 from types import EllipsisType
-from typing import Self
+from typing import Self, cast
 
 import equinox as eqx
 import jax.numpy as jnp
-from jax import lax
+
+from grgg._typing import Integers, IntVector
 from grgg.abc import AbstractModule
+from grgg.utils.misc import format_array
 
-__all__ = ("MultiIndexRavel", "IndexableShape", "CartesianCoordinates")
+__all__ = ("Shaped", "IndexExpression", "DynamicIndex", "DynamicSlice")
 
-IndexArgT = int | slice | EllipsisType | Sequence[int] | jnp.ndarray
+
+IndexArgT = slice | int | Integers | EllipsisType | None
+SliceMapT = dict[int, "DynamicSlice"]
+ArrayMapT = dict[int, Integers]
+NewaxisMapT = dict[int, None]
 
 
 class Shaped(AbstractModule):
-    """An object with a known shape."""
+    """A mixin class for modules that have a shape."""
 
     shape: eqx.AbstractVar[tuple[int, ...]]
 
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}{self.shape}"
-
     @property
     def ndim(self) -> int:
-        """Number of dimensions of the index expression."""
+        """The number of dimensions of the array."""
         return len(self.shape)
 
     @property
     def size(self) -> int:
-        """Total number of elements in the index expression."""
-        return math.prod(self.shape) if self.shape else 1
+        """The total number of elements in the array."""
+        return math.prod(self.shape)
 
 
-class ShapedIndexExpression(Shaped):
-    """An index expression with a known shape.
-
-    Attributes
-    ----------
-    shape
-        Shape of the index expression.
-    """
-
-    shape: tuple[int, ...] = eqx.field(static=True)
-
-    def __init__(self, *shape: int) -> None:
-        shape = sum(((s,) if not isinstance(s, tuple) else s for s in shape), start=())
-        shape = tuple(int(s) for s in shape)
-        self.shape = shape
-
-    def _equals(self, other: object) -> bool:
-        return super()._equals(other) and self.shape == other.shape
-
-    def __getitem__(
-        self,
-        args: IndexArgT | tuple[IndexArgT, ...],
-    ) -> tuple[IndexArgT, ...]:
-        # ruff: noqa
-        if not isinstance(args, tuple):
-            args = (args,)
-        args = self._handle_ellipses(args)
-        if (
-            len(args) == 1
-            and isinstance(args[0], jnp.ndarray)
-            and args[0].shape == self.shape
-        ):
-            return args[0].nonzero()
-        self = self._with_newaxes(args)
-        if len(args) < self.ndim:
-            args = args + (slice(None),) * (self.ndim - len(args))
-        n_dummies = 0
-        parsed = []
-        for i, a in enumerate(args):
-            axis = i - n_dummies
-            n = self.shape[axis]
-            if isinstance(a, slice):
-                a = slice(*a.indices(self.shape[axis]))
-            elif jnp.isscalar(a):
-                a = self._handle_scalar(a, n)
-            elif a is not None and not jnp.isscalar(a):
-                a = jnp.asarray(a)
-                # Bounds checking does not work with JIT compilation
-                # if jnp.issubdtype(a.dtype, jnp.integer):
-                #     a = jnp.where(a < 0, a + n, a)
-                #     if a.min() < -n or a.max() >= n:
-                #         errmsg = f"index out of bounds for axis {axis} with size {n}"
-                #         raise IndexError(errmsg)
-                if jnp.issubdtype(a.dtype, jnp.bool_):
-                    if len(a) != n:
-                        errmsg = (
-                            f"boolean index did not match shape indexed array in index "
-                            f"{axis}: got {a.shape}, expected {(n,)}"
-                        )
-                        raise IndexError(errmsg)
-                    a = a.nonzero()
-                elif not jnp.issubdtype(a.dtype, jnp.integer):
-                    errmsg = f"invalid index type '{a.dtype}'"
-                    raise IndexError(errmsg)
-            parsed.extend(a) if isinstance(a, tuple) else parsed.append(a)
-        return tuple(parsed)
-
-    def _handle_scalar(self, a: int, n: int) -> int:
-        if not isinstance(a, int | jnp.integer) and not (
-            isinstance(a, jnp.ndarray) and jnp.isscalar(a)
-        ):
-            errmsg = f"expected integer index, got '{type(a)}'"
-            raise TypeError(errmsg)
-        a = lax.cond(a < 0, lambda x: x + n, lambda x: x, a)
-        # if a < 0 or a >= n:
-        #     errmsg = f"index {a} is out of bounds for axis with size {n}"
-        #     raise IndexError(errmsg)
-        return a
-
-    def _handle_ellipses(self, args: tuple[IndexArgT, ...]) -> tuple[IndexArgT, ...]:
-        if args is Ellipsis:
-            return self[(slice(None),) * self.ndim]
-        if not isinstance(args, tuple):
-            args = (args,)
-        try:
-            # Handle expressions with ellipsis
-            ellpos = args.index(Ellipsis)
-            if Ellipsis in args[ellpos + 1 :]:
-                errmsg = "an index expression can only contain a single ellipsis"
-                raise ValueError(errmsg)
-            left = args[:ellpos]
-            right = args[ellpos + 1 :]
-            lleft = sum(a is not None for a in left)
-            lright = sum(a is not None for a in right)
-            mid = (slice(None),) * (self.ndim - lleft - lright)
-            return self[left + mid + right]
-        except ValueError:
-            pass
-        return args
-
-    def _with_newaxes(self, args: tuple[IndexArgT, ...]) -> Self:
-        """Return a new ShapedIndexExpression with new axes added.
-
-        Parameters
-        ----------
-        args
-            Indexing arguments, where `None` indicates a new axis.
-
-        Returns
-        -------
-        ShapedIndexExpression
-            New ShapedIndexExpression with updated shape.
-
-        Examples
-        --------
-        >>> import jax.numpy as jnp
-        >>> from grgg.utils.indexing import ShapedIndexExpression
-        >>> shape = (6, 5, 5)
-        >>> shape_exp = ShapedIndexExpression(shape)
-        >>> args = shape_exp[None, :, 1:3, None]
-        >>> shape_exp._with_newaxes(args).shape
-        (1, 6, 5, 1, 5)
-        """
-        shape = [
-            1,
-        ] * (self.ndim + sum(1 for a in args if a is None))
-        n_dummies = 0
-        for i in range(len(shape)):
-            if i < len(args) and args[i] is None:
-                n_dummies += 1
-            else:
-                shape[i] = self.shape[i - n_dummies]
-        shape_exp = ShapedIndexExpression(*shape)
-        if len(args) > shape_exp.ndim:
-            errmsg = f"too many indices for shape {self.shape}"
-            raise IndexError(errmsg)
-        return shape_exp
-
-    def _is_advanced_indexing_contiguous(self, args: tuple[IndexArgT, ...]) -> bool:
-        """Check if advanced indexing in args is contiguous.
-
-        Parameters
-        ----------
-        args
-            Indexing arguments.
-
-        Returns
-        -------
-        bool
-            True if advanced indexing is contiguous, False otherwise.
-
-        Examples
-        --------
-        >>> import jax.numpy as jnp
-        >>> shape = (6, 5, 5, 4, 4)
-        >>> shape_exp = ShapedIndexExpression(shape)
-        >>> args = shape_exp[:, [0, 2], [1, 3], ..., None]
-        >>> shape_exp._is_advanced_indexing_contiguous(args)
-        True
-        >>> args = shape_exp[[0, 1], :, [1, 2], :, 1]
-        >>> shape_exp._is_advanced_indexing_contiguous(args)
-        False
-        >>> args = shape_exp[:4, [0, 2], None, [1, 3]]
-        >>> shape_exp._is_advanced_indexing_contiguous(args)
-        False
-        >>> shape = (3, 4, 5)
-        >>> shape_exp = ShapedIndexExpression(shape)
-        >>> args = shape_exp[1, :2, [0, 1, 2], None, None]
-        >>> shape_exp._is_advanced_indexing_contiguous(args)
-        False
-        >>> args = shape_exp[:, :2, [0, 1, 2], None, None]
-        >>> shape_exp._is_advanced_indexing_contiguous(args)
-        True
-        """
-        adv_pos = [
-            i for i, a in enumerate(args) if a is not None and not isinstance(a, slice)
-        ]
-        return max(adv_pos) - min(adv_pos) + 1 == len(adv_pos) if adv_pos else False
-
-
-class IndexableShape(Shaped):
-    """Indexable shape of an array-like object.
+class DynamicSlice(AbstractModule):
+    """Dynamic slice compatible with JAX transformations.
 
     Attributes
     ----------
-    shape
-        Shape of the array-like object.
+    start
+        The starting index of the slice.
+    end
+        The ending index of the slice.
+    step
+        The step size of the slice.
 
     Examples
     --------
-    >>> import jax.numpy as jnp
-    >>> import numpy as np
-    >>> X = jnp.arange(150).reshape(6,5,5)
-    >>> shape = IndexableShape(X.shape)
-    >>> X[0].shape == shape[0]
+    >>> ds = DynamicSlice(2, 10, 2)
+    >>> ds
+    DynamicSlice(2, 10, 2)
+    >>> ds.indices
+    Array([2, 4, 6, 8], dtype=int32)
+    >>> s = slice(2, 10, 2)
+    >>> ds2 = DynamicSlice.from_slice(slice(2, 10, 2))
+    >>> ds2
+    DynamicSlice(2, 10, 2)
+    >>> ds2.equals(ds)
     True
-    >>> X[0, 1].shape == shape[0, 1]
-    True
-    >>> X[0, 1, 3].shape == shape[0, 1, 3]
-    True
-    >>> X[:, 1:3].shape == shape[:, 1:3]
-    True
-    >>> X[1:3, 2:4].shape == shape[1:3, 2:4]
-    True
-    >>> X[None, 1:3, :, None].shape == shape[None, 1:3, :, None]
-    True
-    >>> X[:3, [0, 2, 4]].shape == shape[:3, [0, 2, 4]]
-    True
-    >>> X[[0,1], [3, 4], :2].shape == shape[[0,1], [3, 4], :2]
-    True
-    >>> X[[0,1], [0,1], [0,2]].shape == shape[[0,1], [0,1], [0,2]]
-    True
-    >>> X[[[0,1],[0,2]], None, [0,1], 1].shape == shape[[[0,1],[0,2]], None, [0,1], 1]
-    True
-
-    Full boolean indexing.
-    >>> from grgg import RandomGenerator
-    >>> rng = RandomGenerator(0)
-    >>> mask = rng.randint(X.shape, 0, 2).astype(bool)
-    >>> X[mask].shape == shape[mask]
-    True
-
-    Partial boolean masking.
-    >>> mask = jnp.asarray([True]*3 + [False]*3)
-    >>> X[mask,].shape == shape[mask,]
-    True
-    >>> X[..., mask[:5]].shape == shape[..., mask[:5]]
-    True
-
-    Mixed indexing.
-    >>> X[1, mask[:5], None, 1].shape == shape[1, mask[:5], None, 1]
+    >>> ds2.to_slice() == s
     True
     """
 
-    index_expr: ShapedIndexExpression
-
-    def __init__(self, shape: tuple[int, ...] | ShapedIndexExpression) -> None:
-        if isinstance(shape, tuple):
-            shape = ShapedIndexExpression(shape)
-        self.index_expr = shape
-
-    def _equals(self, other: object) -> bool:
-        return super()._equals(other) and self.index_expr.equals(other.index_expr)
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        """Shape of the array-like object."""
-        return self.index_expr.shape
-
-    def __getitem__(self, args: IndexArgT | tuple[IndexArgT, ...]) -> tuple[int, ...]:
-        if not isinstance(args, tuple):
-            args = (args,)
-        if not args or len(args) == 1 and args[0] is Ellipsis:
-            return self.shape
-        if len(args) == 1 and isinstance(args[0], jnp.ndarray):
-            dtype = args[0].dtype
-            if jnp.issubdtype(dtype, jnp.bool):
-                return self[args[0].nonzero()]
-        args = self.index_expr[args]
-        shape = self.index_expr._with_newaxes(args).shape
-        basic, advanced = self._split_into_basic_and_advanced(args)
-        # Handle basic indexing
-        shapes = tuple(
-            (len(range(*b.indices(s))),)
-            if isinstance(b, slice)
-            else (1,)
-            if b is None
-            else ()
-            for b, s in zip(basic, shape, strict=True)
-        )
-        # Handle advanced indexing
-        axes = [i for i, a in enumerate(advanced) if a is not None]
-        if axes:
-            broadcasted = jnp.broadcast_shapes(*(advanced[i].shape for i in axes))
-            advanced = list(advanced)
-            advanced[axes[0]] = broadcasted
-            for i in axes[1:]:
-                advanced[i] = ()
-        broadcasted_shapes = []
-        if self.index_expr._is_advanced_indexing_contiguous(args):
-            # Contiguous advanced indexing
-            # Add advanced indices groups after the first advanced index
-            for s, a in zip(shapes, advanced, strict=True):
-                if a is None:
-                    broadcasted_shapes.append(s)
-                else:
-                    broadcasted_shapes.append(a)
-        else:
-            # Non-contiguous advanced indexing
-            # Add all advanced shapes first, then all basic shapes
-            broadcasted_shapes.extend(a for a in advanced if a is not None)
-            broadcasted_shapes.extend(
-                s for a, s in zip(advanced, shapes, strict=True) if a is None
-            )
-        return sum(broadcasted_shapes, start=())
-
-    def _split_into_basic_and_advanced(
-        self, args: tuple[IndexArgT, ...]
-    ) -> tuple[tuple[IndexArgT, ...], tuple[IndexArgT, ...]]:
-        basic = []
-        advanced = []
-        for a in args:
-            if a is None or isinstance(a, slice) or jnp.isscalar(a):
-                basic.append(a)
-                advanced.append(None)
-            else:
-                advanced.append(a)
-                basic.append(slice(None))
-        return tuple(basic), tuple(advanced)
-
-
-class CartesianCoordinates(Shaped):
-    """Converter of Numpy-style indexing to Cartesian coordinates
-    relative to an array of a specified shape.
-
-    Attributes
-    ----------
-    shape
-        The shape of the array.
-    """
-
-    index: IndexableShape
-
-    def __init__(
-        self, shape: int | tuple[int, ...] | IndexableShape, *more_sizes: int
-    ) -> None:
-        if isinstance(shape, tuple | IndexableShape):
-            if more_sizes:
-                errmsg = "cannot specify shape as both tuple and individual sizes"
-                raise ValueError(errmsg)
-            if isinstance(shape, tuple):
-                shape = IndexableShape(shape)
-        else:
-            shape = (shape, *more_sizes)
-            shape = IndexableShape(shape)
-        self.index = shape
-
-    def _equals(self, other: object) -> bool:
-        return super()._equals(other) and self.index.equals(other.index)
-
-    @property
-    def shape(self) -> tuple[int, ...]:
-        """Shape of the array."""
-        return self.index.shape
-
-    @property
-    def index_expr(self) -> ShapedIndexExpression:
-        """Shape expression of the array."""
-        return self.index.index_expr
-
-    @property
-    def i_(self) -> ShapedIndexExpression:
-        """:class:`ShapedIndexExpression` instance for the given shape."""
-        return self.index_expr
-
-    @property
-    def s_(self) -> IndexableShape:
-        """:class:`IndexableShape` instance for the given shape."""
-        return self.index
-
-    def __getitem__(
-        self, args: IndexArgT | tuple[IndexArgT, ...]
-    ) -> tuple[jnp.ndarray, ...]:
-        args = self.index_expr[args]
-        # Broadcast advanced indices
-        basic = {}
-        advanced = {}
-        for i, a in enumerate(args):
-            if a is None or isinstance(a, slice) or jnp.isscalar(a):
-                basic[i] = (
-                    a if isinstance(a, slice) else jnp.asarray([0] if a is None else a)
-                )
-            else:
-                advanced[i] = a
-        adv_broadcasted = jnp.broadcast_arrays(*advanced.values()) if advanced else ()
-        for k, a in zip(advanced, adv_broadcasted, strict=True):
-            advanced[k] = a
-        # Create a meshgrid of all non-scalar basic indices
-        non_scalars = {
-            k: jnp.r_[basic[k]] if isinstance(basic[k], slice) else basic[k]
-            for k in basic
-            if not jnp.isscalar(basic[k])
-        }
-        non_scalars_idx = jnp.ix_(*(jnp.r_[s] for s in non_scalars.values()))
-        for k, a in zip(non_scalars, non_scalars_idx, strict=True):
-            non_scalars[k] = a
-            basic[k] = a
-        # Determine proper axes ordering based on the resulting
-        # position of the grouped advanced indices
-        adv_pos = (
-            0
-            if not advanced
-            else (
-                min(advanced)
-                if self.index_expr._is_advanced_indexing_contiguous(args)
-                else 0
-            )
-        )
-        if advanced:
-            basic_ndim = non_scalars_idx[0].ndim if non_scalars_idx else 0
-            adv_ndim = adv_broadcasted[0].ndim if adv_broadcasted else 0
-            # Expand basic indices to accommodate advanced indices
-            for k in basic:
-                index = basic[k]
-                if jnp.isscalar(index):
-                    continue
-                left = (slice(None),) * adv_pos
-                expand = (None,) * adv_ndim
-                basic[k] = index[*left, *expand, ...]
-            # Expand advanced indices to accommodate basic indices
-            for k in advanced:
-                left = (None,) * adv_pos
-                right = (None,) * (basic_ndim - adv_pos)
-                advanced[k] = advanced[k][*left, ..., *right]
-        joint_mapping = {**basic, **advanced}
-        arrays = tuple(joint_mapping[i] for i in range(len(args)))
-        return arrays
-
-
-class MultiIndexRavel(Shaped):
-    """Ravel arbitrary indexing into an array of flat indices.
-
-    Attributes
-    ----------
-    shape
-        Shape of the array to unravel indices into.
-    mode
-        Specifies how out-of-bounds indices are handled. Can be one of
-        {'raise', 'wrap', 'clip'}. Default is 'clip'.
-        Mode 'raise' is not compatible with JIT compilation.
-    order
-        Determines whether the multi-index is considered in 'C' (row-major)
-        or 'F' (column-major) order. Default is 'C'.
-
-    Examples
-    --------
-    >>> import jax.numpy as jnp
-    >>> X = jnp.arange(100).reshape(10, 10)
-    >>> ravel = MultiIndexRavel(X.shape, mode="raise")
-    >>> def check(idx):
-    ...     Y = X.flatten()[ravel[idx]]
-    ...     return jnp.array_equal(Y, X[idx]).item()
-
-    Test basic indexing.
-    >>> idx = ravel.i_[...]
-    >>> check(idx)
-    True
-    >>> idx = ravel.i_[1, 4]
-    >>> check(idx)
-    True
-    >>> idx = ravel.i_[:5, 1:4]
-    >>> check(idx)
-    True
-    >>> idx = ravel.i_[None, :5, 1:4, None]
-    >>> check(idx)
-    True
-
-    Test advanced indexing.
-    >>> idx = ravel.i_[[0, 2, 4], [1, 3, 4]]
-    >>> check(idx)
-    True
-    >>> idx = ravel.i_[jnp.ix_(jnp.array([0, 2, 4]), jnp.array([1, 3, 4]))]
-    >>> check(idx)
-    True
-    >>> idx = ravel.i_[jnp.arange(100).reshape(X.shape) % 2 == 1]
-    >>> check(idx)
-    True
-    >>> mask = jnp.asarray([True]*4 + [False]*6)
-    >>> idx = ravel.i_[mask, :]
-    >>> check(idx)
-    True
-    """
-
-    index: IndexableShape
-    mode: str = eqx.field(static=True)
-    order: str = eqx.field(static=True)
+    start: int = eqx.field(static=True)
+    end: int = eqx.field(static=True)
+    step: int = eqx.field(static=True)
 
     def __init__(
         self,
-        index: tuple[int, ...] | IndexableShape,
-        mode: str = "clip",
-        order: str = "C",
+        start: int | None = None,
+        end: int | None = None,
+        step: int = 1,
     ) -> None:
-        if isinstance(index, tuple):
-            index = IndexableShape(index)
-        self.index = index
-        self.mode = mode
-        self.order = order
+        if start is not None and end is None:
+            start, end = 0, start
+        elif start is None:
+            start = 0
+        self.start = int(start or 0)
+        self.end = int(end)
+        self.step = int(step or 1)
+
+    def __repr__(self) -> str:
+        cn = self.__class__.__name__
+        return f"{cn}({self.start}, {self.end}, {self.step})"
 
     def _equals(self, other: object) -> bool:
         return (
             super()._equals(other)
-            and self.index.equals(other.index)
-            and self.mode == other.mode
-            and self.order == other.order
+            and self.start == other.start
+            and self.end == other.end
+            and self.step == other.step
+        )
+
+    @property
+    def indices(self) -> IntVector:
+        """Get the indices represented by the slice."""
+        return jnp.arange(self.start, self.end, self.step)
+
+    @classmethod
+    def from_slice(cls, s: slice) -> Self:
+        """Create a standard slice object.
+
+        Parameters
+        ----------
+        s
+            The slice object to convert.
+        """
+        return cls(s.start, s.stop, s.step)
+
+    def to_slice(self) -> slice:
+        """Convert to a standard slice object."""
+        return slice(self.start, self.end, self.step)
+
+
+class DynamicIndex(Shaped, Sequence):
+    """Dynamic index compatible with JAX transformations.
+
+    Attributes
+    ----------
+    args
+        The indexing arguments.
+
+    Examples
+    --------
+    >>> from grgg.utils.indexing import DynamicIndex, DynamicSlice
+    >>> index = DynamicIndex()
+    >>> index
+    DynamicIndex()
+    >>> index.args
+    ()
+    >>> DynamicIndex(DynamicSlice(0, 3, 1))
+    DynamicIndex(DynamicSlice(0, 3, 1))
+    """
+
+    args: tuple[DynamicSlice | Integers | None, ...]
+
+    def __init__(
+        self,
+        *index_args,
+        args: tuple[DynamicSlice | Integers | None, ...] | None = None,
+    ) -> None:
+        if args is None:
+            args = index_args
+        elif index_args:
+            errmsg = "cannot pass arguments both positionally and as 'args' keyword"
+            raise ValueError(errmsg)
+        if not isinstance(args, tuple):
+            args = (args,)
+        self.args = tuple(
+            DynamicSlice.from_slice(a)
+            if isinstance(a, slice)
+            else jnp.asarray(a)
+            if not isinstance(a, DynamicSlice | jnp.ndarray | None)
+            else a
+            for a in args
+        )
+
+    def __check_init__(self) -> None:
+        for a in self.args:
+            if not (
+                isinstance(a, DynamicSlice)
+                or (isinstance(a, jnp.ndarray) and jnp.issubdtype(a.dtype, jnp.integer))
+                or a is None
+            ):
+                errmsg = f"invalid indexing argument: {a!r}"
+                raise TypeError(errmsg)
+
+    def __repr__(self) -> str:
+        cn = self.__class__.__name__
+        args = ", ".join(
+            format_array(a) if isinstance(a, jnp.ndarray) else str(a) for a in self.args
+        )
+        return f"{cn}({args})"
+
+    def __getitem__(self, i: int) -> DynamicSlice | Integers | None:
+        return self.args[i]
+
+    def __len__(self) -> int:
+        return len(self.args)
+
+    def __add__(self, other: object) -> Self:
+        if not isinstance(other, DynamicIndex):
+            return NotImplemented
+        return DynamicIndex(self.args + other.args)
+
+    def __mul__(self, n: int) -> Self:
+        if not isinstance(n, int):
+            return NotImplemented
+        return DynamicIndex(self.args * n)
+
+    def _equals(self, other: object) -> bool:
+        return (
+            super()._equals(other)
+            and len(self) == len(other)
+            and all(
+                jnp.array_equal(a, b)
+                if isinstance(a, jnp.ndarray)
+                else a.equals(b)
+                if isinstance(a, DynamicSlice)
+                else a == b
+                for a, b in zip(self.args, other.args, strict=True)
+            )
         )
 
     @property
     def shape(self) -> tuple[int, ...]:
-        """Shape of the array to unravel indices into."""
-        return self.index.shape
-
-    @property
-    def i_(self) -> ShapedIndexExpression:
-        """ShapedIndexExpression of the array to unravel indices into."""
-        return self.index.index_expr
-
-    @property
-    def s_(self) -> IndexableShape:
-        """IndexableShape of the array to unravel indices into."""
-        return self.index
-
-    @property
-    def index_expr(self) -> ShapedIndexExpression:
-        """Shape expression of the array to unravel indices into."""
-        return self.index.index_expr
-
-    @property
-    def coords(self) -> CartesianCoordinates:
-        """CartesianCoordinates of the array to unravel indices into."""
-        return CartesianCoordinates(self.index)
-
-    def __getitem__(
-        self, args: IndexArgT | tuple[IndexArgT, ...]
-    ) -> tuple[jnp.ndarray, ...]:
-        if not isinstance(args, tuple):
-            args = (args,)
-        if not args or args == (Ellipsis,):
-            return self._ravel(jnp.indices(self.shape, sparse=True))
-        args = self.index_expr[args]
-        coords = self.coords[args]
-        indexed_shape = self.index_expr._with_newaxes(args).shape
-        return self._ravel(coords, indexed_shape)
-
-    def _ravel(
-        self, coords: Sequence[jnp.ndarray], shape: tuple[int, ...] | None = None
-    ) -> jnp.ndarray:
-        """Ravel multi-dimensional coordinate indices into flat indices.
+        """The shape of the result of the indexing operation
+        assuming that each axis is indexed.
 
         Examples
         --------
-        Here are some more examples (and tests) for raveling 3D indices and arrays.
+        >>> expr = DynamicIndexExpression(3, 5, 6, 4)
+        >>> index = expr[:5, [0, 2], 1]
+        >>> index.shape
+        (3, 2, 4)
+        >>> index = expr[1:4, [0, 2], :5, 1]
+        >>> index.shape
+        (2, 2, 5)
+        >>> index = expr[[0, 2], [0, 3]]
+        >>> index.shape
+        (2, 6, 4)
+        >>> index = expr[2, 1, 4, 2]
+        >>> index.shape
+        ()
+        >>> index = expr[2, None, [1, 3]]
+        >>> index.shape
+        (2, 1, 6, 4)
+        >>> index = expr[[True, False], [False, True]]
+        >>> index.shape
+        (1, 6, 4)
+        >>> index = expr[[True, False, False], None]
+        >>> index.shape
+        (1, 1, 5, 6, 4)
+        >>> index = expr[[True, True, False], [1, 3]]
+        >>> index.shape
+        (2, 6, 4)
+        """
+        return self.get_shape()
+
+    @property
+    def coords(self) -> tuple[Integers, ...]:
+        """The coordinate arrays representing the indexing operation."""
+        return self.get_coords(resolve_newaxes=False)
+
+    @property
+    def has_slice_indexing(self) -> bool:
+        """Whether the indexing arguments contain slice indexing."""
+        return any(isinstance(a, DynamicSlice) for a in self.args)
+
+    @property
+    def has_array_indexing(self) -> bool:
+        """Whether the indexing arguments contain array indexing."""
+        return any(isinstance(a, jnp.ndarray) for a in self.args)
+
+    @property
+    def has_contiguous_array_indexing(self) -> bool:
+        """Whether the indexing arguments contain contiguous array indexing.
+
+        Examples
+        --------
         >>> import jax.numpy as jnp
-        >>>
-        >>> X = jnp.arange(60).reshape(3,4,5)
-        >>> ravel = MultiIndexRavel(X.shape, mode="raise")
-        >>> Y = X.flatten()[ravel[...]]
-        >>> jnp.array_equal(Y, X).item()
+        >>> from grgg.utils.indexing import DynamicIndexExpression
+        >>> expr = DynamicIndexExpression(3, 5, 6, 4)
+        >>> index = expr[:5, jnp.array([0, 2]), 1]
+        >>> index.has_contiguous_array_indexing
         True
-        >>>
-        >>> # Test check
-        >>> def check(idx):
-        ...     Y = X.flatten()[ravel[idx]]
-        ...     return jnp.array_equal(Y, X[idx]).item()
-        >>>
-        >>> idx = ravel.i_[...]
-        >>> check(idx)
+        >>> index = expr[jnp.array([0, 2]), slice(2, 5), 1]
+        >>> index.has_contiguous_array_indexing
+        False
+        >>> index = expr[jnp.array([0, 2]), None, jnp.array([1, 3])]
+        >>> index.has_contiguous_array_indexing
+        False
+        >>> index = expr[1:7, None, jnp.array([1, 3])]
+        >>> index.has_contiguous_array_indexing
         True
-        >>> idx = ravel.i_[1, 2, 3]
-        >>> check(idx)
+        >>> index = expr[2, [0, 2], 1, 3, None]
+        >>> index.has_contiguous_array_indexing
         True
-        >>> idx = ravel.i_[:2, 1:3, 2:4]
-        >>> check(idx)
+        >>> index = expr[2, 1]
+        >>> index.has_contiguous_array_indexing
         True
-        >>> idx = ravel.i_[None, :2, 1:3, None, 2:4, None]
-        >>> check(idx)
-        True
-        >>> idx = ravel.i_[[0, 2], [1, 3], [2, 4]]
-        >>> check(idx)
-        True
-        >>> arrays = jnp.array([0, 2]), jnp.array([1, 3]), jnp.array([2, 4])
-        >>> idx = ravel.i_[jnp.ix_(*arrays)]
-        >>> check(idx)
-        True
-        >>> idx = ravel.i_[X % 2 == 1]
-        >>> check(idx)
-        True
-        >>> mask = jnp.asarray([True]*2 + [False]*1)
-        >>> idx = ravel.i_[mask, :, :]
-        >>> check(idx)
-        True
-        >>> mask = jnp.array([True]*2 + [False]*2)
-        >>> idx = ravel.i_[:, mask, :]
-        >>> check(idx)
-        True
-        >>> mask = jnp.array([True]*3 + [False]*2)
-        >>> idx = ravel.i_[:, :, mask]
-        >>> check(idx)
-        True
-        >>> idx = ravel.i_[1, :2, mask]
-        >>> check(idx)
-        True
-        >>> idx = ravel.i_[1, :2, mask, None, None]
-        >>> check(idx)
-        True
-        >>> idx = ravel.i_[:, [0, 2], None, 1]
-        >>> check(idx)
+        >>> index = expr[[0,1,2]]
+        >>> index.has_contiguous_array_indexing
         True
         """
-        if shape is None:
-            shape = self.shape
-        return jnp.ravel_multi_index(coords, shape, mode=self.mode, order=self.order)
+        if not self.has_array_indexing:
+            return False
+        adv_pos = [i for i, a in enumerate(self.args) if isinstance(a, jnp.ndarray)]
+        return max(adv_pos) - min(adv_pos) + 1 == len(adv_pos) if adv_pos else False
+
+    @property
+    def index_maps(self) -> tuple[SliceMapT, ArrayMapT, NewaxisMapT]:
+        """Get the index maps for basic and advanced indexing."""
+        slice_map = {}
+        array_map = {}
+        newaxis_map = {}
+        for i, a in enumerate(self.args):
+            if a is None:
+                newaxis_map[i] = a
+            elif isinstance(a, DynamicSlice):
+                slice_map[i] = a
+            else:
+                array_map[i] = a
+        return slice_map, array_map, newaxis_map
+
+    def get_coords(
+        self, *, resolve_newaxes: bool = False
+    ) -> tuple[Integers | None, ...]:
+        """Create the coordinate arrays representing the indexing operation.
+
+        Parameters
+        ----------
+        resolve_newaxes
+            If True, new axes (None) are represented as arrays with a single zero value
+            and appropriate broadcasted shape. If False, new axes are represented as
+            `None`. The first representation is convenient for determining resultant
+            shapes, while the second is more useful for actual indexing operations on
+            arrays.
+        """
+        slice_map, array_map, newaxis_map = self.index_maps
+        # Broadcast advanced indices
+        advanced = jnp.broadcast_arrays(*array_map.values()) if array_map else ()
+        for k, a in zip(array_map, advanced, strict=True):
+            array_map[k] = a
+        # Create a meshgrid of all slice indices
+        slice_map = {
+            k: v.indices for k, v in slice_map.items() if isinstance(v, DynamicSlice)
+        }
+        if resolve_newaxes:
+            for k in newaxis_map:
+                slice_map[k] = jnp.array([0])
+        slice_map = dict(sorted(slice_map.items(), key=lambda item: item[0]))
+        slice_map = dict(zip(slice_map, jnp.ix_(*slice_map.values()), strict=True))
+        if array_map and slice_map:
+            # Determine the axis ordering
+            adv_pos = (
+                0
+                if not array_map or not self.has_contiguous_array_indexing
+                else min(array_map)
+            )
+            slice_ndim = list(slice_map.values())[0].ndim if slice_map else 0
+            array_ndim = list(array_map.values())[0].ndim if array_map else 0
+            # Expand slice indices for broadcasting with advanced indices
+            for k, i in slice_map.items():
+                if jnp.isscalar(i):
+                    continue
+                left = (slice(None),) * adv_pos
+                expand = (None,) * array_ndim
+                slice_map[k] = i[*left, *expand, ...]
+            # Expand advanced indices for broadcasting with slice indices
+            for k, i in array_map.items():
+                left = (None,) * adv_pos
+                right = (None,) * (slice_ndim - adv_pos)
+                array_map[k] = i[*left, ..., *right]
+        joint_mapping = {**slice_map, **array_map}
+        if not resolve_newaxes:
+            joint_mapping.update(newaxis_map)
+        arrays = tuple(joint_mapping[i] for i in range(len(self.args)))
+        return arrays
+
+    def get_shape(self, coords: tuple[Integers, ...] | None = None) -> tuple[int, ...]:
+        """Get the shape of the result of the indexing operation
+        assuming that each axis is indexed.
+        """
+        if coords is None:
+            coords = cast(tuple[Integers, ...], self.get_coords(resolve_newaxes=True))
+        return jnp.broadcast_shapes(*(a.shape for a in coords))
+
+
+class IndexExpression(Shaped):
+    """Index expression relative to a target shape.
+
+    Attributes
+    ----------
+    shape
+        JAX-compatible array-based representation of the shape.
+    is_dynamic
+        Whether the index expression is dynamic (i.e., produces a DynamicIndex)
+        or static (i.e., produces a tuple of standard indexing arguments).
+
+    Examples
+    --------
+    >>> expr = IndexExpression(3, 5, 6)
+    >>> expr
+    IndexExpression(3, 5, 6)
+    >>> expr[..., 2, None, [0, 2]]
+    (slice(0, 3, 1),
+     Array(2, ...),
+     None,
+     Array([0, 2], ...))
+    >>> expr[..., 2, None, [0, 2], 4]
+    (Array(2, ...),
+     None,
+     Array([0, 2], ...),
+     Array(4, ...))
+    >>> expr[..., 2, None, ..., [0, 2]]
+    Traceback (most recent call last):
+        ...
+    IndexError: an index can only have a single ellipsis ('...')
+    >>> expr[..., 2, None, [0, 2], 4, :]
+    Traceback (most recent call last):
+        ...
+    IndexError: too many indices for shape (3, 5, 6)
+    """
+
+    shape: tuple[int, ...] = eqx.field(static=True)
+
+    def __init__(
+        self,
+        shape: int | tuple[int, ...],
+        *more_sizes: int,
+    ) -> None:
+        if not isinstance(shape, tuple):
+            shape = (shape,)
+        self.shape = shape + more_sizes
+
+    def __repr__(self) -> str:
+        cn = self.__class__.__name__
+        return f"{cn}{self.shape}"
+
+    def __getitem__(
+        self, args: IndexArgT | tuple[IndexArgT, ...]
+    ) -> tuple[IndexArgT, ...]:
+        args = self._resolve_args(args)
+        self = self._with_newaxes(args)
+        args = self._resolve_slices(args)
+        return args
+
+    @property
+    def dynamic(self) -> Self:
+        """A dynamic version of this index expression."""
+        return DynamicIndexExpression(self.shape)
+
+    @property
+    def static(self) -> Self:
+        """A static version of this index expression."""
+        return self
+
+    def _equals(self, other: object) -> bool:
+        return super()._equals(other) and self.shape == other.shape
+
+    def _resolve_args(
+        self, args: IndexArgT | tuple[IndexArgT, ...]
+    ) -> tuple[IndexArgT, ...]:
+        if not isinstance(args, tuple):
+            args = (args,)
+        args = tuple(
+            a if isinstance(a, slice | None | EllipsisType) else jnp.asarray(a)
+            for a in args
+        )
+        args = sum(
+            (
+                a.nonzero()
+                if isinstance(a, jnp.ndarray) and jnp.issubdtype(a.dtype, jnp.bool)
+                else (a,)
+                for a in args
+            ),
+            start=(),
+        )
+        num_newaxis = sum(1 for a in args if a is None)
+        num_ellipsis = sum(1 for a in args if a is Ellipsis)
+        if num_ellipsis > 1:
+            errmsg = "an index can only have a single ellipsis ('...')"
+            raise IndexError(errmsg)
+        if len(args) - num_newaxis - num_ellipsis > self.ndim:
+            errmsg = f"too many indices for shape {self.shape}"
+            raise IndexError(errmsg)
+        ellipsis_index = args.index(Ellipsis) if num_ellipsis == 1 else len(args)
+        num_missing = self.ndim - (len(args) - num_newaxis - num_ellipsis)
+        args = (
+            args[:ellipsis_index]
+            + (slice(None),) * num_missing
+            + args[ellipsis_index + 1 :]
+        )
+        return args
+
+    def _with_newaxes(self, args: tuple[IndexArgT, ...]) -> Self:
+        new_shape = []
+        i = 0
+        for a in args:
+            if a is None:
+                new_shape.append(1)
+            else:
+                new_shape.append(self.shape[i])
+                i += 1
+        new_shape = tuple(new_shape) + self.shape[i:]
+        return self.replace(shape=new_shape)
+
+    def _resolve_slices(self, args: tuple[IndexArgT, ...]) -> tuple[IndexArgT, ...]:
+        return tuple(
+            a if not isinstance(a, slice) else slice(*a.indices(s))
+            for a, s in zip(args, self.shape, strict=True)
+        )
+
+
+class DynamicIndexExpression(IndexExpression):
+    """A dynamic index expression that always produces a DynamicIndex."""
+
+    def __getitem__(self, args: IndexArgT | tuple[IndexArgT, ...]) -> DynamicIndex:
+        args = super().__getitem__(args)
+        return self._make_dynamic_index(args)
+
+    def _make_dynamic_index(self, args: tuple[IndexArgT, ...]) -> "DynamicIndex":
+        _args = tuple(
+            DynamicSlice.from_slice(a) if isinstance(a, slice) else a for a in args
+        )
+        return DynamicIndex(args=_args)
+
+    @property
+    def dynamic(self) -> Self:
+        """A dynamic version of this index expression."""
+        return self
+
+    @property
+    def static(self) -> IndexExpression:
+        """A static version of this index expression."""
+        return IndexExpression(self.shape)

@@ -19,7 +19,13 @@ from grgg.statistics import (
     TClustering,
     TStatistics,
 )
-from grgg.utils.indexing import CartesianCoordinates, IndexArgT, Shaped
+from grgg.utils.indexing import (
+    DynamicIndex,
+    DynamicIndexExpression,
+    IndexArgT,
+    Shaped,
+)
+from grgg.utils.lazy import LazyOuter
 
 from .motifs import (
     AbstractErgmMotifs,
@@ -47,10 +53,7 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
     """Abstract base class for ERGM views."""
 
     model: eqx.AbstractVar[T]
-    _coords: CartesianCoordinates = eqx.field(repr=False, init=False)
-    _index: IndexArgT | tuple[IndexArgT, ...] | None = eqx.field(
-        static=False, repr=False
-    )
+    _index: DynamicIndex | None = eqx.field(repr=False)
 
     motifs_cls: eqx.AbstractClassVar[type[M]]
 
@@ -58,29 +61,27 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         self,
         model: T,
         *,
-        _index: IndexArgT | tuple[IndexArgT, ...] | None = None,
+        _index: DynamicIndex | None = None,
     ) -> None:
         self.model = model
-        self._index = self._index_input(_index)
-        self._coords = CartesianCoordinates(self.full_shape)
+        if _index is not None and not isinstance(_index, DynamicIndex):
+            _index = self.index_expr[_index]
+        self._index = _index
 
     def __check_init__(self) -> None:
-        if (
-            self._index is not None
-            and isinstance(self._index, tuple)
-            and sum(i is not None and i is not Ellipsis for i in self._index)
-            > self.full_ndim
-        ):
+        if self._index is not None and (ndim := self._index.ndim) > self.full_ndim:
             cn = self.__class__.__name__
             errmsg = (
                 f"too many indices for '{cn}': expected up to "
-                f"{self.full_ndim}, got {len(self._index)}"
+                f"{self.full_ndim}, got {ndim}"
             )
             raise ValueError(errmsg)
 
     def __getitem__(self, args: Any) -> Self:
-        if self._index is None or self._index == self._default_index:
-            return self.replace(_index=args)
+        if not self.is_active or self._index.equals(
+            DynamicIndex(self._default_index_args)
+        ):
+            return self.replace(_index=self.index_expr[args])
         cn = self.__class__.__name__
         errmsg = (
             f"'{cn}' can only be indexed once; use the `reset()` method "
@@ -90,24 +91,32 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         raise IndexError(errmsg)
 
     @property
-    def _default_index(self) -> IndexArgT | tuple[IndexArgT, ...]:
-        if self.model.is_homogeneous:
-            return self._index_input(self._default_homogeneous_index)
-        return self._index_input(self._default_heterogeneous_index)
+    def index(self) -> DynamicIndex:
+        """Current index of the view."""
+        if self._index is None:
+            expr = DynamicIndexExpression(self.full_shape)
+            return expr[self._default_index_args]
+        return self._index
 
     @property
-    def _default_heterogeneous_index(self) -> EllipsisType:
+    def _default_index_args(self) -> IndexArgT | tuple[IndexArgT, ...]:
+        if self.model.is_homogeneous:
+            return self._default_homogeneous_index_args
+        return self._default_heterogeneous_index_args
+
+    @property
+    def _default_heterogeneous_index_args(self) -> EllipsisType:
         return ()
 
     @property
     @abstractmethod
-    def _default_homogeneous_index(self) -> int:
+    def _default_homogeneous_index_args(self) -> int:
         pass
 
     @property
     def shape(self) -> tuple[int, ...]:
         """Shape of the view."""
-        return self._coords.s_[self.index]
+        return self.index.shape
 
     @property
     def is_active(self) -> bool:
@@ -138,27 +147,24 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         return self.motifs_cls(self)
 
     @property
-    def index(self) -> IndexArgT | tuple[IndexArgT, ...]:
-        """Current index or default index if 'None' is set."""
-        return self._index if self._index is not None else self._default_index
-
-    @property
     def coords(self) -> tuple[Integers, ...]:
         """Coordinates for the selected indices."""
-        return self._coords[self.index]
+        return self.index.coords
 
     @property
-    def unique_indices(self) -> IntVector:
-        """Unique node indices in the view."""
-        if not self.is_active or self._index is None:
-            return jnp.arange(self.model.n_units)
-        uniq = jnp.unique(jnp.concat(tuple(jnp.unique(i) for i in self.coords)))
-        return uniq
+    @abstractmethod
+    def unique_indices(self) -> Integers:
+        """Unique indices in the view."""
 
     @property
     def reindex(self) -> Self:
         """Reindex the view to use Cartesian coordinates."""
         return self.reset()
+
+    @property
+    def index_expr(self) -> DynamicIndexExpression:
+        """Index expression for the view."""
+        return DynamicIndexExpression(self.full_shape)
 
     def reset(self) -> None:
         """Reset the view."""
@@ -166,22 +172,14 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
 
     def _equals(self, other: object) -> bool:
         """Check equality with another view."""
-        return super()._equals(other) and _indices_equal(self._index, other._index)
+        return (
+            super()._equals(other)
+            and self.model.equals(other.model)
+            and self.index.equals(other.index)
+        )
 
-    def _index_input(
-        self, index: IndexArgT | tuple[IndexArgT, ...] | None
-    ) -> IndexArgT | tuple[IndexArgT, ...] | None:
-        """Process input index."""
-        if index is None:
-            return None
-        if index is Ellipsis:
-            index = ()
-        if jnp.isscalar(index):
-            index = jnp.array(index)
-        _index = index if isinstance(index, tuple) else (index,)
-        return _index
-
-    def materialize(self, *, copy: bool = False) -> T:
+    @abstractmethod
+    def materialize(self, indices: Integers | None = None, *, copy: bool = False) -> T:
         """Materialize the view into a new model instance.
 
         Parameters
@@ -191,9 +189,11 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         """
         if not self.is_active:
             return self.model if not copy else self.model.copy(deep=True)
-        uniq = self.unique_indices
-        parameters = self.model.parameters.subset[uniq]
-        model = self.model.replace(n_nodes=len(uniq), parameters=parameters)
+        if indices is None:
+            errmsg = "`indices` must be provided to materialize a view"
+            raise ValueError(errmsg)
+        parameters = self.model.parameters.subset[indices]
+        model = self.model.replace(n_nodes=len(indices), parameters=parameters)
         if copy:
             model = model.copy(deep=True)
         return model
@@ -203,18 +203,23 @@ class AbstractErgmNodeView[T, MV](AbstractErgmView[T, MV]):
     """Abstract base class for ERGM node views."""
 
     @property
-    def _default_homogeneous_index(self) -> int:
+    def _default_homogeneous_index_args(self) -> int:
         return 0
 
     @property
     def n_nodes(self) -> int:
-        if self._index is None:
+        if not self.is_active:
             return self.model.n_units
-        return max(1, self.shape[0] if self.shape else 0)
+        return len(self.unique_indices)
 
     @property
     def full_shape(self) -> tuple[int]:
         return (self.model.n_units,)
+
+    @property
+    def unique_indices(self) -> Integers:
+        indices = jnp.concat([a.flatten() for a in self.coords], axis=0)
+        return jnp.unique(indices)
 
     @property
     def sampler(self) -> "S":
@@ -225,29 +230,10 @@ class AbstractErgmNodeView[T, MV](AbstractErgmView[T, MV]):
     def pairs(self) -> "E":
         """View of all node pairs induces by the node view."""
         pairs = self.model.pairs
-        if self.index is not None:
-            index = self.index
-            index = index[0] if isinstance(index, tuple) else index
-            if index is Ellipsis:
-                return pairs[index]
-            if not isinstance(index, slice | int):
-                index = jnp.asarray(index)
-                if index.ndim > 1:
-                    errmsg = (
-                        "cannot create pairs view from multi-dimensional node indices"
-                    )
-                    raise IndexError(errmsg)
-                if index.ndim == 1:
-                    if jnp.issubdtype(index.dtype, jnp.bool_):
-                        errmsg = "cannot create pairs view from boolean node indices"
-                        raise IndexError(errmsg)
-                    index = jnp.ix_(index, index)
-            else:
-                index = (index, index)
-            if self.n_nodes > 1 and index == (0, 0):
-                index = (0, 1)
-            return pairs[index]
-        return pairs
+        if not self.is_active:
+            return pairs
+        coords = jnp.ix_(*(self.coords * 2))
+        return pairs[coords]
 
     def sample(self, *args: Any, **kwargs: Any) -> Any:
         """Sample from the view's sampler."""
@@ -256,8 +242,8 @@ class AbstractErgmNodeView[T, MV](AbstractErgmView[T, MV]):
     def get_parameter(self, idx: int | str) -> AbstractParameter:
         param = self.model.parameters[idx]
         if self.model.is_homogeneous:
-            return jnp.full(self.shape, param.data)
-        return param[self.index]
+            return param
+        return param[self._index]
 
     # Statistics ---------------------------------------------------------------------
 
@@ -306,12 +292,23 @@ class AbstractErgmNodeView[T, MV](AbstractErgmView[T, MV]):
         """Quadrangle statistics for the nodes in the view."""
         return QStatistics.from_module(self)
 
+    def materialize(self, *, copy: bool = False) -> T:
+        """Materialize the view into a new model instance.
+
+        Parameters
+        ----------
+        copy
+            Whether to deep copy the model.
+        """
+        indices = self.unique_indices
+        return super().materialize(indices, copy=copy)
+
 
 class AbstractErgmNodePairView[T, ME](AbstractErgmView[T, ME]):
     """Abstract base class for node pair views."""
 
     @property
-    def _default_homogeneous_index(self) -> tuple[int, int]:
+    def _default_homogeneous_index_args(self) -> tuple[int, int]:
         return (0, 0) if self.model.n_units <= 1 else (0, 1)
 
     @property
@@ -321,54 +318,51 @@ class AbstractErgmNodePairView[T, ME](AbstractErgmView[T, ME]):
 
     @property
     def n_nodes(self) -> int:
-        if self._index is None:
-            return self.model.n_units
-        return max(self.shape) if self.shape else 1
+        return len(self.node_indices)
 
     @property
-    def ij(self) -> tuple[Integers, Integers]:
-        """Aligned indices for selected pairs."""
-        index = self.index
-        args = tuple(a for a in (index if index is not None else ()) if a is not None)
-        coords = self._coords[args]
-        if len(coords) < 2:
-            coords = self.index
-        return coords
+    def n_pairs(self) -> int:
+        return len(self.unique_indices)
+
+    @property
+    def unique_indices(self) -> Integers:
+        if not self.is_active:
+            nodes = self.node_indices
+            indices = jnp.ix_(nodes, nodes)
+        else:
+            indices = jnp.broadcast_arrays(*self.coords)
+        indices = jnp.stack(indices, axis=-1).reshape(-1, 2)
+        return jnp.unique(indices, axis=1)
+
+    @property
+    def node_indices(self) -> IntVector:
+        """Unique node indices in the view."""
+        if not self.is_active:
+            return jnp.arange(self.model.n_units)
+        return jnp.unique(self.unique_indices)
 
     @property
     def nodes(self) -> "V":
         """View of all nodes induces by the node pair view."""
-        uniq = self.unique_indices
-        return self.model.nodes[uniq]
+        return self.model.nodes[self.node_indices]
 
-    def get_parameter(self, idx: int | str) -> Any:
+    def get_parameter(self, idx: int | str) -> jnp.ndarray | LazyOuter:
         """Get a model parameter by index or name."""
         param = self.model.parameters[idx]
         if self.model.is_homogeneous:
             return param.data
         param = param.outer
-        if self._index is None:
+        if not self.is_active:
             return param[...]
-        return param[self.index][...]
+        return param[self.coords][...]
 
+    def materialize(self, *, copy: bool = False) -> T:
+        """Materialize the view into a new model instance.
 
-# Internals --------------------------------------------------------------------------
-
-
-def _indices_equal(
-    a: IndexArgT | tuple[IndexArgT, ...] | None,
-    b: IndexArgT | tuple[IndexArgT, ...] | None,
-) -> bool:
-    if a is None and b is None:
-        return True
-    if isinstance(a, jnp.ndarray):
-        if isinstance(b, jnp.ndarray):
-            return jnp.array_equal(a, b)
-        return False
-    if isinstance(a, tuple):
-        if isinstance(b, tuple):
-            if len(a) != len(b):
-                return False
-            return all(_indices_equal(ai, bi) for ai, bi in zip(a, b, strict=True))
-        return False
-    return a == b
+        Parameters
+        ----------
+        copy
+            Whether to deep copy the model.
+        """
+        indices = self.node_indices
+        return super().materialize(indices, copy=copy)

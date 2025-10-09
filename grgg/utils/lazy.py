@@ -1,4 +1,3 @@
-import math
 from collections.abc import Callable
 from dataclasses import replace
 from typing import Any, ClassVar, Self
@@ -10,12 +9,12 @@ from jaxtyping import DTypeLike
 
 from grgg._typing import Integers, RealVector
 
-from .indexing import CartesianCoordinates, IndexArgT
+from .indexing import DynamicIndexExpression, IndexArgT, Shaped
 
 IndexCallableT = Callable[[IndexArgT | tuple[IndexArgT, ...]], jnp.ndarray]
 
 
-class LazyArray(eqx.Module):
+class LazyArray(Shaped):
     """Lazy array wrapper around a callable.
 
     Attributes
@@ -38,6 +37,7 @@ class LazyArray(eqx.Module):
     Here we create a simple lazy 3D outer sum.
     >>> import jax.numpy as jnp
     >>> from grgg.utils.lazy import LazyArray
+    >>> from grgg.utils.indexing import IndexExpression
     >>> x1 = jnp.arange(10)
     >>> x2 = jnp.arange(8)
     >>> x3 = jnp.arange(5)
@@ -70,7 +70,8 @@ class LazyArray(eqx.Module):
     >>> mask = jnp.zeros(X.shape, dtype=bool)
     >>> jnp.array_equal(A[mask], X[mask]).item()
     True
-    >>> idx = A.coords.i_[2:5, [0, 2, -3], [1, 3, 3]]
+    >>> expr = IndexExpression(A.shape)  # Utility for generating indexing arguments
+    >>> idx = expr[2:5, [0, 2, -3], [1, 3, 3]]
     >>> jnp.array_equal(A[idx], X[idx]).item()
     True
     >>> mask = [False]*1+[True]*3+[False]*4
@@ -154,7 +155,6 @@ class LazyArray(eqx.Module):
     shape: tuple[int, ...] = eqx.field(static=True)
     f: IndexCallableT = eqx.field(static=True)
     dtype: DTypeLike | None = eqx.field(static=True)
-    coords: CartesianCoordinates = eqx.field()
 
     f_method_name: ClassVar[str] = "function"
 
@@ -164,7 +164,6 @@ class LazyArray(eqx.Module):
         f: IndexCallableT | None = None,
         *,
         dtype: DTypeLike | None = None,
-        coords: CartesianCoordinates | None = None,
     ) -> None:
         self.shape = (
             (int(shape),) if jnp.isscalar(shape) else tuple(int(s) for s in shape)
@@ -172,15 +171,14 @@ class LazyArray(eqx.Module):
         if hasattr(self, self.f_method_name) and f is not None:
             cn = self.__class__.__name__
             errmsg = (
-                f"it appears that {cn} already defines '{self.f_method_name}', "
+                f"it appears that this '{cn}' already defines '{self.f_method_name}', "
                 "so 'f' argument should not be provided"
             )
             raise ValueError(errmsg)
         if f is not None:
-            f = jax.vmap(jax.jit(f))
+            f = jax.jit(f)
         self.f = f
         self.dtype = jnp.dtype(dtype) if dtype is not None else None
-        self.coords = CartesianCoordinates(shape) if coords is None else coords
 
     def __check_init__(self) -> None:
         if getattr(self, "_f", None) is None and not hasattr(self, self.f_method_name):
@@ -188,9 +186,6 @@ class LazyArray(eqx.Module):
                 f"'{self.f_method_name}' must be provided either as an argument `f` "
                 "or implemented as a method on a subclass"
             )
-            raise ValueError(errmsg)
-        if self.shape != self.coords.shape:
-            errmsg = "`coords` shape must match `shape`"
             raise ValueError(errmsg)
 
     def __repr__(self) -> str:
@@ -202,29 +197,13 @@ class LazyArray(eqx.Module):
         return f"<{cn}{fname} {attrs}>"
 
     def __getitem__(self, args: Any) -> jnp.ndarray:
-        target_shape = None
-        if not isinstance(args, tuple):
-            args = (args,)
-        if any(a is None for a in args):
-            target_shape = self.coords.s_[args]
-            args = tuple(a for a in args if a is not None)
-        coords = self.coords[args]
-        out = self._f(*jnp.broadcast_arrays(*coords))
+        index = DynamicIndexExpression(self.shape)[args]
+        coords = tuple(c for c in index.coords if c is not None)
+        shape = index.shape
+        out = self._f(*coords).reshape(shape)
         if self.dtype is not None and out.dtype != self.dtype:
             out = out.astype(self.dtype)
-        if target_shape is not None:
-            out = out.reshape(target_shape)
         return out
-
-    @property
-    def ndim(self) -> int:
-        """Number of dimensions."""
-        return len(self.shape)
-
-    @property
-    def size(self) -> int:
-        """Total number of elements."""
-        return math.prod(self.shape)
 
     @property
     def _f(self) -> IndexCallableT:
@@ -238,24 +217,14 @@ class LazyArray(eqx.Module):
         """Return a new instance with the given dtype."""
         return replace(self, dtype=dtype)
 
-    def reshape(self, *shape: int) -> Self:
-        """Return a new instance with the given shape."""
-        if not shape:
-            errmsg = "shape must be non-empty"
-            raise ValueError(errmsg)
-        if isinstance(shape[0], tuple):
-            if any(isinstance(s, tuple) for s in shape[1:]):
-                errmsg = "only one tuple can be provided as shape"
-                raise ValueError(errmsg)
-            return self.reshape(*shape)
-        if math.prod(shape) != self.size:
-            errmsg = f"cannot reshape array of size {self.size} into shape {shape}"
-            raise ValueError(errmsg)
-        return replace(self, shape=shape, coords=CartesianCoordinates(shape))
+    def _equals(self, other: object) -> bool:
+        return (
+            super()._equals(other) and self.f is other.f and self.dtype == other.dtype
+        )
 
 
 class LazyView(LazyArray):
-    """Lazy view of an array, with optional element-wisze transformation.
+    """Lazy view of an array, with optional element-wise transformation.
 
     Attributes
     ----------
@@ -267,6 +236,7 @@ class LazyView(LazyArray):
     Examples
     --------
     >>> import jax.numpy as jnp
+    >>> from grgg.utils.lazy import LazyView
     >>> x = jnp.arange(10)
     >>> V = LazyView(x, jnp.square)
     >>> V
@@ -332,6 +302,7 @@ class LazyOuter(LazyArray):
     Examples
     --------
     >>> import jax.numpy as jnp
+    >>> from grgg.utils.lazy import LazyOuter
     >>> x1 = jnp.array([1, 2, 3])
     >>> x2 = jnp.array([4, 5])
     >>> O = LazyOuter(x1, x2)
@@ -378,7 +349,7 @@ class LazyOuter(LazyArray):
 
     x: RealVector
     y: RealVector
-    op: Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]
+    op: Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray] = eqx.field(static=True)
 
     def __init__(
         self,

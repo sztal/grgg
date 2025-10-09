@@ -79,13 +79,13 @@ def _pairs_probs(
     if pairs.model.is_homogeneous:
         probs = jnp.full(pairs.shape, probs)
     try:
-        i, j = pairs.ij
+        i, j = pairs.coords
     except ValueError:
         # This must be a single integer index
         if adjust_quantized and pairs.model.is_quantized:
             w = pairs.model.quantizer.weights
-            return probs.at[pairs.index].mul(1 / w * (w - 1))
-        return probs.at[pairs.index].set(0.0)
+            return probs.at[pairs._index].mul(1 / w * (w - 1))
+        return probs.at[pairs._index].set(0.0)
     if adjust_quantized and pairs.model.is_quantized:
         w = pairs.model.quantizer.weights[i]
         return jnp.where(i == j, probs / w * (w - 1), probs)

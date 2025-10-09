@@ -14,7 +14,7 @@ class UndirectedRandomGraphQHeadMotif(QHeadMotif):
     Examples
     --------
     Here we show that the importance sampling estimator for the Q-head motif is
-    unbiased and very effective.
+    effective.
     >>> import jax
     >>> import jax.numpy as jnp
     >>> from grgg import UndirectedRandomGraph, RandomGenerator
@@ -45,11 +45,8 @@ class UndirectedRandomGraphQHeadMotif(QHeadMotif):
         """Q-head count implementation for heterogeneous undirected random graphs."""
         n = self.model.n_nodes
         vids = jnp.arange(n)
-        rng, mr_kwargs, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
+        key, mr_kwargs, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
         weights = self.importance_weights
-        # Computations with inner loops must pass the explicit key
-        # other wise jax gets confused
-        key = rng.key if rng is not None else None
 
         @jax.jit
         def sum_l(i: Integer, j: Integer, k: Integer) -> Real:

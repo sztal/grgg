@@ -433,7 +433,11 @@ def split_kwargs_by_signature(
 def format_array(x: jnp.ndarray) -> str:
     """Format a JAX array for display."""
     if jnp.isscalar(x):
-        return f"{x.item():.2f}"
+        return (
+            f"{x.item():.2f}"
+            if jnp.issubdtype(x.dtype, jnp.floating)
+            else str(x.item())
+        )
     return tree_pformat(x)
 
 

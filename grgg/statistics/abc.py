@@ -6,7 +6,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from grgg._typing import Reals
+from grgg._typing import Integers, Reals
 from grgg.abc import AbstractModule
 from grgg.utils.compute import MapReduce
 from grgg.utils.misc import split_kwargs_by_signature
@@ -29,7 +29,7 @@ ET = TypeVar("ET", bound="E")
 __all__ = ("AbstractStatistic",)
 
 
-ComputeKwargsT = tuple[RandomGenerator, dict[str, Any], dict[str, Any]]
+ComputeKwargsT = tuple[Integers | None, dict[str, Any], dict[str, Any]]
 
 
 class AbstractStatistic[MT](AbstractModule):
@@ -144,24 +144,27 @@ class AbstractStatistic[MT](AbstractModule):
 
         Returns
         -------
-        rng
-            A random generator or `None`.
+        key
+            PRNG key.
         mr_kwargs
             Keyword arguments for :class:`grgg.utils.compute.MapReduce`.
         loop_kwargs
             Keyword arguments for outer loops, usually :func:`jax.lax.map`.
         """
         mr_kwargs, loop_kwargs = split_kwargs_by_signature(MapReduce, **kwargs)
-        rng = RandomGenerator.from_seed(mr_kwargs.pop("rng", None))
-        if self.use_sampling:
+        rng = mr_kwargs.pop("rng", None)
+        if not self.use_sampling:
+            return None, mr_kwargs, loop_kwargs
+        if isinstance(rng, RandomGenerator):
             # Make sure each sampling call gets a different key
             # and the original rng is not used again, but mutated
-            # a single time.
+            # a single time
             rng = rng.child
+        key = RandomGenerator.make_key(rng)
         loop_kwargs["batch_size"] = self.model._get_batch_size(
             loop_kwargs.get("batch_size")
         )
-        return rng, mr_kwargs, loop_kwargs
+        return key, mr_kwargs, loop_kwargs
 
     def split_compute_kwargs(
         self, n: int = 2, *, same_seed: bool = False, **kwargs: Any
@@ -177,16 +180,11 @@ class AbstractStatistic[MT](AbstractModule):
         **kwargs
             Keyword arguments to split.
         """
-        rng, kwargs, _ = self.prepare_compute_kwargs(**kwargs)
-        if rng is None and same_seed:
-            rng = RandomGenerator()
-        if rng is not None:
-            if same_seed:
-                rngs = tuple(rng.copy() for _ in range(n))
-            else:
-                rngs = RandomGenerator(rng).split(n)
-            return tuple({**kwargs, "rng": rng} for rng in rngs)
-        return tuple(kwargs.copy() for _ in range(n))
+        key, kwargs, _ = self.prepare_compute_kwargs(**kwargs)
+        keys = (
+            (key,) * n if key is None or same_seed else tuple(jax.random.split(key, n))
+        )
+        return tuple(kwargs.copy() if k is None else {**kwargs, "rng": k} for k in keys)
 
 
 class AbstractErgmStatistic[MT](AbstractStatistic[MT]):

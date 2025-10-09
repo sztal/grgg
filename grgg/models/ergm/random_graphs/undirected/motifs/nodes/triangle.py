@@ -9,7 +9,31 @@ from grgg.utils.compute import MapReduce
 
 
 class UndirectedRandomGraphTriangleMotif(TriangleMotif):
-    """Triangle motif statistic for undirected random graphs."""
+    """Triangle motif statistic for undirected random graphs.
+
+    Examples
+    --------
+    Here we show that the importance sampling estimator for the triangle motif is
+    effective.
+    >>> import jax
+    >>> import jax.numpy as jnp
+    >>> from grgg import UndirectedRandomGraph, RandomGenerator
+    >>> n = 100
+    >>> rng = RandomGenerator(303)
+    >>> model = UndirectedRandomGraph(n, mu=rng.normal(n) - 3)
+    >>> T_exact = model.nodes.motifs.triangle()
+    >>> T_approx = model.nodes.motifs.triangle(n_samples=10, rng=rng)
+    >>>
+    >>> def error(X, Y):
+    ...     return jnp.linalg.norm(X - Y) / jnp.linalg.norm(X)
+    >>>
+    >>> err = error(T_exact, T_approx)
+    >>> (err < 0.25).item()
+    True
+    >>> cor = jnp.corrcoef(T_exact, T_approx)[0, 1]
+    >>> (cor > 0.95).item()
+    True
+    """
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
         """Triangle count implementation for homogeneous undirected random graphs."""
@@ -21,11 +45,8 @@ class UndirectedRandomGraphTriangleMotif(TriangleMotif):
         """Triangle count implementation for heterogeneous undirected random graphs."""
         n = self.model.n_nodes
         vids = jnp.arange(n)
-        rng, mr_kwargs, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
+        key, mr_kwargs, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
         weights = self.importance_weights
-        # Computations with inner loops must pass the explicit key
-        # other wise jax gets confused
-        key = rng.key if rng is not None else None
 
         @jax.jit
         def sum_k(i: Integer, j: Integer) -> Real:

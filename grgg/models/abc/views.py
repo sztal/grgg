@@ -25,8 +25,9 @@ class AbstractModelView[T](AbstractModelModule[T]):
 
     @property
     @abstractmethod
-    def _default_index(self) -> IndexArgT | tuple[IndexArgT, ...]:
+    def _default_index_args(self) -> IndexArgT | tuple[IndexArgT, ...]:
         """Default index for the view."""
+        return ()
 
     @abstractmethod
     def __getitem__(self, args: IndexArgT | tuple[IndexArgT, ...]) -> Self:
