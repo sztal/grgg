@@ -10,12 +10,12 @@ from grgg.statistics.motifs import (
     TWedgeMotif,
 )
 
-from .qhead import UndirectedRandomGraphQHeadMotif
-from .quadrangle import UndirectedRandomGraphQuadrangleMotif
-from .qwedge import UndirectedRandomGraphQWedgeMotif
-from .thead import UndirectedRandomGraphTHeadMotif
-from .triangle import UndirectedRandomGraphTriangleMotif
-from .twedge import UndirectedRandomGraphTWedgeMotif
+from ._qhead import UndirectedRandomGraphQHeadMotif
+from ._quadrangle import UndirectedRandomGraphQuadrangleMotif
+from ._qwedge import UndirectedRandomGraphQWedgeMotif
+from ._thead import UndirectedRandomGraphTHeadMotif
+from ._triangle import UndirectedRandomGraphTriangleMotif
+from ._twedge import UndirectedRandomGraphTWedgeMotif
 
 if TYPE_CHECKING:
     from grgg.models.ergm.random_graphs.undirected.model import UndirectedRandomGraph

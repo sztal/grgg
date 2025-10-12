@@ -8,7 +8,7 @@ import jax.numpy as jnp
 
 from grgg._typing import Integers, Reals
 from grgg.abc import AbstractModule
-from grgg.utils.compute import MapReduce
+from grgg.utils.compute import mapreduce
 from grgg.utils.misc import split_kwargs_by_signature
 from grgg.utils.random import RandomGenerator
 
@@ -146,25 +146,26 @@ class AbstractStatistic[MT](AbstractModule):
         -------
         key
             PRNG key.
-        mr_kwargs
-            Keyword arguments for :class:`grgg.utils.compute.MapReduce`.
+        sample_kwargs
+            Keyword arguments for sampling routines, usually
+            :func:`grgg.utils.compute.sample`.
         loop_kwargs
             Keyword arguments for outer loops, usually :func:`jax.lax.map`.
         """
-        mr_kwargs, loop_kwargs = split_kwargs_by_signature(MapReduce, **kwargs)
-        rng = mr_kwargs.pop("rng", None)
+        sample_kwargs, loop_kwargs = split_kwargs_by_signature(mapreduce, **kwargs)
+        loop_kwargs["batch_size"] = self.model._get_batch_size(
+            loop_kwargs.get("batch_size")
+        )
+        rng = sample_kwargs.pop("rng", None)
         if not self.use_sampling:
-            return None, mr_kwargs, loop_kwargs
+            return None, sample_kwargs, loop_kwargs
         if isinstance(rng, RandomGenerator):
             # Make sure each sampling call gets a different key
             # and the original rng is not used again, but mutated
             # a single time
             rng = rng.child
         key = RandomGenerator.make_key(rng)
-        loop_kwargs["batch_size"] = self.model._get_batch_size(
-            loop_kwargs.get("batch_size")
-        )
-        return key, mr_kwargs, loop_kwargs
+        return key, sample_kwargs, loop_kwargs
 
     def split_compute_kwargs(
         self, n: int = 2, *, same_seed: bool = False, **kwargs: Any
@@ -218,9 +219,9 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
         return moments
 
     def prepare_compute_kwargs(self, **kwargs: Any) -> ComputeKwargsT:
-        rng, mr_kwargs, loop_kwargs = super().prepare_compute_kwargs(**kwargs)
-        mr_kwargs = {"n_samples": self.n_samples, **mr_kwargs}
-        return rng, mr_kwargs, loop_kwargs
+        rng, sample_kwargs, loop_kwargs = super().prepare_compute_kwargs(**kwargs)
+        sample_kwargs = {"n_samples": self.n_samples, **sample_kwargs}
+        return rng, sample_kwargs, loop_kwargs
 
 
 class AbstractErgmViewStatistic[QT](AbstractErgmStatistic[QT]):

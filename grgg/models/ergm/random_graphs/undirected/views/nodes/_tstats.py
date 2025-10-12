@@ -5,9 +5,9 @@ import jax.numpy as jnp
 from grgg._typing import Reals
 from grgg.statistics import TStatistics
 
-from .similarity import UndirectedRandomGraphStructuralSimilarity
-from .tclosure import UndirectedRandomGraphTClosure
-from .tclust import UndirectedRandomGraphTClustering
+from ._similarity import UndirectedRandomGraphStructuralSimilarity
+from ._tclosure import UndirectedRandomGraphTClosure
+from ._tclust import UndirectedRandomGraphTClustering
 
 
 class UndirectedRandomGraphTStatistics(TStatistics):

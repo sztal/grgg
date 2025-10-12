@@ -52,6 +52,7 @@ dev = [
     "networkx>=3.5",
     "matplotlib>=3.10.3",
     "seaborn>=0.13.2",
+    "xprof",
     "grgg[test,lint,mypy,igraph,pathcensus]",
 ]
 lint = ["ruff>=0.1.9"]

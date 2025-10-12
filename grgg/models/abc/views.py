@@ -40,7 +40,7 @@ class AbstractModelView[T](AbstractModelModule[T]):
     @property
     def parameters(self) -> tuple[jnp.ndarray, ...]:
         """Tuple of parameter arrays for the view."""
-        return tuple(self.get_parameter(name) for name in self.model.parameters.names)
+        return tuple(self.get_parameter(name) for name in self.model.parameters)
 
     @abstractmethod
     def get_parameter(self, args: Any, **kwargs: Any) -> Any:

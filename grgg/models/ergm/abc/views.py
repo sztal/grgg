@@ -7,7 +7,7 @@ import equinox as eqx
 import jax.numpy as jnp
 
 from grgg._typing import Integers, IntVector
-from grgg.models.abc import AbstractModelView, AbstractParameter, AbstractParameters
+from grgg.models.abc import AbstractModelView
 from grgg.statistics import (
     Degree,
     QClosure,
@@ -25,7 +25,6 @@ from grgg.utils.indexing import (
     IndexArgT,
     Shaped,
 )
-from grgg.utils.lazy import LazyOuter
 
 from .motifs import (
     AbstractErgmMotifs,
@@ -37,11 +36,10 @@ from .sampling import AbstractErgmSampler
 if TYPE_CHECKING:
     from .models import AbstractErgm
 
-    P = TypeVar("P", bound=AbstractParameters)
     V = TypeVar("V", bound="AbstractErgmNodeView")
     E = TypeVar("E", bound="AbstractErgmNodePairView")
     S = TypeVar("S", bound=AbstractErgmSampler)
-    T = TypeVar("T", bound=AbstractErgm[P, V, E, S])
+    T = TypeVar("T", bound=AbstractErgm[V, E, S])
     M = TypeVar("M", bound="AbstractErgmMotifs")
     MV = TypeVar("M", bound="AbstractErgmNodeMotifs")
     ME = TypeVar("N", bound="AbstractErgmNodePairMotifs")
@@ -192,8 +190,10 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         if indices is None:
             errmsg = "`indices` must be provided to materialize a view"
             raise ValueError(errmsg)
-        parameters = self.model.parameters.subset[indices]
-        model = self.model.replace(n_nodes=len(indices), parameters=parameters)
+        parameters = {
+            name: param[indices] for name, param in self.model.parameters.items()
+        }
+        model = self.model.replace(n_nodes=len(indices), **parameters)
         if copy:
             model = model.copy(deep=True)
         return model
@@ -239,11 +239,11 @@ class AbstractErgmNodeView[T, MV](AbstractErgmView[T, MV]):
         """Sample from the view's sampler."""
         return self.sampler.sample(*args, **kwargs)
 
-    def get_parameter(self, idx: int | str) -> AbstractParameter:
+    def get_parameter(self, idx: str) -> jnp.ndarray:
         param = self.model.parameters[idx]
         if self.model.is_homogeneous:
-            return param
-        return param[self._index]
+            return param.data
+        return param[self.index].data
 
     # Statistics ---------------------------------------------------------------------
 
@@ -346,15 +346,13 @@ class AbstractErgmNodePairView[T, ME](AbstractErgmView[T, ME]):
         """View of all nodes induces by the node pair view."""
         return self.model.nodes[self.node_indices]
 
-    def get_parameter(self, idx: int | str) -> jnp.ndarray | LazyOuter:
+    def get_parameter(self, idx: int | str) -> jnp.ndarray:
         """Get a model parameter by index or name."""
         param = self.model.parameters[idx]
         if self.model.is_homogeneous:
             return param.data
-        param = param.outer
-        if not self.is_active:
-            return param[...]
-        return param[self.coords][...]
+        i, j = self.coords if self.is_active else self[...].coords
+        return param.data[i] + param.data[j]
 
     def materialize(self, *, copy: bool = False) -> T:
         """Materialize the view into a new model instance.

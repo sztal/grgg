@@ -5,9 +5,9 @@ import jax.numpy as jnp
 from grgg._typing import Reals
 from grgg.statistics import QStatistics
 
-from .complementarity import UndirectedRandomGraphStructuralComplementarity
-from .qclosure import UndirectedRandomGraphQClosure
-from .qclust import UndirectedRandomGraphQClustering
+from ._complementarity import UndirectedRandomGraphStructuralComplementarity
+from ._qclosure import UndirectedRandomGraphQClosure
+from ._qclust import UndirectedRandomGraphQClustering
 
 
 class UndirectedRandomGraphQStatistics(QStatistics):

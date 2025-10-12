@@ -1,6 +1,5 @@
 from .functions import UndirectedRandomGraphCoupling
-from .models import AbstractUndirectedRandomGraph
-from .parameters import Mu, UndirectedRandomGraphParameters
+from .models import AbstractUndirectedRandomGraph, Mu
 from .sampling import AbstractUndirectedRandomGraphSampler
 from .views import (
     AbstractUndirectedRandomGraphNodePairView,

@@ -1,8 +1,10 @@
 from typing import Any
 
+import equinox as eqx
 import jax
+import jax.numpy as jnp
 
-from grgg._typing import Reals
+from grgg._typing import Integer, Reals
 from grgg.statistics import Degree
 
 
@@ -62,6 +64,11 @@ class UndirectedRandomGraphDegreeStatistic(Degree):
         True
         """
         *_, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
-        indices = self.nodes.coords
-        f = jax.jit(lambda i: self.model.pairs[i].probs().sum())
-        return jax.lax.map(f, indices, **loop_kwargs)
+        indices = self.nodes.coords[0]
+
+        @eqx.filter_checkpoint
+        @eqx.filter_jit
+        def node_degree(i: Integer) -> jnp.ndarray:
+            return self.model.pairs[i].probs().sum(-1)
+
+        return jax.lax.map(node_degree, indices, **loop_kwargs)

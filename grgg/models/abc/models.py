@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from collections.abc import Mapping
 from typing import Any, TypeVar
 
 import equinox as eqx
@@ -8,39 +9,29 @@ from grgg._options import options
 from grgg.utils.misc import parse_switch_flag
 
 from .modules import AbstractModelModule
-from .parameters import AbstractParameters
+from .parameters import AbstractParameter
 from .sampling import AbstractModelSampler
 
 __all__ = ("AbstractModel",)
 
 
 T = TypeVar("T", bound="AbstractModel")
-P = TypeVar("M", bound="AbstractParameters")
 S = TypeVar("S", bound=AbstractModelSampler)
 
 
-class AbstractModel[T, P, S](AbstractModelModule[T]):
+class AbstractModel[T, S](AbstractModelModule[T]):
     """Abstract base class for models."""
 
-    parameters: eqx.AbstractVar[P]
     n_units: eqx.AbstractVar[int]
 
-    parameters_cls: eqx.AbstractClassVar[type[P]]
     sampler_cls: eqx.AbstractClassVar[type[S]]
 
     def __check_init__(self) -> None:
         if self.n_units <= 0:
             errmsg = f"'n_units' must be positive, got {self.n_units}."
             raise ValueError(errmsg)
-        if not isinstance(self.parameters, self.parameters_cls):
-            errmsg = (
-                f"'parameters' must be an instance of '{self.parameters_cls.__name__}',"
-                f" got '{type(self.parameters).__name__}' instead."
-            )
-            raise TypeError(errmsg)
-        for parameter in self.parameters:
+        for name, parameter in self.parameters.items():
             if not parameter.is_scalar and len(parameter) != self.n_units:
-                name = parameter.name
                 errmsg = (
                     f"all non-scalar parameters must have leading axis size equal to "
                     f"'n_units' ({self.n_units}), but parameter '{name}' has "
@@ -70,6 +61,11 @@ class AbstractModel[T, P, S](AbstractModelModule[T]):
     def is_quantized(self) -> bool:
         """Whether the model is quantized."""
         return False
+
+    @property
+    @abstractmethod
+    def parameters(self) -> Mapping[str, AbstractParameter]:
+        """Parameters of the model."""
 
     @abstractmethod
     def _repr_inner(self) -> str:

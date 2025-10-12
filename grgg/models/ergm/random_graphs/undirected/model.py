@@ -2,7 +2,7 @@ from typing import ClassVar, TypeVar
 
 import equinox as eqx
 
-from .abc import AbstractUndirectedRandomGraph, UndirectedRandomGraphParameters
+from .abc import AbstractUndirectedRandomGraph, Mu
 from .abc.functions import UndirectedRandomGraphCoupling
 from .sampling import UndirectedRandomGraphSampler
 from .views import UndirectedRandomGraphNodePairView, UndirectedRandomGraphNodeView
@@ -11,15 +11,12 @@ __all__ = ("UndirectedRandomGraph",)
 
 
 T = TypeVar("T", bound="UndirectedRandomGraph")
-P = TypeVar("P", bound=UndirectedRandomGraphParameters)
 V = TypeVar("V", bound=UndirectedRandomGraphNodeView)
 E = TypeVar("E", bound=UndirectedRandomGraphNodePairView)
 S = TypeVar("S", bound=UndirectedRandomGraphSampler)
 
 
-class UndirectedRandomGraph[T, P, V, E, S](
-    AbstractUndirectedRandomGraph[T, P, V, E, S]
-):
+class UndirectedRandomGraph[T, V, E, S](AbstractUndirectedRandomGraph[T, V, E, S]):
     """Undirected random graph model.
 
     It is equivalent to the `(n, p)`-Erdős–Rényi model when `mu` is homogeneous,
@@ -34,10 +31,9 @@ class UndirectedRandomGraph[T, P, V, E, S](
     """
 
     n_nodes: int = eqx.field(static=True)
-    parameters: P
+    mu: Mu
     coupling: UndirectedRandomGraphCoupling = eqx.field(init=False)
 
-    parameters_cls: ClassVar[type[P]] = UndirectedRandomGraphParameters  # type: ignore
     node_view_cls: ClassVar[type[V]] = UndirectedRandomGraphNodeView  # type: ignore
     pair_view_cls: ClassVar[type[E]] = UndirectedRandomGraphNodePairView  # type: ignore
     sampler_cls: ClassVar[type[S]] = UndirectedRandomGraphSampler  # type: ignore

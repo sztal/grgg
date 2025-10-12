@@ -18,15 +18,15 @@ from grgg.statistics import (
     TStatistics,
 )
 
-from .complementarity import UndirectedRandomGraphStructuralComplementarity
-from .degree import UndirectedRandomGraphDegreeStatistic
-from .qclosure import UndirectedRandomGraphQClosure
-from .qclust import UndirectedRandomGraphQClustering
-from .qstats import UndirectedRandomGraphQStatistics
-from .similarity import UndirectedRandomGraphStructuralSimilarity
-from .tclosure import UndirectedRandomGraphTClosure
-from .tclust import UndirectedRandomGraphTClustering
-from .tstats import UndirectedRandomGraphTStatistics
+from ._complementarity import UndirectedRandomGraphStructuralComplementarity
+from ._degree import UndirectedRandomGraphDegreeStatistic
+from ._qclosure import UndirectedRandomGraphQClosure
+from ._qclust import UndirectedRandomGraphQClustering
+from ._qstats import UndirectedRandomGraphQStatistics
+from ._similarity import UndirectedRandomGraphStructuralSimilarity
+from ._tclosure import UndirectedRandomGraphTClosure
+from ._tclust import UndirectedRandomGraphTClustering
+from ._tstats import UndirectedRandomGraphTStatistics
 
 if TYPE_CHECKING:
     from grgg.models.ergm.random_graphs.undirected.model import UndirectedRandomGraph

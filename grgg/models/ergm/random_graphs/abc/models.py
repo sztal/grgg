@@ -2,7 +2,6 @@ from abc import abstractmethod
 from typing import Any, TypeVar
 
 from grgg._typing import Reals
-from grgg.models.abc import AbstractParameters
 from grgg.models.ergm.abc import AbstractErgm
 from grgg.utils.misc import sigmoid
 
@@ -14,13 +13,12 @@ __all__ = ("AbstractRandomGraph",)
 
 
 T = TypeVar("T", bound="AbstractRandomGraph")
-P = TypeVar("P", bound=AbstractParameters)
 V = TypeVar("V", bound=AbstractRandomGraphNodeView)
 E = TypeVar("E", bound=AbstractRandomGraphNodePairView)
 S = TypeVar("S", bound=AbstractRandomGraphSampler)
 
 
-class AbstractRandomGraph[T, P, V, E, S](AbstractErgm[T, P, V, E, S]):
+class AbstractRandomGraph[T, V, E, S](AbstractErgm[T, V, E, S]):
     """Abstract base class for random graph models."""
 
     coupling: AbstractCoupling

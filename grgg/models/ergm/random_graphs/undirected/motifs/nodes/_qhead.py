@@ -5,7 +5,7 @@ import jax.numpy as jnp
 
 from grgg._typing import Integer, Integers, Real, Reals
 from grgg.statistics.motifs import QHeadMotif
-from grgg.utils.compute import MapReduce
+from grgg.utils.compute import foreach, sample
 
 
 class UndirectedRandomGraphQHeadMotif(QHeadMotif):
@@ -45,42 +45,62 @@ class UndirectedRandomGraphQHeadMotif(QHeadMotif):
         """Q-head count implementation for heterogeneous undirected random graphs."""
         n = self.model.n_nodes
         vids = jnp.arange(n)
-        key, mr_kwargs, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
+        key, sample_kwargs, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
         weights = self.importance_weights
 
+        @jax.checkpoint
         @jax.jit
         def sum_l(i: Integer, j: Integer, k: Integer) -> Real:
             """Sum over l of p_kl."""
-            p_ik = self.model.pairs[i, k].probs()
-            p_jk = self.model.pairs[j, k].probs()
-            return self.model.pairs[k].probs().sum() - p_ik - p_jk
+            p_ik_jk = self.model.pairs[[i, j], [k, k]].probs().sum(-1)
+            return self.model.pairs[k].probs().sum(-1) - p_ik_jk
 
         @jax.jit
         def sum_k(i: Integer, j: Integer, key: Integers | None) -> Real:
             """Sum over k of p_ik * sum_l"""
             key_k = jax.random.fold_in(key, j) if key is not None else None
             v = jnp.delete(vids, jnp.array([i, j]), assume_unique_indices=True)
-            w = weights[v] if self.use_sampling else None
+            xs = (
+                sample(v, p=weights[v], rng=key_k, **sample_kwargs)
+                if self.use_sampling
+                else (v,)
+            )
 
-            @MapReduce(rng=key_k, p=w, **mr_kwargs)
-            def compute(k: Integer) -> Real:
-                return self.model.pairs[j, k].probs() * sum_l(i, j, k)
+            @foreach(xs, init=0.0)
+            def _sum_k(
+                carry: Real, x: Integer | tuple[Integer, Real]
+            ) -> tuple[Real, None]:
+                k = x[0]
+                out = self.model.pairs[j, k].probs() * sum_l(i, j, k)
+                if self.use_sampling:
+                    out *= x[1]  # importance weight
+                return carry + out, None
 
-            return compute(v)
+            return _sum_k[0]  # type: ignore
 
         @jax.jit
         def sum_j(i: Integer) -> Real:
             """Sum over j of p_ij * sum_k"""
             key_j = jax.random.fold_in(key, i) if self.use_sampling else None
             v = jnp.delete(vids, i, assume_unique_indices=True)
-            w = weights[v] if self.use_sampling else None
+            xs = (
+                sample(v, p=weights[v], rng=key_j, **sample_kwargs)
+                if self.use_sampling
+                else (v,)
+            )
 
-            @MapReduce(rng=key_j, p=w, **mr_kwargs)
-            def compute(j: Integer) -> Real:
-                return self.model.pairs[i, j].probs() * sum_k(i, j, key_j)
+            @foreach(xs, init=0.0)
+            def _sum_j(
+                carry: Real, x: Integer | tuple[Integer, Real]
+            ) -> tuple[Real, None]:
+                j = x[0]
+                out = self.model.pairs[i, j].probs() * sum_k(i, j, key_j)
+                if self.use_sampling:
+                    out *= x[1]  # importance weight
+                return carry + out, None
 
-            return compute(v)
+            return _sum_j[0]  # type: ignore
 
-        indices = self.view.coords[0].flatten()
+        indices = self.view.coords[0]
         qheads = jax.lax.map(sum_j, indices, **loop_kwargs)
         return qheads
