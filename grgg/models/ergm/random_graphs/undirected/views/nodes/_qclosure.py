@@ -1,5 +1,7 @@
 from typing import Any
 
+import equinox as eqx
+
 from grgg._typing import Reals
 from grgg.statistics import QClosure
 
@@ -8,16 +10,10 @@ class UndirectedRandomGraphQClosure(QClosure):
     """Quadrangle closure statistic for undirected random graphs."""
 
     @staticmethod
+    @eqx.filter_jit
     def m1_from_motifs(quadrangles: Reals, qheads: Reals) -> Reals:
         """Compute the first moment of the statistic from motifs counts."""
         return 2 * quadrangles / qheads
-
-    def _m1(self, **kwargs: Any) -> Reals:
-        """Compute the first moment of the statistic."""
-        kw1, kw2 = self.split_compute_kwargs(same_seed=True, **kwargs)
-        quadrangles = self.nodes.motifs.quadrangle(**kw1)
-        qheads = self.nodes.motifs.qhead(**kw2)
-        return self.m1_from_motifs(quadrangles, qheads)
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
         """Compute q-closure for a homogeneous undirected random graph.
@@ -44,7 +40,7 @@ class UndirectedRandomGraphQClosure(QClosure):
         >>> jnp.all(qc == qclosure).item()
         True
         """
-        return self._m1(**kwargs)
+        return _m1(self, **kwargs)
 
     def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
         """Compute q-closure for a heterogeneous undirected random graph.
@@ -76,4 +72,13 @@ class UndirectedRandomGraphQClosure(QClosure):
         >>> jnp.allclose(qc, qclosure[vids]).item()
         True
         """
-        return self._m1(**kwargs)
+        return _m1(self, **kwargs)
+
+
+@eqx.filter_jit
+def _m1(stat: UndirectedRandomGraphQClosure, **kwargs: Any) -> Reals:
+    """Compute the first moment of the statistic."""
+    kw1, kw2 = stat.split_compute_kwargs(same_seed=True, **kwargs)
+    quadrangles = stat.nodes.motifs.quadrangle(**kw1)
+    qheads = stat.nodes.motifs.qhead(**kw2)
+    return stat.m1_from_motifs(quadrangles, qheads)

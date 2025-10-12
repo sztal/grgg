@@ -1,5 +1,7 @@
 from typing import Any
 
+import equinox as eqx
+
 from grgg._typing import Reals
 from grgg.statistics import TClustering
 
@@ -8,16 +10,10 @@ class UndirectedRandomGraphTClustering(TClustering):
     """Triangle clustering statistic for undirected random graphs."""
 
     @staticmethod
+    @eqx.filter_jit
     def m1_from_motifs(triangles: Reals, twedges: Reals) -> Reals:
         """Compute the first moment of the statistic from motifs counts."""
         return 2 * triangles / twedges
-
-    def _m1(self, **kwargs: Any) -> Reals:
-        """Compute the first moment of the statistic."""
-        kw1, kw2 = self.split_compute_kwargs(same_seed=True, **kwargs)
-        triangles = self.nodes.motifs.triangle(**kw1)
-        twedges = self.nodes.motifs.twedge(**kw2)
-        return self.m1_from_motifs(triangles, twedges)
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
         """Compute t-clustering for a homogeneous undirected random graph.
@@ -44,7 +40,7 @@ class UndirectedRandomGraphTClustering(TClustering):
         >>> jnp.all(tc == tclust).item()
         True
         """
-        return self._m1()
+        return _m1(self, **kwargs)
 
     def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
         """Compute t-clustering for a heterogeneous undirected random graph.
@@ -75,4 +71,13 @@ class UndirectedRandomGraphTClustering(TClustering):
         >>> jnp.allclose(tc, tclust[vids]).item()
         True
         """
-        return self._m1(**kwargs)
+        return _m1(self, **kwargs)
+
+
+@eqx.filter_jit
+def _m1(stat: UndirectedRandomGraphTClustering, **kwargs: Any) -> Reals:
+    """Compute the first moment of the statistic."""
+    kw1, kw2 = stat.split_compute_kwargs(same_seed=True, **kwargs)
+    triangles = stat.nodes.motifs.triangle(**kw1)
+    twedges = stat.nodes.motifs.twedge(**kw2)
+    return stat.m1_from_motifs(triangles, twedges)

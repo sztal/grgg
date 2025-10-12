@@ -1,5 +1,7 @@
 from typing import Any
 
+import equinox as eqx
+
 from grgg._typing import Reals
 from grgg.statistics import TClosure
 
@@ -8,16 +10,10 @@ class UndirectedRandomGraphTClosure(TClosure):
     """Triangle closure statistic for undirected random graphs."""
 
     @staticmethod
+    @eqx.filter_jit
     def m1_from_motifs(triangles: Reals, theads: Reals) -> Reals:
         """Compute the first moment of the statistic from motifs counts."""
         return 2 * triangles / theads
-
-    def _m1(self, **kwargs: Any) -> Reals:
-        """Compute the first moment of the statistic."""
-        kw1, kw2 = self.split_compute_kwargs(same_seed=True, **kwargs)
-        triangles = self.nodes.motifs.triangle(**kw1)
-        theads = self.nodes.motifs.thead(**kw2)
-        return self.m1_from_motifs(triangles, theads)
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:
         """Compute t-closure for a homogeneous undirected random graph.
@@ -44,7 +40,7 @@ class UndirectedRandomGraphTClosure(TClosure):
         >>> jnp.all(tc == tclosure).item()
         True
         """
-        return self._m1(**kwargs)
+        return _m1(self, **kwargs)
 
     def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
         """Compute t-closure for a heterogeneous undirected random graph.
@@ -76,4 +72,13 @@ class UndirectedRandomGraphTClosure(TClosure):
         >>> jnp.allclose(tc, tclosure[vids]).item()
         True
         """
-        return self._m1(**kwargs)
+        return _m1(self, **kwargs)
+
+
+@eqx.filter_jit
+def _m1(stat: UndirectedRandomGraphTClosure, **kwargs: Any) -> Reals:
+    """Compute the first moment of the statistic."""
+    kw1, kw2 = stat.split_compute_kwargs(same_seed=True, **kwargs)
+    triangles = stat.nodes.motifs.triangle(**kw1)
+    theads = stat.nodes.motifs.thead(**kw2)
+    return stat.m1_from_motifs(triangles, theads)

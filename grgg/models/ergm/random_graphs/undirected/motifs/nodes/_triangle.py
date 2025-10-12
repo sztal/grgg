@@ -1,5 +1,6 @@
 from typing import Any
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
 
@@ -41,42 +42,46 @@ class UndirectedRandomGraphTriangleMotif(TriangleMotif):
         p = self.model.pairs.probs()
         return (n - 1) * (n - 2) * p**3 / 2
 
-    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
-        """Triangle count implementation for heterogeneous undirected random graphs."""
-        vids = jnp.arange(self.model.n_nodes)
-        key, sample_kwargs, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
-        weights = self.importance_weights
+    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
+        """Triangle count for heterogeneous undirected random graphs."""
+        return _heterogeneous_m1(self, **kwargs)
 
-        @jax.checkpoint
-        @jax.jit
-        def sum_k(i: Integer, j: Integer) -> Real:
-            """Sum over k of p_ik * p_jk."""
-            return self.model.pairs[[i, j]].probs().prod(0).sum(-1)
 
-        @jax.jit
-        def sum_j(i: Integer) -> Real:
-            """Sum over j of p_ij * sum_k(p_ik * p_jk)."""
-            key_j = jax.random.fold_in(key, i) if self.use_sampling else None
-            v = jnp.delete(vids, i, assume_unique_indices=True)
-            xs = (
-                sample(v, p=weights[v], rng=key_j, **sample_kwargs)
-                if self.use_sampling
-                else (v,)
-            )
+@eqx.filter_jit
+def _heterogeneous_m1(stat: UndirectedRandomGraphTriangleMotif, **kwargs: Any) -> Reals:
+    """Triangle count implementation for heterogeneous undirected random graphs."""
+    vids = jnp.arange(stat.model.n_nodes)
+    key, sample_kwargs, loop_kwargs = stat.prepare_compute_kwargs(**kwargs)
+    weights = stat.importance_weights
 
-            @foreach(xs, init=0.0)
-            def _sum_j(
-                carry: Real, x: Integer | tuple[Integer, Real]
-            ) -> tuple[Real, None]:
-                j = x[0]
-                p_ij = self.model.pairs[i, j].probs()
-                out = p_ij * sum_k(i, j)
-                if self.use_sampling:
-                    out *= x[1]  # importance weight
-                return carry + out, None
+    @jax.checkpoint
+    @jax.jit
+    def sum_k(i: Integer, j: Integer) -> Real:
+        """Sum over k of p_ik * p_jk."""
+        return stat.model.pairs[[i, j]].probs().prod(0).sum(-1)
 
-            return _sum_j[0]  # type: ignore
+    @jax.jit
+    def sum_j(i: Integer) -> Real:
+        """Sum over j of p_ij * sum_k(p_ik * p_jk)."""
+        key_j = jax.random.fold_in(key, i) if stat.use_sampling else None
+        v = jnp.delete(vids, i, assume_unique_indices=True)
+        xs = (
+            sample(v, p=weights[v], rng=key_j, **sample_kwargs)
+            if stat.use_sampling
+            else (v,)
+        )
 
-        indices = self.nodes.coords[0]
-        triangles = jax.lax.map(sum_j, indices, **loop_kwargs)
-        return triangles / 2
+        @foreach(xs, init=0.0)
+        def _sum_j(carry: Real, x: Integer | tuple[Integer, Real]) -> tuple[Real, None]:
+            j = x[0]
+            p_ij = stat.model.pairs[i, j].probs()
+            out = p_ij * sum_k(i, j)
+            if stat.use_sampling:
+                out *= x[1]  # importance weight
+            return carry + out, None
+
+        return _sum_j[0]  # type: ignore
+
+    indices = stat.nodes.coords[0]
+    triangles = jax.lax.map(sum_j, indices, **loop_kwargs)
+    return triangles / 2

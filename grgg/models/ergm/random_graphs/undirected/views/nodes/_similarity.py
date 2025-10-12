@@ -1,5 +1,7 @@
 from typing import Any
 
+import equinox as eqx
+
 from grgg._typing import Reals
 from grgg.statistics import StructuralSimilarity
 
@@ -8,17 +10,10 @@ class UndirectedRandomGraphStructuralSimilarity(StructuralSimilarity):
     """Structural similarity statistic for undirected random graphs."""
 
     @staticmethod
+    @eqx.filter_jit
     def m1_from_motifs(triangles: Reals, twedges: Reals, theads: Reals) -> Reals:
         """Compute the first moment of the statistic from motifs counts."""
         return 4 * triangles / (twedges + theads)
-
-    def _m1(self, **kwargs: Any) -> Reals:
-        """Compute the first moment of the statistic."""
-        kw1, kw2, kw3 = self.split_compute_kwargs(3, same_seed=True, **kwargs)
-        triangles = self.nodes.motifs.triangle(**kw1)
-        twedges = self.nodes.motifs.twedge(**kw2)
-        theads = self.nodes.motifs.thead(**kw3)
-        return self.m1_from_motifs(triangles, twedges, theads)
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
         """Compute similarity for a homogeneous undirected random graph.
@@ -45,7 +40,7 @@ class UndirectedRandomGraphStructuralSimilarity(StructuralSimilarity):
         >>> jnp.all(s == sim).item()
         True
         """
-        return self._m1(**kwargs)
+        return _m1(self, **kwargs)
 
     def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
         """Compute similarity for a heterogeneous undirected random graph.
@@ -74,4 +69,14 @@ class UndirectedRandomGraphStructuralSimilarity(StructuralSimilarity):
         >>> jnp.allclose(s, sim[vids], rtol=1e-1).item()
         True
         """
-        return self._m1(**kwargs)
+        return _m1(self, **kwargs)
+
+
+@eqx.filter_jit
+def _m1(stat: UndirectedRandomGraphStructuralSimilarity, **kwargs: Any) -> Reals:
+    """Compute the first moment of the statistic."""
+    kw1, kw2, kw3 = stat.split_compute_kwargs(3, same_seed=True, **kwargs)
+    triangles = stat.nodes.motifs.triangle(**kw1)
+    twedges = stat.nodes.motifs.twedge(**kw2)
+    theads = stat.nodes.motifs.thead(**kw3)
+    return stat.m1_from_motifs(triangles, twedges, theads)

@@ -38,37 +38,45 @@ class UndirectedRandomGraphDegreeStatistic(Degree):
         """
         return self.model.pairs.probs() * (self.model.n_nodes - 1)
 
-    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
-        """Expected degree for heterogeneous undirected random graph models.
+    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
+        """Expected degree for heterogeneous undirected random graph models."""
+        return _heterogeneous_m1(self, **kwargs)
 
-        Examples
-        --------
-        >>> import jax.numpy as jnp
-        >>> from grgg import UndirectedRandomGraph, RandomGenerator
-        >>> rng = RandomGenerator(42)
-        >>> mu = rng.normal(100)
-        >>> model = UndirectedRandomGraph(mu.size, mu=mu)
-        >>> D = model.nodes.degree()
-        >>> D.shape
-        (100,)
-        >>> K = jnp.column_stack(
-        ...     [model.sample(rng=rng).A.sum(axis=1) for _ in range(20)
-        ... ]).mean(axis=1)
-        >>> jnp.allclose(D, K, rtol=1e-1).item()
-        True
-        >>> vids = jnp.array([0, 11, 27, 89])
-        >>> D = model.nodes[vids].degree()
-        >>> D.shape
-        (4,)
-        >>> jnp.allclose(D, K[vids], rtol=1e-1).item()
-        True
-        """
-        *_, loop_kwargs = self.prepare_compute_kwargs(**kwargs)
-        indices = self.nodes.coords[0]
 
-        @eqx.filter_checkpoint
-        @eqx.filter_jit
-        def node_degree(i: Integer) -> jnp.ndarray:
-            return self.model.pairs[i].probs().sum(-1)
+@eqx.filter_jit
+def _heterogeneous_m1(
+    stat: UndirectedRandomGraphDegreeStatistic, **kwargs: Any
+) -> Reals:
+    """Expected degree for heterogeneous undirected random graph models.
 
-        return jax.lax.map(node_degree, indices, **loop_kwargs)
+    Examples
+    --------
+    >>> import jax.numpy as jnp
+    >>> from grgg import UndirectedRandomGraph, RandomGenerator
+    >>> rng = RandomGenerator(42)
+    >>> mu = rng.normal(100)
+    >>> model = UndirectedRandomGraph(mu.size, mu=mu)
+    >>> D = model.nodes.degree()
+    >>> D.shape
+    (100,)
+    >>> K = jnp.column_stack(
+    ...     [model.sample(rng=rng).A.sum(axis=1) for _ in range(20)
+    ... ]).mean(axis=1)
+    >>> jnp.allclose(D, K, rtol=1e-1).item()
+    True
+    >>> vids = jnp.array([0, 11, 27, 89])
+    >>> D = model.nodes[vids].degree()
+    >>> D.shape
+    (4,)
+    >>> jnp.allclose(D, K[vids], rtol=1e-1).item()
+    True
+    """
+    *_, loop_kwargs = stat.prepare_compute_kwargs(**kwargs)
+    indices = stat.nodes.coords[0]
+
+    @eqx.filter_checkpoint
+    @eqx.filter_jit
+    def node_degree(i: Integer) -> jnp.ndarray:
+        return stat.model.pairs[i].probs().sum(-1)
+
+    return jax.lax.map(node_degree, indices, **loop_kwargs)

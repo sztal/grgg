@@ -1,5 +1,7 @@
 from typing import Any
 
+import equinox as eqx
+
 from grgg._typing import Reals
 from grgg.statistics import QClustering
 
@@ -8,16 +10,10 @@ class UndirectedRandomGraphQClustering(QClustering):
     """Quadrangle clustering statistic for undirected random graphs."""
 
     @staticmethod
+    @eqx.filter_jit
     def m1_from_motifs(quadrangles: Reals, qwedges: Reals) -> Reals:
         """Compute the first moment of the statistic from motifs counts."""
         return 2 * quadrangles / qwedges
-
-    def _m1(self, **kwargs: Any) -> Reals:
-        """Compute the first moment of the statistic."""
-        kw1, kw2 = self.split_compute_kwargs(same_seed=True, **kwargs)
-        quadrangles = self.nodes.motifs.quadrangle(**kw1)
-        qwedges = self.nodes.motifs.qwedge(**kw2)
-        return self.m1_from_motifs(quadrangles, qwedges)
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
         """Compute q-clustering for a homogeneous undirected random graph.
@@ -44,7 +40,7 @@ class UndirectedRandomGraphQClustering(QClustering):
         >>> jnp.all(qc == qclust).item()
         True
         """
-        return self._m1(**kwargs)
+        return _m1(self, **kwargs)
 
     def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
         """Compute q-clustering for a heterogeneous undirected random graph.
@@ -76,4 +72,13 @@ class UndirectedRandomGraphQClustering(QClustering):
         >>> jnp.allclose(qc, qclust[vids]).item()
         True
         """
-        return self._m1(**kwargs)
+        return _m1(self, **kwargs)
+
+
+@eqx.filter_jit
+def _m1(stat: UndirectedRandomGraphQClustering, **kwargs: Any) -> Reals:
+    """Compute the first moment of the statistic."""
+    kw1, kw2 = stat.split_compute_kwargs(same_seed=True, **kwargs)
+    quadrangles = stat.nodes.motifs.quadrangle(**kw1)
+    qwedges = stat.nodes.motifs.qwedge(**kw2)
+    return stat.m1_from_motifs(quadrangles, qwedges)

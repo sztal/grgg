@@ -1,5 +1,7 @@
 from typing import Any
 
+import equinox as eqx
+
 from grgg._typing import Reals
 from grgg.statistics import StructuralComplementarity
 
@@ -8,17 +10,10 @@ class UndirectedRandomGraphStructuralComplementarity(StructuralComplementarity):
     """Structural complementarity statistic for undirected random graphs."""
 
     @staticmethod
+    @eqx.filter_jit
     def m1_from_motifs(quadrangles: Reals, qwedges: Reals, qheads: Reals) -> Reals:
         """Compute the first moment of the statistic from motifs counts."""
         return 4 * quadrangles / (qwedges + qheads)
-
-    def _m1(self, **kwargs: Any) -> Reals:
-        """Compute the first moment of the statistic."""
-        kw1, kw2, kw3 = self.split_compute_kwargs(3, same_seed=True, **kwargs)
-        quadrangles = self.nodes.motifs.quadrangle(**kw1)
-        qwedges = self.nodes.motifs.qwedge(**kw2)
-        qheads = self.nodes.motifs.qhead(**kw3)
-        return self.m1_from_motifs(quadrangles, qwedges, qheads)
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
         """Compute complementarity for a homogeneous undirected random graph.
@@ -45,7 +40,7 @@ class UndirectedRandomGraphStructuralComplementarity(StructuralComplementarity):
         >>> jnp.all(c == comp).item()
         True
         """
-        return self._m1(**kwargs)
+        return _m1(self, **kwargs)
 
     def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
         """Compute complementarity for a heterogeneous undirected random graph.
@@ -74,4 +69,14 @@ class UndirectedRandomGraphStructuralComplementarity(StructuralComplementarity):
         >>> jnp.allclose(s, comp[vids], rtol=1e-1).item()
         True
         """
-        return self._m1(**kwargs)
+        return _m1(self, **kwargs)
+
+
+@eqx.filter_jit
+def _m1(stat: UndirectedRandomGraphStructuralComplementarity, **kwargs: Any) -> Reals:
+    """Compute the first moment of the statistic."""
+    kw1, kw2, kw3 = stat.split_compute_kwargs(3, same_seed=True, **kwargs)
+    quadrangles = stat.nodes.motifs.quadrangle(**kw1)
+    qwedges = stat.nodes.motifs.qwedge(**kw2)
+    qheads = stat.nodes.motifs.qhead(**kw3)
+    return stat.m1_from_motifs(quadrangles, qwedges, qheads)
