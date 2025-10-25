@@ -47,13 +47,12 @@ class RandomGraphTWedgeMotif(TWedgeMotif):
         True
         """
         vids = jnp.arange(self.model.n_nodes)
-        degree = self.model.nodes.degree()
 
         @jax.jit
         def sum_j(i: Integer) -> Real:
             j = jnp.delete(vids, i, assume_unique_indices=True)
-            d_i = degree[i]
             p_ij = self.model.pairs[i, j].probs()
+            d_i = p_ij.sum()
             return jnp.sum(p_ij * (d_i - p_ij))
 
         indices = self.nodes.coords[0]
@@ -80,7 +79,6 @@ class RandomGraphTWedgeMotif(TWedgeMotif):
         True
         """
         vids = jnp.arange(self.model.n_nodes)
-        degree = self.model.nodes.degree()
 
         @jax.jit
         def sum_j(i: Integer) -> Real:
@@ -88,7 +86,7 @@ class RandomGraphTWedgeMotif(TWedgeMotif):
             j = jnp.delete(vids, i, assume_unique_indices=True)
             p_ij = self.model.pairs[i, j].probs()
             indices = jax.random.choice(key, j, (self.mc,), replace=True, p=p_ij)
-            d_i = degree[i]
+            d_i = p_ij.sum()
             return d_i / self.mc * jnp.sum(d_i - p_ij[indices])
 
         indices = self.nodes.coords[0]
