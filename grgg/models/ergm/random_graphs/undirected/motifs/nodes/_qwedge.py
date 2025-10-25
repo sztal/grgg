@@ -1,109 +1,136 @@
 from typing import Any
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from grgg._typing import Integer, Integers, Real, Reals
+from grgg._typing import Integer, IntVector, Real, Reals, RealVector
 from grgg.statistics.motifs import QWedgeMotif
-from grgg.utils.compute import foreach, sample
+from grgg.utils.compute import foreach
 
 
-class UndirectedRandomGraphQWedgeMotif(QWedgeMotif):
-    """Q-wedge motif statistic for undirected random graphs.
-
-    Examples
-    --------
-    Here we show that the importance sampling estimator for the Q-wedge motif is
-    effective.
-    >>> import jax
-    >>> import jax.numpy as jnp
-    >>> from grgg import UndirectedRandomGraph, RandomGenerator
-    >>> n = 100
-    >>> rng = RandomGenerator(303)
-    >>> model = UndirectedRandomGraph(n, mu=rng.normal(n) - 3)
-    >>> Q_exact = model.nodes.motifs.qwedge()
-    >>> Q_approx = model.nodes.motifs.qwedge(n_samples=10, rng=rng)
-    >>>
-    >>> def error(X, Y):
-    ...     return jnp.linalg.norm(X - Y) / jnp.linalg.norm(X)
-    >>>
-    >>> err = error(Q_exact, Q_approx)
-    >>> (err < 0.25).item()
-    True
-    >>> cor = jnp.corrcoef(Q_exact, Q_approx)[0, 1]
-    >>> (cor > 0.95).item()
-    True
-    """
+class RandomGraphQWedgeMotif(QWedgeMotif):
+    """Q-wedge motif statistic for undirected random graphs."""
 
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
-        """Q-wedge count implementation for homogeneous undirected random graphs."""
+        """Q-wedge count implementation for homogeneous undirected random graphs.
+
+        Examples
+        --------
+        >>> import jax.numpy as jnp
+        >>> from grgg import RandomGraph, RandomGenerator
+        >>> rng = RandomGenerator(17)
+        >>> model = RandomGraph(100, mu=-2)
+        >>> qwedge = model.nodes.motifs.qwedge()
+        >>> QW = jnp.array(
+        ...     [model.sample(rng=rng).struct.census().qw.mean() for _ in range(20)]
+        ... )
+        >>> jnp.isclose(qwedge, QW.mean(), rtol=5e-2).item()
+        True
+        """
         n = self.model.n_nodes
         p = self.model.pairs.probs()
         return (n - 1) * (n - 2) * (n - 3) * p**3
 
-    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
-        """Q-wedge count for heterogeneous undirected random graphs."""
-        return _heterogeneous_m1(self, **kwargs)
+    def _heterogeneous_m1_exact(self) -> Reals:
+        """Q-wedge count for heterogeneous undirected random graphs.
 
+        Examples
+        --------
+        >>> import jax.numpy as jnp
+        >>> from grgg import RandomGraph, RandomGenerator
+        >>> rng = RandomGenerator(42)
+        >>> model = RandomGraph(100, mu=rng.normal(100) - 1.2)
+        >>> qwedge = model.nodes.motifs.qwedge()
+        >>> QW = jnp.column_stack(
+        ...     [model.sample(rng=rng).struct.census().qw.to_numpy() for _ in range(20)]
+        ... ).mean(axis=-1)
+        >>> jnp.isclose(qwedge.mean(), QW.mean(), rtol=1e-1).item()
+        True
+        >>> (jnp.corrcoef(qwedge, QW)[0, 1] > 0.99).item()
+        True
+        """
+        vids = jnp.arange(self.model.n_nodes)
+        degree = self.model.nodes.degree()
 
-@eqx.filter_jit
-def _heterogeneous_m1(stat: UndirectedRandomGraphQWedgeMotif, **kwargs: Any) -> Reals:
-    """Q-wedge count implementation for heterogeneous undirected random graphs."""
-    n = stat.model.n_nodes
-    vids = jnp.arange(n)
-    key, sample_kwargs, loop_kwargs = stat.prepare_compute_kwargs(**kwargs)
-    weights = stat.importance_weights
+        @jax.checkpoint
+        @jax.jit
+        def sum_k(i: Integer, j: Integer) -> Real:
+            """Sum over k of p_jk * (d_i - p_ij - p_ik)."""
+            return self._inner_sum(degree, vids, i, j)
 
-    @jax.checkpoint
-    @jax.jit
-    def sum_l(i: Integer, j: Integer, k: Integer) -> Real:
-        """Sum over l of p_il."""
-        p_ij_ik = stat.model.pairs[[i, i], [j, k]].probs().sum(-1)
-        return stat.model.pairs[i].probs().sum(-1) - p_ij_ik
+        @jax.jit
+        def sum_j(i: Integer) -> Real:
+            """Expected sum over k of p_jk * (d_i - p_ij - p_ik)."""
+            j = jnp.delete(vids, i, assume_unique_indices=True)
 
-    @jax.jit
-    def sum_k(i: Integer, j: Integer, key: Integers | None) -> Real:
-        """Sum over k of p_jk * sum_l"""
-        key_k = jax.random.fold_in(key, j) if key is not None else None
-        v = jnp.delete(vids, jnp.array([i, j]), assume_unique_indices=True)
-        xs = (
-            sample(v, p=weights[v], rng=key_k, **sample_kwargs)
-            if stat.use_sampling
-            else (v,)
-        )
+            @foreach(j, init=0.0, unroll=self.unroll)
+            def expectation(carry: Real, j: Integer) -> tuple[Real, None]:
+                p_ij = self.model.pairs[i, j].probs()
+                return carry + p_ij * sum_k(i, j), None
 
-        @foreach(xs, init=0.0)
-        def _sum_k(carry: Real, x: Integer | tuple[Integer, Real]) -> tuple[Real, None]:
-            k = x[0]
-            out = stat.model.pairs[j, k].probs() * sum_l(i, j, k)
-            if stat.use_sampling:
-                out *= x[1]  # importance weight
-            return carry + out, None
+            return expectation[0]  # type: ignore
 
-        return _sum_k[0]  # type: ignore
+        indices = self.nodes.coords[0]
+        qwedges = jax.lax.map(sum_j, indices, batch_size=self.batch_size)
+        return qwedges
 
-    @jax.jit
-    def sum_j(i: Integer) -> Real:
-        """Sum over j of p_ij * sum_k"""
-        key_j = jax.random.fold_in(key, i) if stat.use_sampling else None
-        v = jnp.delete(vids, i, assume_unique_indices=True)
-        xs = (
-            sample(v, p=weights[v], rng=key_j, **sample_kwargs)
-            if stat.use_sampling
-            else (v,)
-        )
+    def _heterogeneous_m1_monte_carlo(self) -> Reals:
+        """Monte Carlo q-wedge count for heterogeneous undirected random graphs.
 
-        @foreach(xs, init=0.0)
-        def _sum_j(carry: Real, x: Integer | tuple[Integer, Real]) -> tuple[Real, None]:
-            j = x[0]
-            out = stat.model.pairs[i, j].probs() * sum_k(i, j, key_j)
-            if stat.use_sampling:
-                out *= x[1]  # importance weight
-            return carry + out, None
+        Examples
+        --------
+        >>> import jax.numpy as jnp
+        >>> from grgg import RandomGraph, RandomGenerator
+        >>> rng = RandomGenerator(42)
+        >>> n = 1000
+        >>> model = RandomGraph(n, mu=rng.normal(n) - 2.5)
+        >>> qw0 = jnp.log(model.nodes.motifs.qwedge())
+        >>> qw1 = jnp.log(model.nodes.motifs.qwedge(mc=50, rng=rng))
+        >>> err = jnp.linalg.norm(qw0 - qw1) / jnp.linalg.norm(qw0)
+        >>> (err < 0.05).item()
+        True
+        >>> cor = jnp.corrcoef(qw0, qw1)[0, 1]
+        >>> (cor > 0.99).item()
+        True
+        """
+        vids = jnp.arange(self.model.n_nodes)
+        degree = self.model.nodes.degree()
 
-        return _sum_j[0]  # type: ignore
+        @jax.checkpoint
+        @jax.jit
+        def sum_k(i: Integer, j: Integer) -> Real:
+            """Sum over k of p_jk * (d_i - p_ij - p_ik)."""
+            return self._inner_sum(degree, vids, i, j)
 
-    indices = stat.nodes.coords[0]
-    qwedges = jax.lax.map(sum_j, indices, **loop_kwargs)
-    return qwedges
+        @jax.jit
+        def sum_j(i: Integer) -> Real:
+            """Expected sum over k of p_jk * (d_i - p_ij - p_ik)."""
+            key = jax.random.fold_in(self.key, i)
+            j = jnp.delete(vids, i, assume_unique_indices=True)
+            p_ij = self.model.pairs[i, j].probs()
+            d_i = degree[i]
+            j = jax.random.choice(key, j, (self.mc,), replace=True, p=p_ij)
+
+            @foreach(j, init=0.0, unroll=self.unroll)
+            def expectation(carry: Real, j: Integer) -> tuple[Real, None]:
+                return carry + sum_k(i, j), None
+
+            return d_i / self.mc * expectation[0]  # type: ignore
+
+        indices = self.nodes.coords[0]
+        qwedges = jax.lax.map(sum_j, indices, batch_size=self.batch_size)
+        return qwedges
+
+    def _inner_sum(
+        self,
+        degree: RealVector,
+        vids: IntVector,
+        i: Integer,
+        j: Integer,
+    ) -> Real:
+        k = jnp.delete(vids, jnp.array([i, j]), assume_unique_indices=True)
+        p_jk = self.model.pairs[j, k].probs()
+        d_i = degree[i]
+        p_ij = self.model.pairs[i, j].probs()
+        p_ik = self.model.pairs[i, k].probs()
+        return jnp.sum(p_jk * (d_i - p_ij - p_ik))

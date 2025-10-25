@@ -13,7 +13,7 @@ description = "Generalized Random Geometric Graphs [Proof-of-Concept]"
 authors = [{ name = "Szymon Talaga",  email="stalaga@protonmail.com"}]
 license = {file = "LICENSE"}
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.14"
 dependencies = [
     "numpy>=2.2",
     "scipy>=1.16.0",
@@ -23,6 +23,8 @@ dependencies = [
     "equinox>=0.13.0",
     "quadax>=0.2.9",
     "tqdm>=4.65",
+    "pydantic>=2.12",
+    "rich>=14.2",
 ]
 dynamic = ["version"]
 classifiers = [
@@ -124,6 +126,7 @@ ignore = [
     "S101",
     "PT003",
     "E741",
+    "TID252",
 ]
 
 [tool.ruff.lint.per-file-ignores]

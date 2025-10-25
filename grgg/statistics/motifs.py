@@ -41,16 +41,12 @@ ME = TypeVar("ME", bound="ME")
 
 
 class AbstractMotifStatistic[TT](AbstractStatistic[TT]):
-    """Abstract base class for motif statistics."""
-
     motifs: eqx.AbstractVar[TT]
 
 
 class AbstractErgmViewMotifStatistic[MT](
     AbstractErgmViewStatistic[MT], AbstractMotifStatistic[MT]
 ):
-    """Abstract base class for motif statistics on model views."""
-
     @property
     def motifs(self) -> MT:
         """The motifs of the view the statistic is computed on."""
@@ -65,8 +61,6 @@ class AbstractErgmViewMotifStatistic[MT](
 class AbstractErgmNodeMotifStatistic[MV](
     AbstractErgmNodeStatistic[MV], AbstractErgmViewMotifStatistic[MV]
 ):
-    """Abstract base class for node motif statistics."""
-
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
     @property
@@ -78,9 +72,51 @@ class AbstractErgmNodeMotifStatistic[MV](
 class AbstractErgmNodePairMotifStatistic[ME](
     AbstractErgmNodePairStatistic[ME], AbstractErgmViewMotifStatistic[ME]
 ):
-    """Abstract base class for node pair motif statistics."""
-
     @property
     def pairs(self) -> ME:
         """The node pair motifs of the view the statistic is computed on."""
         return self.module.pairs
+
+
+# Node motif statistics --------------------------------------------------------------
+
+
+class TWedgeMotif(AbstractErgmNodeMotifStatistic):
+    module: MV
+
+    label: ClassVar[str] = "twedge"
+    supported_moments: ClassVar[tuple[int, ...]] = (1,)
+
+
+class THeadMotif(AbstractErgmNodeMotifStatistic):
+    module: MV
+
+    label: ClassVar[str] = "thead"
+    supported_moments: ClassVar[tuple[int, ...]] = (1,)
+
+
+class TriangleMotif(AbstractErgmNodeMotifStatistic):
+    module: MV
+
+    label: ClassVar[str] = "triangle"
+    supported_moments: ClassVar[tuple[int, ...]] = (1,)
+
+
+class QWedgeMotif(AbstractErgmNodeMotifStatistic):
+    module: MV
+
+    label: ClassVar[str] = "qwedge"
+    supported_moments: ClassVar[tuple[int, ...]] = (1,)
+
+
+class QHeadMotif(AbstractErgmNodeMotifStatistic):
+    module: MV
+
+    label: ClassVar[str] = "qhead"
+
+
+class QuadrangleMotif(AbstractErgmNodeMotifStatistic):
+    module: MV
+
+    label: ClassVar[str] = "quadrangle"
+    supported_moments: ClassVar[tuple[int, ...]] = (1,)

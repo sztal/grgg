@@ -75,18 +75,10 @@ class AbstractModel[T, S](AbstractModelModule[T]):
     def _preprocess_inputs(self, *inputs: jnp.ndarray) -> jnp.ndarray:
         return tuple(jnp.asarray(input) for input in inputs)
 
-    def _get_batch_size(self, value: int | None = None) -> int:
-        """Get batch size from value or options."""
-        if value is None:
-            value = int(options.batch.size)
-        if value <= 0:
-            value = self.n_units
-        return int(value)
-
     def _get_progress(self, value: bool | None = None) -> tuple[bool, dict[str, Any]]:
         """Get progress value from value or options."""
         if value is None:
-            value = self.n_nodes >= options.batch.auto_progress
+            value = self.n_nodes >= options.auto.progress
         value, opts = parse_switch_flag(value)
         return value, opts
 

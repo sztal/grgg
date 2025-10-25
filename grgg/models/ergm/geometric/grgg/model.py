@@ -8,7 +8,7 @@ import jax.numpy as jnp
 from grgg._options import options
 from grgg._typing import Reals
 from grgg.manifolds import CompactManifold, Sphere
-from grgg.models.ergm.random_graphs.undirected.abc import AbstractUndirectedRandomGraph
+from grgg.models.ergm.random_graphs.undirected import RandomGraph
 
 from .functions import (
     CouplingFunction,
@@ -18,7 +18,7 @@ from .layers import AbstractLayer
 from .parameters import ParameterGroups
 
 
-class GRGG(AbstractUndirectedRandomGraph, Sequence[Self]):
+class GRGG(RandomGraph, Sequence[Self]):
     r"""Generalized Random Geometric Graph model.
 
     Attributes

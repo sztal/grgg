@@ -1,1 +1,1 @@
-from .undirected import UndirectedRandomGraph
+from .undirected import RandomGraph

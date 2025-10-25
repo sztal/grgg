@@ -1,3 +1,3 @@
-from .model import UndirectedRandomGraph
-from .motifs import UndirectedRandomGraphNodeMotifs, UndirectedRandomGraphNodePairMotifs
-from .views import UndirectedRandomGraphNodePairView, UndirectedRandomGraphNodeView
+from .model import RandomGraph
+from .motifs import RandomGraphNodeMotifs, RandomGraphNodePairMotifs
+from .views import RandomGraphNodePairView, RandomGraphNodeView

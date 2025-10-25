@@ -1,2 +1,2 @@
-from .nodes import UndirectedRandomGraphNodeMotifs
-from .pairs import UndirectedRandomGraphNodePairMotifs
+from .nodes import RandomGraphNodeMotifs
+from .pairs import RandomGraphNodePairMotifs

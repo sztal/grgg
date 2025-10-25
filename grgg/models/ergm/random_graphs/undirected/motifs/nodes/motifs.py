@@ -1,104 +1,36 @@
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, ClassVar, TypeVar
 
 from grgg.models.ergm.abc import AbstractErgmNodeMotifs
-from grgg.statistics.motifs import (
-    QHeadMotif,
-    QuadrangleMotif,
-    QWedgeMotif,
-    THeadMotif,
-    TriangleMotif,
-    TWedgeMotif,
-)
 
-from ._qhead import UndirectedRandomGraphQHeadMotif
-from ._quadrangle import UndirectedRandomGraphQuadrangleMotif
-from ._qwedge import UndirectedRandomGraphQWedgeMotif
-from ._thead import UndirectedRandomGraphTHeadMotif
-from ._triangle import UndirectedRandomGraphTriangleMotif
-from ._twedge import UndirectedRandomGraphTWedgeMotif
+from ._qhead import RandomGraphQHeadMotif
+from ._quadrangle import RandomGraphQuadrangleMotif
+from ._qwedge import RandomGraphQWedgeMotif
+from ._thead import RandomGraphTHeadMotif
+from ._triangle import RandomGraphTriangleMotif
+from ._twedge import RandomGraphTWedgeMotif
 
 if TYPE_CHECKING:
-    from grgg.models.ergm.random_graphs.undirected.model import UndirectedRandomGraph
+    from grgg.models.ergm.random_graphs.undirected.model import RandomGraph
     from grgg.models.ergm.random_graphs.undirected.views import (
-        UndirectedRandomGraphNodePairView,
-        UndirectedRandomGraphNodeView,
+        RandomGraphNodePairView,
+        RandomGraphNodeView,
     )
 
-    T = TypeVar("T", bound="UndirectedRandomGraph")
-    V = TypeVar("V", bound="UndirectedRandomGraphNodeView")
-    E = TypeVar("E", bound="UndirectedRandomGraphNodePairView")
+    T = TypeVar("T", bound="RandomGraph")
+    V = TypeVar("V", bound="RandomGraphNodeView")
+    E = TypeVar("E", bound="RandomGraphNodePairView")
 
 
-class UndirectedRandomGraphNodeMotifs[V](AbstractErgmNodeMotifs[V]):
+class RandomGraphNodeMotifs[V](AbstractErgmNodeMotifs[V]):
     """Class for undirected node motifs."""
 
-    view: "UndirectedRandomGraphNodeView"
+    view: "RandomGraphNodeView"
 
-
-# Register motif statistics ----------------------------------------------------------
-
-
-@TriangleMotif.from_module.register
-@classmethod
-def _(
-    cls,  # noqa
-    module: UndirectedRandomGraphNodeMotifs,  # noqa
-    *args: Any,
-    **kwargs: Any,
-) -> UndirectedRandomGraphTriangleMotif:
-    return UndirectedRandomGraphTriangleMotif(module, *args, **kwargs)
-
-
-@TWedgeMotif.from_module.register
-@classmethod
-def _(
-    cls,  # noqa
-    module: UndirectedRandomGraphNodeMotifs,  # noqa
-    *args: Any,
-    **kwargs: Any,
-) -> UndirectedRandomGraphTWedgeMotif:
-    return UndirectedRandomGraphTWedgeMotif(module, *args, **kwargs)
-
-
-@THeadMotif.from_module.register
-@classmethod
-def _(
-    cls,  # noqa
-    module: UndirectedRandomGraphNodeMotifs,  # noqa
-    *args: Any,
-    **kwargs: Any,
-) -> UndirectedRandomGraphTHeadMotif:
-    return UndirectedRandomGraphTHeadMotif(module, *args, **kwargs)
-
-
-@QuadrangleMotif.from_module.register
-@classmethod
-def _(
-    cls,  # noqa
-    module: UndirectedRandomGraphNodeMotifs,  # noqa
-    *args: Any,
-    **kwargs: Any,
-) -> UndirectedRandomGraphQuadrangleMotif:
-    return UndirectedRandomGraphQuadrangleMotif(module, *args, **kwargs)
-
-
-@QWedgeMotif.from_module.register
-@classmethod
-def _(
-    cls,  # noqa
-    module: UndirectedRandomGraphNodeMotifs,  # noqa
-    *args: Any,
-    **kwargs: Any,
-) -> UndirectedRandomGraphQWedgeMotif:
-    return UndirectedRandomGraphQWedgeMotif(module, *args, **kwargs)
-
-
-@QHeadMotif.from_module.register
-@classmethod
-def _(
-    cls,  # noqa
-    module: UndirectedRandomGraphNodeMotifs,  # noqa
-    *args: Any,
-    **kwargs: Any,
-) -> UndirectedRandomGraphQHeadMotif:
-    return UndirectedRandomGraphQHeadMotif(module, *args, **kwargs)
+    triangle_cls: ClassVar[type[RandomGraphTriangleMotif]] = RandomGraphTriangleMotif
+    twedge_cls: ClassVar[type[RandomGraphTWedgeMotif]] = RandomGraphTWedgeMotif
+    thead_cls: ClassVar[type[RandomGraphTHeadMotif]] = RandomGraphTHeadMotif
+    quadrangle_cls: ClassVar[
+        type[RandomGraphQuadrangleMotif]
+    ] = RandomGraphQuadrangleMotif
+    qwedge_cls: ClassVar[type[RandomGraphQWedgeMotif]] = RandomGraphQWedgeMotif
+    qhead_cls: ClassVar[type[RandomGraphQHeadMotif]] = RandomGraphQHeadMotif

@@ -1,9 +1,0 @@
-name: grgg
-channels:
-  - conda-forge
-  - nodefaults
-dependencies:
-  - python=3.13
-  - ipython
-  - jupyterlab
-  - pip

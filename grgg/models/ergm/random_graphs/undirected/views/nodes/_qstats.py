@@ -1,41 +1,40 @@
-from typing import Any
-
 import equinox as eqx
 import jax.numpy as jnp
 
 from grgg._typing import Reals
 from grgg.statistics import QStatistics
 
-from ._complementarity import UndirectedRandomGraphStructuralComplementarity
-from ._qclosure import UndirectedRandomGraphQClosure
-from ._qclust import UndirectedRandomGraphQClustering
+from ._complementarity import RandomGraphStructuralComplementarity
+from ._qclosure import RandomGraphQClosure
+from ._qclust import RandomGraphQClustering
 
 
-class UndirectedRandomGraphQStatistics(QStatistics):
-    """Quadrangle-based statistic for undirected random graphs."""
-
+class RandomGraphQStatistics(QStatistics):
     @staticmethod
     @eqx.filter_jit
     def m1_from_motifs(quadrangles: Reals, qwedges: Reals, qheads: Reals) -> Reals:
         """Compute the first moment of the statistic from motifs counts."""
-        qclust = UndirectedRandomGraphQClustering.m1_from_motifs(quadrangles, qwedges)
-        qclosure = UndirectedRandomGraphQClosure.m1_from_motifs(quadrangles, qheads)
-        complementarity = UndirectedRandomGraphStructuralComplementarity.m1_from_motifs(
+        qclust = RandomGraphQClustering.m1_from_motifs(quadrangles, qwedges)
+        qclosure = RandomGraphQClosure.m1_from_motifs(quadrangles, qheads)
+        complementarity = RandomGraphStructuralComplementarity.m1_from_motifs(
             quadrangles, qwedges, qheads
         )
         return jnp.stack([qclust, qclosure, complementarity])
 
-    def _homogeneous_m1(self, **kwargs: Any) -> Reals:
-        return _m1(self, **kwargs)
+    def _homogeneous_m1(self) -> Reals:
+        return _m1(self)
 
-    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
-        return _m1(self, **kwargs)
+    def _heterogeneous_m1_exact(self) -> Reals:
+        return _m1(self)
+
+    def _heterogeneous_m1_monte_carlo(self) -> Reals:
+        return _m1(self)
 
 
 @eqx.filter_jit
-def _m1(stat: UndirectedRandomGraphQStatistics, **kwargs: Any) -> Reals:
+def _m1(stat: RandomGraphQStatistics) -> Reals:
     """Compute the first moment of the statistic."""
-    kw1, kw2, kw3 = stat.split_compute_kwargs(3, same_seed=True, **kwargs)
+    kw1, kw2, kw3 = stat.split_options(3, repeat=1, average=True)
     quadrangles = stat.nodes.motifs.quadrangle(**kw1)
     qwedges = stat.nodes.motifs.qwedge(**kw2)
     qheads = stat.nodes.motifs.qhead(**kw3)

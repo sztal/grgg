@@ -15,7 +15,7 @@ help:
 
 init:
 	git init
-	pip install -e .[dev]
+	uv pip install -e .[dev]
 	pre-commit install
 	mkdir -p data/raw
 	mkdir -p data/proc

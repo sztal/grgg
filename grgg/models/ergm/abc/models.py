@@ -24,8 +24,8 @@ class AbstractErgm[T, V, E, S](AbstractModel[T, S]):
     n_nodes: eqx.AbstractVar[int]
 
     is_directed: eqx.AbstractClassVar[bool]
-    node_view_cls: eqx.AbstractClassVar[type[V]]
-    pair_view_cls: eqx.AbstractClassVar[type[E]]
+    nodes_cls: eqx.AbstractClassVar[type[V]]
+    pairs_cls: eqx.AbstractClassVar[type[E]]
 
     def __check_init__(self) -> None:
         if self.n_nodes <= 0:
@@ -45,12 +45,12 @@ class AbstractErgm[T, V, E, S](AbstractModel[T, S]):
     @property
     def nodes(self) -> V:
         """Nodes view."""
-        return self.node_view_cls(self)
+        return self.nodes_cls(self)
 
     @property
     def pairs(self) -> E:
         """Node pairs view."""
-        return self.pair_view_cls(self)
+        return self.pairs_cls(self)
 
     @property
     def sampler(self) -> S:

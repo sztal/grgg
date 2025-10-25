@@ -1,41 +1,40 @@
-from typing import Any
-
 import equinox as eqx
 import jax.numpy as jnp
 
 from grgg._typing import Reals
 from grgg.statistics import TStatistics
 
-from ._similarity import UndirectedRandomGraphStructuralSimilarity
-from ._tclosure import UndirectedRandomGraphTClosure
-from ._tclust import UndirectedRandomGraphTClustering
+from ._similarity import RandomGraphStructuralSimilarity
+from ._tclosure import RandomGraphTClosure
+from ._tclust import RandomGraphTClustering
 
 
-class UndirectedRandomGraphTStatistics(TStatistics):
-    """Triangle-based statistic for undirected random graphs."""
-
+class RandomGraphTStatistics(TStatistics):
     @staticmethod
     @eqx.filter_jit
     def m1_from_motifs(triangles: Reals, twedges: Reals, theads: Reals) -> Reals:
         """Compute the first moment of the statistic from motifs counts."""
-        tclust = UndirectedRandomGraphTClustering.m1_from_motifs(triangles, twedges)
-        tclosure = UndirectedRandomGraphTClosure.m1_from_motifs(triangles, theads)
-        similarity = UndirectedRandomGraphStructuralSimilarity.m1_from_motifs(
+        tclust = RandomGraphTClustering.m1_from_motifs(triangles, twedges)
+        tclosure = RandomGraphTClosure.m1_from_motifs(triangles, theads)
+        similarity = RandomGraphStructuralSimilarity.m1_from_motifs(
             triangles, twedges, theads
         )
         return jnp.stack([tclust, tclosure, similarity])
 
-    def _homogeneous_m1(self, **kwargs: Any) -> Reals:
-        return self._m1(**kwargs)
+    def _homogeneous_m1(self) -> Reals:
+        return _m1(self)
 
-    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
-        return self._m1(**kwargs)
+    def _heterogeneous_m1_exact(self) -> Reals:
+        return _m1(self)
+
+    def _heterogeneous_m1_monte_carlo(self) -> Reals:
+        return _m1(self)
 
 
 @eqx.filter_jit
-def _m1(stat: UndirectedRandomGraphTStatistics, **kwargs: Any) -> Reals:
+def _m1(stat: RandomGraphTStatistics) -> Reals:
     """Compute the first moment of the statistic."""
-    kw1, kw2, kw3 = stat.split_compute_kwargs(3, same_seed=True, **kwargs)
+    kw1, kw2, kw3 = stat.split_options(3, repeat=1, average=True)
     triangles = stat.nodes.motifs.triangle(**kw1)
     twedges = stat.nodes.motifs.twedge(**kw2)
     theads = stat.nodes.motifs.thead(**kw3)

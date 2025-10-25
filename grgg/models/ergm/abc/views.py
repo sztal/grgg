@@ -1,5 +1,6 @@
 import math
 from abc import abstractmethod
+from functools import wraps
 from types import EllipsisType
 from typing import TYPE_CHECKING, Any, Self, TypeVar
 
@@ -202,6 +203,16 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
 class AbstractErgmNodeView[T, MV](AbstractErgmView[T, MV]):
     """Abstract base class for ERGM node views."""
 
+    degree_cls: eqx.AbstractClassVar[type[Degree]]
+    tclust_cls: eqx.AbstractClassVar[type[TClustering]]
+    tclosure_cls: eqx.AbstractClassVar[type[TClosure]]
+    similarity_cls: eqx.AbstractClassVar[type[StructuralSimilarity]]
+    qclust_cls: eqx.AbstractClassVar[type[QClustering]]
+    qclosure_cls: eqx.AbstractClassVar[type[QClosure]]
+    complementarity_cls: eqx.AbstractClassVar[type[StructuralComplementarity]]
+    tstats_cls: eqx.AbstractClassVar[type[TStatistics]]
+    qstats_cls: eqx.AbstractClassVar[type[QStatistics]]
+
     @property
     def _default_homogeneous_index_args(self) -> int:
         return 0
@@ -248,49 +259,58 @@ class AbstractErgmNodeView[T, MV](AbstractErgmView[T, MV]):
     # Statistics ---------------------------------------------------------------------
 
     @property
+    @wraps(Degree.__init__)
     def degree(self) -> Degree:
         """Degree statistic for the nodes in the view."""
-        return Degree.from_module(self)
+        return self.degree_cls(self)
 
     @property
+    @wraps(TClustering.__init__)
     def tclust(self) -> TClustering:
         """Triangle clustering statistic for the nodes in the view."""
-        return TClustering.from_module(self)
+        return self.tclust_cls(self)
 
     @property
+    @wraps(TClosure.__init__)
     def tclosure(self) -> TClosure:
         """Triangle closure statistic for the nodes in the view."""
-        return TClosure.from_module(self)
+        return self.tclosure_cls(self)
 
     @property
+    @wraps(StructuralSimilarity.__init__)
     def similarity(self) -> StructuralSimilarity:
         """Structural similarity statistic for the nodes in the view."""
-        return StructuralSimilarity.from_module(self)
+        return self.similarity_cls(self)
 
     @property
+    @wraps(QClustering.__init__)
     def qclust(self) -> QClustering:
         """Quadrangle clustering statistic for the nodes in the view."""
-        return QClustering.from_module(self)
+        return self.qclust_cls(self)
 
     @property
+    @wraps(QClosure.__init__)
     def qclosure(self) -> QClosure:
         """Quadrangle closure statistic for the nodes in the view."""
-        return QClosure.from_module(self)
+        return self.qclosure_cls(self)
 
     @property
+    @wraps(StructuralComplementarity.__init__)
     def complementarity(self) -> StructuralComplementarity:
         """Complementarity statistic for the nodes in the view."""
-        return StructuralComplementarity.from_module(self)
+        return self.complementarity_cls(self)
 
     @property
+    @wraps(TStatistics.__init__)
     def tstats(self) -> jnp.ndarray:
         """Triangle statistics for the nodes in the view."""
-        return TStatistics.from_module(self)
+        return self.tstats_cls(self)
 
     @property
+    @wraps(QStatistics.__init__)
     def qstats(self) -> jnp.ndarray:
         """Quadrangle statistics for the nodes in the view."""
-        return QStatistics.from_module(self)
+        return self.qstats_cls(self)
 
     def materialize(self, *, copy: bool = False) -> T:
         """Materialize the view into a new model instance.

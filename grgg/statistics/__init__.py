@@ -1,4 +1,3 @@
-from .complementarity import StructuralComplementarity
 from .degree import Degree
 from .motifs import (
     QHeadMotif,
@@ -8,10 +7,13 @@ from .motifs import (
     TriangleMotif,
     TWedgeMotif,
 )
-from .qclosure import QClosure
-from .qclust import QClustering
-from .qstats import QStatistics
-from .similarity import StructuralSimilarity
-from .tclosure import TClosure
-from .tclust import TClustering
-from .tstats import TStatistics
+from .structure import (
+    QClosure,
+    QClustering,
+    QStatistics,
+    StructuralComplementarity,
+    StructuralSimilarity,
+    TClosure,
+    TClustering,
+    TStatistics,
+)

@@ -1,15 +1,14 @@
-from abc import abstractmethod
-from functools import singledispatchmethod
-from typing import TYPE_CHECKING, Any, Self, TypeVar
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, ClassVar, Self, TypeVar
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 
+from grgg._options import options
 from grgg._typing import Integers, Reals
 from grgg.abc import AbstractModule
-from grgg.utils.compute import mapreduce
-from grgg.utils.misc import split_kwargs_by_signature
+from grgg.utils.misc import split_kwargs
 from grgg.utils.random import RandomGenerator
 
 if TYPE_CHECKING:
@@ -26,10 +25,18 @@ QT = TypeVar("QT", bound="Q")
 VT = TypeVar("VT", bound="V")
 ET = TypeVar("ET", bound="E")
 
-__all__ = ("AbstractStatistic",)
+__all__ = (
+    "AbstractStatistic",
+    "AbstractErgmStatistic",
+    "AbstractErgmViewStatistic",
+    "AbstractErgmNodeStatistic",
+    "AbstractErgmNodePairStatistic",
+)
 
 
-ComputeKwargsT = tuple[Integers | None, dict[str, Any], dict[str, Any]]
+OptsT = dict[str, Any]
+ComputeKwargsT = tuple[OptsT, ...]
+MomentMethodT = Callable[..., Reals]
 
 
 class AbstractStatistic[MT](AbstractModule):
@@ -46,67 +53,50 @@ class AbstractStatistic[MT](AbstractModule):
     module: eqx.AbstractVar[MT]
 
     label: eqx.AbstractClassVar[str]
-    supported_moments: eqx.AbstractClassVar[tuple[int, ...]]
 
-    def __init_subclass__(cls) -> None:
-        for moment in getattr(cls, "supported_moments", ()):
-            if not isinstance(moment, int) or moment < 1:
-                errmsg = "supported_moments must be a tuple of positive integers"
-                raise ValueError(errmsg)
-            for variant in ("homogeneous", "heterogeneous"):
-                method_name = f"_{variant}_m{moment}"
-                if not hasattr(cls, method_name):
+    def __init__(self, module: MT) -> None:
+        self.module = module
 
-                    def _moment_method(self, *args: Any, **kwargs: Any) -> Reals:  # noqa
-                        pass
-
-                    _moment_method.__name__ = method_name
-                    setattr(cls, method_name, abstractmethod(_moment_method))
-
-    def __call__(self, *args: Any, **kwargs: Any) -> Self:
+    def __call__(self, **kwargs: Any) -> Self:
         """Compute first moment of the statistic."""
-        return self.moment(1, *args, **kwargs)
+        return self.moment(1, **kwargs)
 
     @property
     def model(self) -> "T":
         return self.module.model
 
-    @singledispatchmethod
-    @classmethod
-    @abstractmethod
-    def from_module(cls, module: "T", *args: Any, **kwargs: Any) -> Self:
-        """Create a statistic from a model."""
-        raise cls.unsupported_module_exception(module)
-
-    def moment(self, n: int, *args: Any, **kwargs: Any) -> Reals:
+    def moment(self, n: int, **kwargs: Any) -> Reals:
         """Compute the n-th moment of the statistic.
+
+        Parameters
+        ----------
+        n
+            The order of the moment.
+        **kwargs
+            Additional keyword arguments.
 
         Raises
         ------
-        ValueError
+        NotImplementedError
             If the n-th moment is not supported.
         """
-        if n not in self.supported_moments:
-            raise self.unsupported_moment_exception(n)
-        moment = self._moment(n, *args, **kwargs)
-        return self.postprocess(moment)
+        if kwargs:
+            self = self.replace(**kwargs)
+        method = self._get_moment_method(n)
+        return self.postprocess(method())
 
     def postprocess(self, moment: Reals) -> Reals:
-        """Post-process the computed moment, e.g., to ensure non-negativity.
-
-        This is mostly useful for sampling-based estimates that may sometimes produce
-        results that are out of theoretical bounds.
-        """
+        """Post-process the computed moments."""
         return moment
 
-    def _moment(self, n: int, *args: Any, **kwargs: Any) -> Reals:
-        """Compute the n-th moment of the statistic for the model."""
-        method = (
-            getattr(self, f"_homogeneous_m{n}")
-            if self.model.is_homogeneous
-            else getattr(self, f"_heterogeneous_m{n}")
-        )
-        return method(*args, **kwargs)
+    def _get_moment_method(self, n: int) -> MomentMethodT:
+        """Get the appropriate moment method."""
+        method_type = "heterogeneous" if self.model.is_heterogeneous else "homogeneous"
+        try:
+            method = getattr(self, f"_get_{method_type}_method")(n)
+        except AttributeError as exc:
+            raise self.unsupported_moment_exception(n) from exc
+        return eqx.filter_jit(method)
 
     def expectation(self, *args: Any, **kwargs: Any) -> Reals:
         """Compute the expectation of the statistic."""
@@ -116,12 +106,11 @@ class AbstractStatistic[MT](AbstractModule):
         """Compute the variance of the statistic."""
         return self.moment(2, *args, **kwargs) - self.expectation(*args, **kwargs) ** 2
 
-    def unsupported_moment_exception(self, n: int) -> ValueError:
-        errmsg = (
-            f"{n}-th moment is not supported. "
-            f"Supported moments: {self.supported_moments}"
-        )
-        return ValueError(errmsg)
+    def unsupported_moment_exception(self, n: int) -> NotImplementedError:
+        cn = self.__class__.__name__
+        method_type = "heterogeneous" if self.model.is_heterogeneous else "homogeneous"
+        errmsg = f"'{cn}' does not support {method_type} moment of order {n}"
+        return NotImplementedError(errmsg)
 
     @classmethod
     def unsupported_module_exception(cls, module: object) -> TypeError:
@@ -137,113 +126,157 @@ class AbstractStatistic[MT](AbstractModule):
             and self.module.equals(other.module)
         )
 
-    def prepare_compute_kwargs(self, **kwargs: Any) -> ComputeKwargsT:
-        """Split kwargs into those for :class:`grgg.utils.compute.MapReduce`
-        and those for other purposes and configure the random generator appropriately,
-        so it may be distributed across many computation loops.
+    def _get_homogeneous_method(self, n: int) -> MomentMethodT:
+        return getattr(self, f"_homogeneous_m{n}")
 
-        Returns
-        -------
-        key
-            PRNG key.
-        sample_kwargs
-            Keyword arguments for sampling routines, usually
-            :func:`grgg.utils.compute.sample`.
-        loop_kwargs
-            Keyword arguments for outer loops, usually :func:`jax.lax.map`.
-        """
-        sample_kwargs, loop_kwargs = split_kwargs_by_signature(mapreduce, **kwargs)
-        loop_kwargs["batch_size"] = self.model._get_batch_size(
-            loop_kwargs.get("batch_size")
-        )
-        rng = sample_kwargs.pop("rng", None)
-        if not self.use_sampling:
-            return None, sample_kwargs, loop_kwargs
-        if isinstance(rng, RandomGenerator):
-            # Make sure each sampling call gets a different key
-            # and the original rng is not used again, but mutated
-            # a single time
-            rng = rng.child
-        key = RandomGenerator.make_key(rng)
-        return key, sample_kwargs, loop_kwargs
-
-    def split_compute_kwargs(
-        self, n: int = 2, *, same_seed: bool = False, **kwargs: Any
-    ) -> tuple[dict[str, Any], ...]:
-        """Split compute kwargs for using in multiple routines.
-
-        Parameters
-        ----------
-        n
-            Number of splits.
-        same_seed
-            Whether to keep the same PRNG seed for all splits.
-        **kwargs
-            Keyword arguments to split.
-        """
-        key, kwargs, _ = self.prepare_compute_kwargs(**kwargs)
-        keys = (
-            (key,) * n if key is None or same_seed else tuple(jax.random.split(key, n))
-        )
-        return tuple(kwargs.copy() if k is None else {**kwargs, "rng": k} for k in keys)
+    def _get_heterogeneous_method(self, n: int) -> MomentMethodT:
+        return getattr(self, f"_heterogeneous_m{n}")
 
 
 class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
-    """Abstract base class for ERGM statistics."""
+    batch_size: int | None = eqx.field(static=True)
+    unroll: int = eqx.field(static=True)
+    mc: int | bool = eqx.field(static=True)
+    repeat: int = eqx.field(static=True)
+    average: bool = eqx.field(static=True)
+    same_seed: bool = eqx.field(static=True)
+    key: Integers | None
 
-    n_samples: int = eqx.field(static=True, default=0, kw_only=True, converter=int)
-    _importance_weights: eqx.AbstractVar[Reals]
+    supports_monte_carlo: ClassVar[bool] = True
+
+    def __init__(
+        self,
+        module: MT,
+        *,
+        key: Integers | None = None,
+        rng: Integers | None = None,
+        **kwargs: Any,
+    ) -> None:
+        """ERGM statistic.
+
+        Parameters
+        ----------
+        batch_size
+            The batch size for the main computation loop.
+        unroll
+            The unroll factor for the inner reduction loops.
+            In general, should be rather small. The default value is typically best.
+        mc
+            Number of Monte Carlo samples to use for estimates.
+            If `False`, exact computation is used where possible.
+            If `True`, a default number of samples is chosen.
+            If `None`, the automatic choice is made based on the model size.
+        repeat
+            Number of independent repetitions for Monte Carlo estimates.
+        average
+            Whether to average over repetitions for Monte Carlo estimates.
+            If `False`, the estimates are stacked along the first axis.
+        same_seed
+            Whether to use the same random seed for coupled computations,
+            e.g. when estimating triangle and t-wedge counts for computing
+            the clustering coefficient.
+        key, rng
+            The random key (or generator) to use for sampling-based estimates.
+            `rng` is an alias for `key`.
+        """
+        if not self.supports_monte_carlo:
+            if (field := "mc") in kwargs:
+                cn = self.__class__.__name__
+                errmsg = (
+                    f"'{cn}' does not support Monte Carlo sampling "
+                    f"(got '{field}={kwargs[field]}')"
+                )
+                raise NotImplementedError(errmsg)
+            kwargs[field] = False
+        super().__init__(module)
+        loop_kwargs, mc_kwargs = split_kwargs(options.loop.__annotations__, **kwargs)
+        loop_opts = options.loop.replace(**loop_kwargs)
+        self.batch_size = loop_opts.batch_size
+        self.unroll = loop_opts.unroll
+        mc_opts = options.monte_carlo.from_size(self.model.n_units, **mc_kwargs)
+        self.mc = mc_opts.mc
+        self.repeat = mc_opts.repeat
+        self.average = mc_opts.average
+        self.same_seed = mc_opts.same_seed
+        if key is None and rng is not None:
+            key = rng
+        if isinstance(key, RandomGenerator):
+            key = key.child
+        self.key = RandomGenerator.make_key(key) if self.use_mc else None
 
     @property
-    def use_sampling(self) -> bool:
-        return self.model.is_heterogeneous and self.n_samples > 0
+    def use_mc(self) -> bool:
+        """Whether to use Monte Carlo sampling for estimates."""
+        return bool(self.mc)
 
-    @property
-    def importance_weights(self) -> Reals:
-        """Importance sampling weights."""
-        return jax.lax.stop_gradient(self._importance_weights)
+    def moment(self, n: int, **kwargs: Any) -> Reals:
+        if kwargs:
+            self = self.replace(**kwargs)
+        if not self.use_mc:
+            return super().moment(n)
+        if self.average:
+            if self.repeat == 1:
+                return super().moment(n)
+            moment = 0.0
+            for r in range(self.repeat):
+                key = jax.random.fold_in(RandomGenerator.make_key(self.key), r)
+                moment += super().moment(n, key=key) / self.repeat
+            return moment
+        moments = []
+        for r in range(self.repeat):
+            key = jax.random.fold_in(RandomGenerator.make_key(self.key), r)
+            moment = super().moment(n, key=key)
+            moments.append(moment)
+        return jnp.stack(moments)
 
-    def moment(
-        self, n: int, *args: Any, n_samples: int = 0, repeat: int = 1, **kwargs: Any
-    ) -> Reals:
-        """Compute the n-th moment of the statistic for the nodes."""
-        if n_samples > 0:
-            return self.replace(n_samples=n_samples).moment(
-                n, *args, repeat=repeat, **kwargs
-            )
-        if not self.use_sampling or repeat <= 1:
-            return super().moment(n, *args, **kwargs)
-        moments = jnp.stack(
-            [self.moment(n, *args, repeat=1, **kwargs) for _ in range(repeat)]
+    def split_options(self, n: int = 1, **kwargs: Any) -> tuple[OptsT, ...]:
+        if not self.use_mc:
+            return tuple({"batch_size": self.batch_size} for _ in range(n))
+        opts = {
+            "batch_size": self.batch_size,
+            "unroll": self.unroll,
+            "mc": self.mc,
+            "repeat": self.repeat,
+            "average": self.average,
+            "same_seed": self.same_seed,
+            "key": self.key,
+            **kwargs,
+        }
+        if self.same_seed:
+            return tuple(opts.copy() for _ in range(n))
+        return tuple({**opts, "key": jax.random.fold_in(self.key, i)} for i in range(n))
+
+    def unsupported_moment_exception(self, n: int) -> NotImplementedError:
+        cn = self.__class__.__name__
+        method_type = "heterogeneous" if self.model.is_heterogeneous else "homogeneous"
+        estimator = "Monte Carlo" if self.use_mc else "exact"
+        errmsg = (
+            f"'{cn}' does not support {method_type} {estimator} moment of order {n}"
         )
-        return moments
+        return NotImplementedError(errmsg)
 
-    def prepare_compute_kwargs(self, **kwargs: Any) -> ComputeKwargsT:
-        rng, sample_kwargs, loop_kwargs = super().prepare_compute_kwargs(**kwargs)
-        sample_kwargs = {"n_samples": self.n_samples, **sample_kwargs}
-        return rng, sample_kwargs, loop_kwargs
+    def _get_heterogeneous_method(self, n: int) -> MomentMethodT:
+        if self.use_mc:
+            return getattr(self, f"_heterogeneous_m{n}_monte_carlo")
+        return getattr(self, f"_heterogeneous_m{n}_exact")
 
 
 class AbstractErgmViewStatistic[QT](AbstractErgmStatistic[QT]):
-    """Abstract base class for ERGM statistics on model views."""
-
     module: eqx.AbstractVar[QT]
 
     @property
     def view(self) -> QT:
         return self.module
 
-    def moment(self, n: int, *args: Any, **kwargs: Any) -> Reals:
-        """Compute the n-th moment of the statistic for the nodes."""
-        m = super().moment(n, *args, **kwargs)
+    def postprocess(self, moment: Reals) -> Reals:
+        """Post-process the computed moment of the statistic for the nodes."""
+        m = super().postprocess(moment)
         if self.model.is_homogeneous and self.view.is_active:
             return jnp.full(self.view.shape, m)
         return m
 
 
 class AbstractErgmNodeStatistic[VT](AbstractErgmViewStatistic[VT]):
-    """Abstract base class for node statistics."""
-
     module: eqx.AbstractVar["VT"]
 
     @property
@@ -254,21 +287,8 @@ class AbstractErgmNodeStatistic[VT](AbstractErgmViewStatistic[VT]):
     def pairs(self) -> "ET":
         return self.model.pairs
 
-    @property
-    def _importance_weights(self) -> Reals:
-        return self.model.nodes.degree() if self.use_sampling else jnp.array(1.0)
-
-
-class AbstractErgmNodeLocalStructureStatistic[VT](AbstractErgmNodeStatistic[VT]):
-    """Abstract base class for node local structure statistics."""
-
-    def postprocess(self, moment: Reals) -> Reals:
-        return jnp.clip(moment, 0, jnp.inf)
-
 
 class AbstractErgmNodePairStatistic[ET](AbstractErgmViewStatistic[ET]):
-    """Abstract base class for node pair statistics."""
-
     module: eqx.AbstractVar["ET"]
 
     @property

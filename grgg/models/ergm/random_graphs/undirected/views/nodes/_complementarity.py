@@ -1,29 +1,25 @@
-from typing import Any
-
 import equinox as eqx
 
 from grgg._typing import Reals
 from grgg.statistics import StructuralComplementarity
 
 
-class UndirectedRandomGraphStructuralComplementarity(StructuralComplementarity):
-    """Structural complementarity statistic for undirected random graphs."""
-
+class RandomGraphStructuralComplementarity(StructuralComplementarity):
     @staticmethod
     @eqx.filter_jit
     def m1_from_motifs(quadrangles: Reals, qwedges: Reals, qheads: Reals) -> Reals:
         """Compute the first moment of the statistic from motifs counts."""
         return 4 * quadrangles / (qwedges + qheads)
 
-    def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
+    def _homogeneous_m1(self) -> Reals:
         """Compute complementarity for a homogeneous undirected random graph.
 
         Examples
         --------
         >>> import jax.numpy as jnp
-        >>> from grgg import UndirectedRandomGraph, RandomGenerator
+        >>> from grgg import RandomGraph, RandomGenerator
         >>> rng = RandomGenerator(42)
-        >>> model = UndirectedRandomGraph(100, mu=-2)
+        >>> model = RandomGraph(100, mu=-2)
         >>> comp = model.nodes.complementarity()
         >>> comp.item()
         0.0924780
@@ -40,18 +36,18 @@ class UndirectedRandomGraphStructuralComplementarity(StructuralComplementarity):
         >>> jnp.all(c == comp).item()
         True
         """
-        return _m1(self, **kwargs)
+        return _m1(self)
 
-    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:
+    def _heterogeneous_m1_exact(self) -> Reals:
         """Compute complementarity for a heterogeneous undirected random graph.
 
         Examples
         --------
         >>> import jax.numpy as jnp
-        >>> from grgg import UndirectedRandomGraph, RandomGenerator
+        >>> from grgg import RandomGraph, RandomGenerator
         >>> rng = RandomGenerator(42)
         >>> mu = rng.normal(100)
-        >>> model = UndirectedRandomGraph(mu.size, mu=mu)
+        >>> model = RandomGraph(mu.size, mu=mu)
         >>> comp = model.nodes.complementarity()
         >>> comp.shape
         (100,)
@@ -69,13 +65,34 @@ class UndirectedRandomGraphStructuralComplementarity(StructuralComplementarity):
         >>> jnp.allclose(s, comp[vids], rtol=1e-1).item()
         True
         """
-        return _m1(self, **kwargs)
+        return _m1(self)
+
+    def _heterogeneous_m1_monte_carlo(self) -> Reals:
+        """Monte Carlo estimate of complementarity for undirected random graphs.
+
+        Examples
+        --------
+        >>> import jax.numpy as jnp
+        >>> from grgg import RandomGraph, RandomGenerator
+        >>> rng = RandomGenerator(42)
+        >>> n = 1000
+        >>> model = RandomGraph(n, mu=rng.normal(n) - 2.5)
+        >>> c0 = model.nodes.complementarity()
+        >>> c1 = model.nodes.complementarity(mc=300, rng=rng)
+        >>> err = jnp.linalg.norm(c0 - c1) / jnp.linalg.norm(c0)
+        >>> (err < 0.02).item()
+        True
+        >>> cor = jnp.corrcoef(c0, c1)[0, 1]
+        >>> (cor > 0.99).item()
+        True
+        """
+        return _m1(self)
 
 
 @eqx.filter_jit
-def _m1(stat: UndirectedRandomGraphStructuralComplementarity, **kwargs: Any) -> Reals:
+def _m1(stat: RandomGraphStructuralComplementarity) -> Reals:
     """Compute the first moment of the statistic."""
-    kw1, kw2, kw3 = stat.split_compute_kwargs(3, same_seed=True, **kwargs)
+    kw1, kw2, kw3 = stat.split_options(3, repeat=1, average=True)
     quadrangles = stat.nodes.motifs.quadrangle(**kw1)
     qwedges = stat.nodes.motifs.qwedge(**kw2)
     qheads = stat.nodes.motifs.qhead(**kw3)

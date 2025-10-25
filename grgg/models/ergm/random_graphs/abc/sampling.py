@@ -6,9 +6,10 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
+from rich.progress import track
 from scipy.sparse import csr_array
-from tqdm.auto import tqdm
 
+from grgg._options import options
 from grgg._typing import Booleans, BoolVector, Integer, IntVector
 from grgg.models.ergm.abc import AbstractErgmSampler, ErgmSample
 from grgg.utils.misc import batch_starts
@@ -73,15 +74,18 @@ class AbstractRandomGraphSampler[T, V, S](AbstractErgmSampler[T, V, S]):
         if self.nodes.is_active:
             nodes = self.nodes.materialize(copy=False).nodes
             self = nodes.sampler
-        batch_size = self.model._get_batch_size(batch_size)
-        progress, pkw = self.model._get_progress(progress)
+        if batch_size is None:
+            batch_size = options.loop.batch_size or self.model.n_nodes
         rng = RandomGenerator.from_seed(rng)
         n_nodes = self.nodes.n_nodes
         starts = batch_starts(n_nodes, batch_size, repeat=2)
         starts = starts[starts[:, 0] <= starts[:, 1]]
         Ai = []
         Aj = []
-        for s1, s2 in tqdm(starts, disable=not progress, **pkw):
+        progress_opts = options.progress.from_steps(
+            len(starts), progress, description="Sampling..."
+        )
+        for s1, s2 in track(starts, **progress_opts):
             if s1 > s2:
                 continue
             if s1 == s2:

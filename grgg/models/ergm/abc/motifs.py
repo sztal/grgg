@@ -1,3 +1,4 @@
+from functools import wraps
 from typing import TYPE_CHECKING, TypeVar
 
 import equinox as eqx
@@ -29,6 +30,13 @@ class AbstractErgmMotifs[U](AbstractModule):
 
     view: eqx.AbstractVar[U]
 
+    triangle_cls: eqx.AbstractClassVar[type[TriangleMotif]]
+    twedge_cls: eqx.AbstractClassVar[type[TWedgeMotif]]
+    thead_cls: eqx.AbstractClassVar[type[THeadMotif]]
+    quadrangle_cls: eqx.AbstractClassVar[type[QuadrangleMotif]]
+    qwedge_cls: eqx.AbstractClassVar[type[QWedgeMotif]]
+    qhead_cls: eqx.AbstractClassVar[type[QHeadMotif]]
+
     @property
     def model(self) -> "T":
         """The model the motifs are computed for."""
@@ -49,34 +57,40 @@ class AbstractErgmNodeMotifs[V](AbstractErgmMotifs[V]):
         return self.view
 
     @property
+    @wraps(TriangleMotif.__init__)
     def triangle(self) -> TriangleMotif:
         """Triangle motif statistic for the nodes in the view."""
-        return TriangleMotif.from_module(self)
+        return self.triangle_cls(self)
 
     @property
+    @wraps(TWedgeMotif.__init__)
     def twedge(self) -> TWedgeMotif:
         """Triangle wedge motif statistic for the nodes in the view."""
-        return TWedgeMotif.from_module(self)
+        return self.twedge_cls(self)
 
     @property
+    @wraps(THeadMotif.__init__)
     def thead(self) -> THeadMotif:
         """Triangle head motif statistic for the nodes in the view."""
-        return THeadMotif.from_module(self)
+        return self.thead_cls(self)
 
     @property
+    @wraps(QuadrangleMotif.__init__)
     def quadrangle(self) -> QuadrangleMotif:
         """Quadrangle motif statistic for the nodes in the view."""
-        return QuadrangleMotif.from_module(self)
+        return self.quadrangle_cls(self)
 
     @property
+    @wraps(QWedgeMotif.__init__)
     def qwedge(self) -> QWedgeMotif:
         """Quadrangle wedge motif statistic for the nodes in the view."""
-        return QWedgeMotif.from_module(self)
+        return self.qwedge_cls(self)
 
     @property
+    @wraps(QHeadMotif.__init__)
     def qhead(self) -> QHeadMotif:
         """Quadrangle head motif statistic for the nodes in the view."""
-        return QHeadMotif.from_module(self)
+        return self.qhead_cls(self)
 
 
 class AbstractErgmNodePairMotifs[E](AbstractErgmMotifs[E]):

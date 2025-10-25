@@ -2,21 +2,23 @@ from typing import ClassVar, TypeVar
 
 import equinox as eqx
 
-from .abc import AbstractUndirectedRandomGraph, Mu
-from .abc.functions import UndirectedRandomGraphCoupling
-from .sampling import UndirectedRandomGraphSampler
-from .views import UndirectedRandomGraphNodePairView, UndirectedRandomGraphNodeView
+from grgg._typing import Real, RealVector
+from grgg.models.ergm.random_graphs.abc import AbstractRandomGraph, Mu
 
-__all__ = ("UndirectedRandomGraph",)
+from .functions import RandomGraphCoupling
+from .sampling import RandomGraphSampler
+from .views import RandomGraphNodePairView, RandomGraphNodeView
 
-
-T = TypeVar("T", bound="UndirectedRandomGraph")
-V = TypeVar("V", bound=UndirectedRandomGraphNodeView)
-E = TypeVar("E", bound=UndirectedRandomGraphNodePairView)
-S = TypeVar("S", bound=UndirectedRandomGraphSampler)
+__all__ = ("RandomGraph",)
 
 
-class UndirectedRandomGraph[T, V, E, S](AbstractUndirectedRandomGraph[T, V, E, S]):
+T = TypeVar("T", bound="RandomGraph")
+V = TypeVar("V", bound=RandomGraphNodeView)
+E = TypeVar("E", bound=RandomGraphNodePairView)
+S = TypeVar("S", bound=RandomGraphSampler)
+
+
+class RandomGraph[T, V, E, S](AbstractRandomGraph[T, V, E, S]):
     """Undirected random graph model.
 
     It is equivalent to the `(n, p)`-Erdős–Rényi model when `mu` is homogeneous,
@@ -32,23 +34,41 @@ class UndirectedRandomGraph[T, V, E, S](AbstractUndirectedRandomGraph[T, V, E, S
 
     n_nodes: int = eqx.field(static=True)
     mu: Mu
-    coupling: UndirectedRandomGraphCoupling = eqx.field(init=False)
+    coupling: RandomGraphCoupling = eqx.field(init=False)
 
-    node_view_cls: ClassVar[type[V]] = UndirectedRandomGraphNodeView  # type: ignore
-    pair_view_cls: ClassVar[type[E]] = UndirectedRandomGraphNodePairView  # type: ignore
-    sampler_cls: ClassVar[type[S]] = UndirectedRandomGraphSampler  # type: ignore
+    is_directed: ClassVar[bool] = False
+    nodes_cls: ClassVar[type[V]] = RandomGraphNodeView  # type: ignore
+    pairs_cls: ClassVar[type[E]] = RandomGraphNodePairView  # type: ignore
+    sampler_cls: ClassVar[type[S]] = RandomGraphSampler  # type: ignore
 
-    _node_view_type: ClassVar[
-        type[UndirectedRandomGraphNodeView]
-    ] = UndirectedRandomGraphNodeView
+    def __init__(
+        self,
+        n_nodes: int,
+        mu: Real | RealVector | Mu | None = None,
+    ) -> None:
+        self.n_nodes = n_nodes
+        self.mu = mu if isinstance(mu, Mu) else Mu(mu)
+        self.coupling = self._init_coupling()
 
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def _repr_inner(self) -> str:
+        return f"{self.n_nodes}, {self.mu}"
+
+    @property
+    def parameters(self) -> dict[str, Mu]:
+        return {"mu": self.mu}
 
     @property
     def is_heterogeneous(self) -> bool:
         """Whether the model has heterogeneous parameters."""
         return self.mu.is_heterogeneous
 
-    def _init_coupling(self) -> UndirectedRandomGraphCoupling:
-        return UndirectedRandomGraphCoupling()
+    def _init_coupling(self) -> RandomGraphCoupling:
+        return RandomGraphCoupling()
+
+    def _equals(self, other: object) -> bool:
+        return (
+            super()._equals(other)
+            and self.n_nodes == other.n_nodes
+            and self.mu.equals(other.mu)
+            and self.coupling.equals(other.coupling)
+        )

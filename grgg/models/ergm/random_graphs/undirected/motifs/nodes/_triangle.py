@@ -1,87 +1,124 @@
-from typing import Any
-
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 
-from grgg._typing import Integer, Real, Reals
+from grgg._typing import Integer, IntVector, Real, Reals
 from grgg.statistics.motifs import TriangleMotif
-from grgg.utils.compute import foreach, sample
+from grgg.utils.compute import foreach
 
 
-class UndirectedRandomGraphTriangleMotif(TriangleMotif):
-    """Triangle motif statistic for undirected random graphs.
+class RandomGraphTriangleMotif(TriangleMotif):
+    """Triangle motif statistic for undirected random graphs."""
 
-    Examples
-    --------
-    Here we show that the importance sampling estimator for the triangle motif is
-    effective.
-    >>> import jax
-    >>> import jax.numpy as jnp
-    >>> from grgg import UndirectedRandomGraph, RandomGenerator
-    >>> n = 100
-    >>> rng = RandomGenerator(303)
-    >>> model = UndirectedRandomGraph(n, mu=rng.normal(n) - 3)
-    >>> T_exact = model.nodes.motifs.triangle()
-    >>> T_approx = model.nodes.motifs.triangle(n_samples=10, rng=rng)
-    >>>
-    >>> def error(X, Y):
-    ...     return jnp.linalg.norm(X - Y) / jnp.linalg.norm(X)
-    >>>
-    >>> err = error(T_exact, T_approx)
-    >>> (err < 0.25).item()
-    True
-    >>> cor = jnp.corrcoef(T_exact, T_approx)[0, 1]
-    >>> (cor > 0.95).item()
-    True
-    """
+    def _homogeneous_m1(self) -> Reals:
+        """Triangle count implementation for homogeneous undirected random graphs.
 
-    def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
-        """Triangle count implementation for homogeneous undirected random graphs."""
+        Examples
+        --------
+        >>> import jax.numpy as jnp
+        >>> from grgg import RandomGraph, RandomGenerator
+        >>> rng = RandomGenerator(17)
+        >>> model = RandomGraph(100, mu=-2)
+        >>> triangle = model.nodes.motifs.triangle()
+        >>> T = jnp.array(
+        ...     [model.sample(rng=rng).struct.census().t.mean() for _ in range(20)]
+        ... )
+        >>> jnp.isclose(triangle, T.mean(), rtol=5e-2).item()
+        True
+        """
         n = self.model.n_nodes
         p = self.model.pairs.probs()
         return (n - 1) * (n - 2) * p**3 / 2
 
-    def _heterogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
-        """Triangle count for heterogeneous undirected random graphs."""
-        return _heterogeneous_m1(self, **kwargs)
+    def _heterogeneous_m1_exact(self) -> Reals:  # noqa
+        """Triangle count for heterogeneous undirected random graphs.
 
+        Examples
+        --------
+        >>> import jax.numpy as jnp
+        >>> from grgg import RandomGraph, RandomGenerator
+        >>> rng = RandomGenerator(42)
+        >>> model = RandomGraph(100, mu=rng.normal(100) - 1.2)
+        >>> triangle = model.nodes.motifs.triangle()
+        >>> T = jnp.column_stack(
+        ...     [model.sample(rng=rng).struct.census().t.to_numpy() for _ in range(20)]
+        ... ).mean(axis=-1)
+        >>> jnp.isclose(triangle.mean(), T.mean(), rtol=1e-2).item()
+        True
+        >>> (jnp.corrcoef(triangle, T)[0, 1] > 0.99).item()
+        True
+        """
+        vids = jnp.arange(self.model.n_nodes)
 
-@eqx.filter_jit
-def _heterogeneous_m1(stat: UndirectedRandomGraphTriangleMotif, **kwargs: Any) -> Reals:
-    """Triangle count implementation for heterogeneous undirected random graphs."""
-    vids = jnp.arange(stat.model.n_nodes)
-    key, sample_kwargs, loop_kwargs = stat.prepare_compute_kwargs(**kwargs)
-    weights = stat.importance_weights
+        @jax.checkpoint
+        @jax.jit
+        def sum_k(i: Integer, j: Integer) -> Real:
+            """Sum over k of p_ik * p_jk."""
+            k = jnp.delete(vids, jnp.array([i, j]), assume_unique_indices=True)
+            return self._inner(i, j, k).sum()
 
-    @jax.checkpoint
-    @jax.jit
-    def sum_k(i: Integer, j: Integer) -> Real:
-        """Sum over k of p_ik * p_jk."""
-        return stat.model.pairs[[i, j]].probs().prod(0).sum(-1)
+        @jax.jit
+        def sum_j(i: Integer) -> Real:
+            """Expected sum over k of p_ik * p_jk."""
+            j = jnp.delete(vids, i, assume_unique_indices=True)
 
-    @jax.jit
-    def sum_j(i: Integer) -> Real:
-        """Sum over j of p_ij * sum_k(p_ik * p_jk)."""
-        key_j = jax.random.fold_in(key, i) if stat.use_sampling else None
-        v = jnp.delete(vids, i, assume_unique_indices=True)
-        xs = (
-            sample(v, p=weights[v], rng=key_j, **sample_kwargs)
-            if stat.use_sampling
-            else (v,)
-        )
+            @foreach(j, init=0.0, unroll=self.unroll)
+            def expectation(carry: Real, j: Integer) -> tuple[Real, None]:
+                p_ij = self.model.pairs[i, j].probs()
+                return carry + p_ij * sum_k(i, j), None
 
-        @foreach(xs, init=0.0)
-        def _sum_j(carry: Real, x: Integer | tuple[Integer, Real]) -> tuple[Real, None]:
-            j = x[0]
-            p_ij = stat.model.pairs[i, j].probs()
-            out = p_ij * sum_k(i, j)
-            if stat.use_sampling:
-                out *= x[1]  # importance weight
-            return carry + out, None
+            return expectation[0]  # type: ignore
 
-        return _sum_j[0]  # type: ignore
+        indices = self.nodes.coords[0]
+        triangles = jax.lax.map(sum_j, indices, batch_size=self.batch_size)
+        return triangles / 2
 
-    indices = stat.nodes.coords[0]
-    triangles = jax.lax.map(sum_j, indices, **loop_kwargs)
-    return triangles / 2
+    def _heterogeneous_m1_monte_carlo(self) -> Reals:
+        """Monte Carlo triangle count for heterogeneous undirected random graphs.
+
+        Examples
+        --------
+        >>> import jax.numpy as jnp
+        >>> from grgg import RandomGraph, RandomGenerator
+        >>> rng = RandomGenerator(42)
+        >>> n = 1000
+        >>> model = RandomGraph(n, mu=rng.normal(n) - 2.5)
+        >>> t0 = jnp.log(model.nodes.motifs.triangle())
+        >>> t1 = jnp.log(model.nodes.motifs.triangle(mc=50, rng=rng))
+        >>> err = jnp.linalg.norm(t0 - t1) / jnp.linalg.norm(t0)
+        >>> (err < 0.05).item()
+        True
+        >>> cor = jnp.corrcoef(t0, t1)[0, 1]
+        >>> (cor > 0.99).item()
+        True
+        """
+        vids = jnp.arange(self.model.n_nodes)
+
+        @jax.checkpoint
+        @jax.jit
+        def sum_k(i: Integer, j: Integer) -> Real:  # noqa
+            """Sum over k of p_ik * p_jk."""
+            k = jnp.delete(vids, jnp.array([i, j]), assume_unique_indices=True)
+            return self._inner(i, j, k).sum()
+
+        @jax.jit
+        def sum_j(i: Integer) -> Real:
+            """Expected sum over k of p_ik * p_jk."""
+            key = jax.random.fold_in(self.key, i)
+            j = jnp.delete(vids, i, assume_unique_indices=True)
+            p_ij = self.model.pairs[i, j].probs()
+            j = jax.random.choice(key, j, (self.mc,), replace=True, p=p_ij)
+            d_i = p_ij.sum()
+
+            @foreach(j, init=0.0, unroll=self.unroll)
+            def expectation(carry: Real, j: Integer) -> tuple[Real, None]:
+                return carry + sum_k(i, j), None
+
+            return d_i / self.mc * expectation[0]  # type: ignore
+
+        indices = self.nodes.coords[0]
+        triangles = jax.lax.map(sum_j, indices, batch_size=self.batch_size)
+        return triangles / 2
+
+    def _inner(self, i: Integer, j: Integer, k: IntVector) -> Real:
+        ij = jnp.array([i, j])
+        return self.model.pairs[jnp.ix_(ij, k)].probs().prod(0)

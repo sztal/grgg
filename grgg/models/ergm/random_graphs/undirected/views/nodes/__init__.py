@@ -1,1 +1,1 @@
-from .nodes import UndirectedRandomGraphNodeView
+from .nodes import RandomGraphNodeView

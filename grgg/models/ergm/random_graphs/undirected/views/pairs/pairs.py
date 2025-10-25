@@ -1,25 +1,23 @@
 from typing import TYPE_CHECKING, ClassVar, TypeVar
 
-from grgg.models.ergm.random_graphs.undirected.abc import (
-    AbstractUndirectedRandomGraphNodePairView,
+from grgg.models.ergm.random_graphs.abc import (
+    AbstractRandomGraphNodePairView,
 )
 from grgg.models.ergm.random_graphs.undirected.motifs.pairs.motifs import (
-    UndirectedRandomGraphNodePairMotifs,
+    RandomGraphNodePairMotifs,
 )
 
 if TYPE_CHECKING:
-    from grgg.models.ergm.random_graphs.undirected.model import UndirectedRandomGraph
+    from grgg.models.ergm.random_graphs.undirected.model import RandomGraph
 
-__all__ = ("UndirectedRandomGraphNodePairView",)
-
-
-T = TypeVar("T", bound="UndirectedRandomGraph")
-ME = TypeVar("ME", bound="UndirectedRandomGraphNodePairMotifs")
+__all__ = ("RandomGraphNodePairView",)
 
 
-class UndirectedRandomGraphNodePairView[T, ME](
-    AbstractUndirectedRandomGraphNodePairView[T, ME]
-):
+T = TypeVar("T", bound="RandomGraph")
+ME = TypeVar("ME", bound="RandomGraphNodePairMotifs")
+
+
+class RandomGraphNodePairView[T, ME](AbstractRandomGraphNodePairView[T, ME]):
     r"""Node pair view for undirected random graph models.
 
     Examples
@@ -27,8 +25,8 @@ class UndirectedRandomGraphNodePairView[T, ME](
     Define a homogeneous undirected random graph model which is equivalent to the
     `(n, p)`-Erdős–Rényi model with :math:`p = 1 / (1 + e^{-\mu})`.
     >>> import jax.numpy as jnp
-    >>> from grgg import UndirectedRandomGraph
-    >>> model = UndirectedRandomGraph(100, mu=-2)
+    >>> from grgg import RandomGraph
+    >>> model = RandomGraph(100, mu=-2)
 
     By default, homogeneous models return a scalar value for connection probabilities.
     >>> model.pairs.probs().item()
@@ -63,10 +61,10 @@ class UndirectedRandomGraphNodePairView[T, ME](
 
     Now we do the same for a heterogeneous model.
     >>> import jax.numpy as jnp
-    >>> from grgg import UndirectedRandomGraph, RandomGenerator
+    >>> from grgg import RandomGraph, RandomGenerator
     >>> rng = RandomGenerator(42)
     >>> mu = rng.normal(100)
-    >>> model = UndirectedRandomGraph(mu.size, mu=mu)
+    >>> model = RandomGraph(mu.size, mu=mu)
     >>> probs = model.pairs.probs()
     >>> probs.shape
     (100, 100)
@@ -86,7 +84,5 @@ class UndirectedRandomGraphNodePairView[T, ME](
     True
     """
 
-    model: "UndirectedRandomGraph"
-    motifs_cls: ClassVar[
-        type[UndirectedRandomGraphNodePairMotifs]
-    ] = UndirectedRandomGraphNodePairMotifs
+    model: "RandomGraph"
+    motifs_cls: ClassVar[type[RandomGraphNodePairMotifs]] = RandomGraphNodePairMotifs

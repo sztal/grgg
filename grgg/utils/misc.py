@@ -1,4 +1,4 @@
-from collections.abc import Callable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Container, Iterator, Mapping, Sequence
 from functools import partial, wraps
 from inspect import Signature, signature
 from itertools import product
@@ -402,6 +402,33 @@ def number_of_batches(n: int, batch_size: int) -> int:
     return (n + batch_size - 1) // batch_size
 
 
+def split_kwargs(
+    container: Container[str], **kwargs: Any
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Split keyword arguments by container membership.
+
+    Parameters
+    ----------
+    container
+        The container of keys to match against.
+
+    Returns
+    -------
+    matched
+        A dictionary of matched keyword arguments.
+    unmatched
+        A dictionary of unmatched keyword arguments.
+    """
+    matched = {}
+    unmatched = {}
+    for k, v in kwargs.items():
+        if k in container:
+            matched[k] = v
+        else:
+            unmatched[k] = v
+    return matched, unmatched
+
+
 def split_kwargs_by_signature(
     func: Callable, **kwargs: Any
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -420,14 +447,7 @@ def split_kwargs_by_signature(
         A dictionary of unmatched keyword arguments.
     """
     sig = func if isinstance(func, Signature) else signature(func)
-    matched = {}
-    unmatched = {}
-    for k, v in kwargs.items():
-        if k in sig.parameters:
-            matched[k] = v
-        else:
-            unmatched[k] = v
-    return matched, unmatched
+    return split_kwargs(sig.parameters, **kwargs)
 
 
 def format_array(x: jnp.ndarray) -> str:

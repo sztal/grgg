@@ -1,16 +1,16 @@
+from collections.abc import Iterator, Mapping, MutableMapping
 from copy import deepcopy
-from dataclasses import dataclass, field
+from dataclasses import replace
 from types import TracebackType
-from typing import Self
+from typing import Any, Self
+
+from pydantic import NonNegativeFloat, PositiveInt
+from pydantic.dataclasses import Field, dataclass
+from rich.pretty import pprint
 
 
 @dataclass(slots=True)
-class Options:
-    __original__: Self = field(init=False, repr=False)
-
-    def __post_init__(self) -> None:
-        self.__original__ = deepcopy(self)
-
+class Options(MutableMapping[str, Any]):
     def __copy__(self) -> Self:
         return deepcopy(self)
 
@@ -25,59 +25,121 @@ class Options:
     ) -> bool | None:
         self.reset()
 
+    def __setattr__(self, name: str, value: Any) -> None:
+        new = self.replace(**{name: value})
+        object.__setattr__(self, name, new[name])
+
+    def __getitem__(self, name: str) -> Any:
+        return getattr(self, name)
+
+    def __setitem__(self, name: str, value: Any) -> None:
+        setattr(self, name, value)
+
+    def __delitem__(self, name: str) -> None:
+        errmsg = "options cannot be deleted"
+        raise TypeError(errmsg)
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.__slots__)
+
+    def __len__(self) -> int:
+        return len(self.__slots__)
+
     def reset(self) -> None:
         """Reset options to their original values."""
-        if self.__original__ is not None:
-            for slot_name in self.__slots__:
-                obj = getattr(self.__original__, slot_name)
-                setattr(self, slot_name, deepcopy(obj))
+        new = self.__class__()
+        for slot_name in self.__slots__:
+            obj = getattr(new, slot_name)
+            setattr(self, slot_name, obj)
+
+    def replace(self, **changes: Any) -> Self:
+        """Return a copy of the options with specified changes."""
+        return replace(self, **changes)
+
+    def show(self) -> None:
+        """Pretty-print the options."""
+        pprint(self)
+
+
+@dataclass(slots=True)
+class RandomGraphOptions(Options):
+    mu: float = 0.0
+
+
+@dataclass(slots=True)
+class GeometricOptions(Options):
+    beta: NonNegativeFloat = 1.5
+    log: bool = True
+    eps: NonNegativeFloat = 1e-9
 
 
 @dataclass(slots=True)
 class ModelOptions(Options):
-    beta: float = 1.5
-    mu: float = 0.0
-    log: bool = True
-    eps: float = 1e-9
-    modified: bool = True
+    random_graph: RandomGraphOptions = Field(default_factory=RandomGraphOptions)
+    geometric: GeometricOptions = Field(default_factory=GeometricOptions)
 
 
 @dataclass(slots=True)
-class BatchOptions(Options):
-    size: int = 1000
-    auto_progress: int = 5000
+class LoopOptions(Options):
+    batch_size: PositiveInt | None = 1000
+    unroll: PositiveInt = 2
 
 
 @dataclass(slots=True)
-class IntegrateOptions(Options):
-    batch_size: int = 1000
+class MonteCarloOptions(Options):
+    mc: PositiveInt | bool = 50
+    repeat: PositiveInt = 5
+    average: bool = True
+    same_seed: bool = True
+
+    def __post_init__(self) -> None:
+        if self.mc is True:
+            self.mc = options.monte_carlo.mc
+
+    @classmethod
+    def from_size(cls, n: int, mc: int | None = None, **kwargs: Any) -> Self:
+        """Create Monte Carlo options from model size."""
+        if mc is None:
+            mc = options.monte_carlo.mc if n > options.auto.mc else False
+        opts = cls(mc=mc, **kwargs)
+        return opts
 
 
 @dataclass(slots=True)
-class QuantizeOptions(Options):
-    auto: bool = True
-    n_codes: int = 1024
+class ProgressOptions(Options):
+    description: str = "Processing..."
+    disable: bool = False
+
+    @classmethod
+    def from_steps(
+        cls, steps: float, progress: bool | Mapping | None = None, **kwargs: Any
+    ) -> Self:
+        """Create progress options from number of steps."""
+        if isinstance(progress, bool):
+            disable = not progress
+            opts = kwargs
+        elif progress is None:
+            disable = steps <= options.auto.progress
+            opts = kwargs
+        else:
+            disable = progress.pop("disable", False)
+            opts = {**progress, **kwargs}
+        return cls(disable=disable, **opts)
 
 
 @dataclass(slots=True)
-class OptimizeMuOptions(Options):
-    beta_max: float = 1e2
-
-
-@dataclass(slots=True)
-class OptimizeOptions(Options):
-    method: str = "Nelder-Mead"
-    tol: float = 1e-2
-    mu: OptimizeMuOptions = field(default_factory=OptimizeMuOptions)
+class AutoOptions(Options):
+    mc: PositiveInt = 1000
+    progress: NonNegativeFloat = 1.0
 
 
 @dataclass(slots=True)
 class PackageOptions(Options):
-    model: ModelOptions = field(default_factory=ModelOptions)
-    batch: BatchOptions = field(default_factory=BatchOptions)
-    integrate: IntegrateOptions = field(default_factory=IntegrateOptions)
-    quantize: QuantizeOptions = field(default_factory=QuantizeOptions)
-    optimize: OptimizeOptions = field(default_factory=OptimizeOptions)
+    model: ModelOptions = Field(default_factory=ModelOptions)
+    loop: LoopOptions = Field(default_factory=LoopOptions)
+    monte_carlo: MonteCarloOptions = Field(default_factory=MonteCarloOptions)
+    progress: ProgressOptions = Field(default_factory=ProgressOptions)
+    auto: AutoOptions = Field(default_factory=AutoOptions)
 
 
 options = PackageOptions()

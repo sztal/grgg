@@ -1,2 +1,2 @@
-from .nodes import UndirectedRandomGraphNodeView
-from .pairs import UndirectedRandomGraphNodePairView
+from .nodes import RandomGraphNodeView
+from .pairs import RandomGraphNodePairView

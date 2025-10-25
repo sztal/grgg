@@ -1,10 +1,10 @@
 from grgg._typing import Reals
 from grgg.models.ergm.random_graphs.abc import AbstractCoupling
 
-__all__ = ("UndirectedRandomGraphCoupling",)
+__all__ = ("RandomGraphCoupling",)
 
 
-class UndirectedRandomGraphCoupling(AbstractCoupling):
+class RandomGraphCoupling(AbstractCoupling):
     """Abstract base class for undirected coupling functions."""
 
     def __call__(self, mu: Reals) -> Reals:
