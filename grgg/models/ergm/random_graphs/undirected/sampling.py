@@ -12,10 +12,10 @@ __all__ = ("RandomGraphSampler",)
 
 T = TypeVar("T", bound="RandomGraph")
 V = TypeVar("V", bound="RandomGraphNodeView")
-S = TypeVar("S", bound="ErgmSample")
+X = TypeVar("X", bound="ErgmSample")
 
 
-class RandomGraphSampler[T, V, S](AbstractRandomGraphSampler[T, V, S]):
+class RandomGraphSampler[T, V, X](AbstractRandomGraphSampler[T, V, X]):
     """Sampler for undirected random graph models."""
 
     nodes: V

@@ -4,21 +4,17 @@ import equinox as eqx
 
 from grgg.models.abc import AbstractModel
 
-from .sampling import AbstractErgmSampler, ErgmSample
-from .views import AbstractErgmNodePairView, AbstractErgmNodeView, AbstractErgmView
+from .sampling import ErgmSample
+from .views import AbstractErgmNodePairView, AbstractErgmNodeView
 
 __all__ = ("AbstractErgm",)
 
 
-T = TypeVar("T", bound="AbstractErgm")
-Q = TypeVar("Q", bound=AbstractErgmView)
 V = TypeVar("V", bound=AbstractErgmNodeView)
 E = TypeVar("E", bound=AbstractErgmNodePairView)
-S = TypeVar("S", bound=AbstractErgmSampler)
-X = TypeVar("X", bound=ErgmSample)
 
 
-class AbstractErgm[T, V, E, S](AbstractModel[T, S]):
+class AbstractErgm[V, E](AbstractModel):
     """Abstract base class for ERGMs."""
 
     n_nodes: eqx.AbstractVar[int]
@@ -52,10 +48,6 @@ class AbstractErgm[T, V, E, S](AbstractModel[T, S]):
         """Node pairs view."""
         return self.pairs_cls(self)
 
-    @property
-    def sampler(self) -> S:
-        return self.nodes.sampler
-
-    def sample(self, *args: Any, **kwargs: Any) -> X:
+    def sample(self, *args: Any, **kwargs: Any) -> ErgmSample:
         """Sample from the model."""
         return self.nodes.sample(*args, **kwargs)

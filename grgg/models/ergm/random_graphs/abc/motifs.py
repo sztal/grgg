@@ -19,9 +19,9 @@ __all__ = (
 )
 
 
-class AbstractRandomGraphNodeMotifs[V](AbstractErgmNodeMotifs[V]):
+class AbstractRandomGraphNodeMotifs[V, T](AbstractErgmNodeMotifs[V, T]):
     """Abstract base class for random graph node motif statistics."""
 
 
-class AbstractRandomGraphNodePairMotifs[E](AbstractErgmNodePairMotifs[E]):
+class AbstractRandomGraphNodePairMotifs[E, T](AbstractErgmNodePairMotifs[E, T]):
     """Abstract base class for random graph node pair motif statistics."""

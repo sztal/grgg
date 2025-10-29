@@ -84,5 +84,4 @@ class RandomGraphNodePairView[T, ME](AbstractRandomGraphNodePairView[T, ME]):
     True
     """
 
-    model: "RandomGraph"
-    motifs_cls: ClassVar[type[RandomGraphNodePairMotifs]] = RandomGraphNodePairMotifs
+    motifs_cls: ClassVar[type[ME]] = RandomGraphNodePairMotifs  # type: ignore

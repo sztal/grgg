@@ -6,19 +6,16 @@ from grgg._typing import Real, RealVector
 from grgg.models.ergm.random_graphs.abc import AbstractRandomGraph, Mu
 
 from .functions import RandomGraphCoupling
-from .sampling import RandomGraphSampler
 from .views import RandomGraphNodePairView, RandomGraphNodeView
 
 __all__ = ("RandomGraph",)
 
 
-T = TypeVar("T", bound="RandomGraph")
 V = TypeVar("V", bound=RandomGraphNodeView)
 E = TypeVar("E", bound=RandomGraphNodePairView)
-S = TypeVar("S", bound=RandomGraphSampler)
 
 
-class RandomGraph[T, V, E, S](AbstractRandomGraph[T, V, E, S]):
+class RandomGraph[V, E](AbstractRandomGraph[V, E]):
     """Undirected random graph model.
 
     It is equivalent to the `(n, p)`-Erdős–Rényi model when `mu` is homogeneous,
@@ -39,7 +36,6 @@ class RandomGraph[T, V, E, S](AbstractRandomGraph[T, V, E, S]):
     is_directed: ClassVar[bool] = False
     nodes_cls: ClassVar[type[V]] = RandomGraphNodeView  # type: ignore
     pairs_cls: ClassVar[type[E]] = RandomGraphNodePairView  # type: ignore
-    sampler_cls: ClassVar[type[S]] = RandomGraphSampler  # type: ignore
 
     def __init__(
         self,
@@ -56,11 +52,6 @@ class RandomGraph[T, V, E, S](AbstractRandomGraph[T, V, E, S]):
     @property
     def parameters(self) -> dict[str, Mu]:
         return {"mu": self.mu}
-
-    @property
-    def is_heterogeneous(self) -> bool:
-        """Whether the model has heterogeneous parameters."""
-        return self.mu.is_heterogeneous
 
     def _init_coupling(self) -> RandomGraphCoupling:
         return RandomGraphCoupling()

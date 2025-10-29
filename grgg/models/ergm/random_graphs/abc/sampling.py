@@ -24,10 +24,10 @@ __all__ = ("AbstractRandomGraphSampler",)
 
 T = TypeVar("T", bound="AbstractRandomGraph")
 V = TypeVar("V", bound="AbstractRandomGraphNodeView")
-S = TypeVar("S", bound="ErgmSample")
+X = TypeVar("X", bound="ErgmSample")
 
 
-class AbstractRandomGraphSampler[T, V, S](AbstractErgmSampler[T, V, S]):
+class AbstractRandomGraphSampler[T, V, X](AbstractErgmSampler[T, V, X]):
     """Abstract base class for samplers of random graph models."""
 
     nodes: eqx.AbstractVar[V]
@@ -38,7 +38,7 @@ class AbstractRandomGraphSampler[T, V, S](AbstractErgmSampler[T, V, S]):
         batch_size: int | None = None,
         rng: RandomGenerator | int | None = None,
         progress: bool | Mapping | None = None,
-    ) -> S:
+    ) -> X:
         """Sample a graph from the model.
 
         Parameters

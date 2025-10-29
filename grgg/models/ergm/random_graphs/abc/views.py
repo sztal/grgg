@@ -6,23 +6,23 @@ import jax.numpy as jnp
 from grgg._typing import Reals
 from grgg.models.ergm.abc import AbstractErgmNodePairView, AbstractErgmNodeView
 
+from .motifs import AbstractRandomGraphNodeMotifs, AbstractRandomGraphNodePairMotifs
+from .sampling import AbstractRandomGraphSampler
+
 if TYPE_CHECKING:
     from .models import AbstractRandomGraph
-    from .motifs import AbstractRandomGraphNodeMotifs, AbstractRandomGraphNodePairMotifs
-
-    MV = TypeVar("MV", bound=AbstractRandomGraphNodeMotifs)
-    ME = TypeVar("ME", bound=AbstractRandomGraphNodePairMotifs)
 
 __all__ = ("AbstractRandomGraphNodeView", "AbstractRandomGraphNodePairView")
 
 
 T = TypeVar("T", bound="AbstractRandomGraph")
+MV = TypeVar("MV", bound=AbstractRandomGraphNodeMotifs)
+ME = TypeVar("ME", bound=AbstractRandomGraphNodePairMotifs)
+S = TypeVar("S", bound=AbstractRandomGraphSampler)
 
 
-class AbstractRandomGraphNodeView[T, MV](AbstractErgmNodeView[T, MV]):
+class AbstractRandomGraphNodeView[T, MV, S](AbstractErgmNodeView[T, MV, S]):
     """Abstract base class for node views of random graph models."""
-
-    model: eqx.AbstractVar[T]
 
     def materialize(self, *, copy: bool = False) -> T:
         """Materialize a new model with the current selection of nodes.
@@ -52,8 +52,6 @@ class AbstractRandomGraphNodeView[T, MV](AbstractErgmNodeView[T, MV]):
 
 class AbstractRandomGraphNodePairView[T, ME](AbstractErgmNodePairView[T, ME]):
     """Abstract base class for node pair views of random graph models."""
-
-    model: eqx.AbstractVar[T]
 
     def probs(self, *args: Any, **kwargs: Any) -> Reals:
         """Compute connection probabilities for selected pairs."""

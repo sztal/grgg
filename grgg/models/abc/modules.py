@@ -13,4 +13,4 @@ if TYPE_CHECKING:
 class AbstractModelModule[T](AbstractModule):
     """Abstract base class for model modules."""
 
-    model: eqx.AbstractVar["AbstractModel"]
+    model: eqx.AbstractVar[T]

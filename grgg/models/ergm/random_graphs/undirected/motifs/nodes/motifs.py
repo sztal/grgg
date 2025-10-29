@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     E = TypeVar("E", bound="RandomGraphNodePairView")
 
 
-class RandomGraphNodeMotifs[V](AbstractErgmNodeMotifs[V]):
+class RandomGraphNodeMotifs[V, T](AbstractErgmNodeMotifs[V, T]):
     """Class for undirected node motifs."""
 
     view: "RandomGraphNodeView"

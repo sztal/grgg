@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from collections.abc import Mapping
-from typing import Any, TypeVar
+from typing import Any, Self
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -10,21 +10,14 @@ from grgg.utils.misc import parse_switch_flag
 
 from .modules import AbstractModelModule
 from .parameters import AbstractParameter
-from .sampling import AbstractModelSampler
 
 __all__ = ("AbstractModel",)
 
 
-T = TypeVar("T", bound="AbstractModel")
-S = TypeVar("S", bound=AbstractModelSampler)
-
-
-class AbstractModel[T, S](AbstractModelModule[T]):
+class AbstractModel(AbstractModelModule[Self]):
     """Abstract base class for models."""
 
     n_units: eqx.AbstractVar[int]
-
-    sampler_cls: eqx.AbstractClassVar[type[S]]
 
     def __check_init__(self) -> None:
         if self.n_units <= 0:
@@ -43,14 +36,14 @@ class AbstractModel[T, S](AbstractModelModule[T]):
         return f"{self.__class__.__name__}({self._repr_inner()})"
 
     @property
-    def model(self) -> T:
+    def model(self) -> Self:
         """Self as model."""
         return self
 
     @property
-    @abstractmethod
     def is_heterogeneous(self) -> bool:
         """Whether the model has heterogeneous parameters."""
+        return all(param.is_heterogeneous for param in self.parameters.values())
 
     @property
     def is_homogeneous(self) -> bool:
@@ -82,11 +75,6 @@ class AbstractModel[T, S](AbstractModelModule[T]):
         value, opts = parse_switch_flag(value)
         return value, opts
 
-    @property
     @abstractmethod
-    def sampler(self) -> S:
-        """Sampler for the model."""
-
     def sample(self, *args: Any, **kwargs: Any) -> Any:
         """Sample from the model."""
-        return self.sampler.sample(*args, **kwargs)

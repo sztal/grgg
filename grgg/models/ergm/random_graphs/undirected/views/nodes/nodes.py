@@ -3,10 +3,9 @@ from typing import TYPE_CHECKING, ClassVar, TypeVar
 from grgg.models.ergm.random_graphs.abc import (
     AbstractRandomGraphNodeView,
 )
-from grgg.models.ergm.random_graphs.undirected.motifs.nodes.motifs import (
-    RandomGraphNodeMotifs,
-)
 
+from ...motifs.nodes import RandomGraphNodeMotifs
+from ...sampling import RandomGraphSampler
 from ._complementarity import RandomGraphStructuralComplementarity
 from ._degree import RandomGraphDegreeStatistic
 from ._qclosure import RandomGraphQClosure
@@ -25,11 +24,14 @@ __all__ = ("RandomGraphNodeView",)
 
 T = TypeVar("T", bound="RandomGraph")
 MV = TypeVar("MV", bound="RandomGraphNodeMotifs")
+S = TypeVar("S", bound="RandomGraphSampler")
 
 
-class RandomGraphNodeView[T, MV](AbstractRandomGraphNodeView[T, MV]):
-    model: "RandomGraph"
-    motifs_cls: ClassVar[type[RandomGraphNodeMotifs]] = RandomGraphNodeMotifs
+class RandomGraphNodeView[T, MV, S](AbstractRandomGraphNodeView[T, MV, S]):
+    """Nodes view for undirected random graph models."""
+
+    motifs_cls: ClassVar[type[MV]] = RandomGraphNodeMotifs  # type: ignore
+    sampler_cls: ClassVar[type[S]] = RandomGraphSampler  # type: ignore
 
     degree_cls: ClassVar[type[RandomGraphDegreeStatistic]] = RandomGraphDegreeStatistic
     tclust_cls: ClassVar[type[RandomGraphTClustering]] = RandomGraphTClustering

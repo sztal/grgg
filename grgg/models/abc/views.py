@@ -1,6 +1,7 @@
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, Self, TypeVar
 
+import equinox as eqx
 import jax.numpy as jnp
 
 from grgg.utils.indexing import IndexArgT
@@ -15,8 +16,10 @@ T = TypeVar("T", bound="AbstractModel")
 __all__ = ("AbstractModelView",)
 
 
-class AbstractModelView[T](AbstractModelModule[T]):
+class AbstractModelView[T](AbstractModelModule):
     """Abstract base class for model views."""
+
+    model: eqx.AbstractVar[T]
 
     @property
     @abstractmethod

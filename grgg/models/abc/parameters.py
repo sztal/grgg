@@ -1,4 +1,3 @@
-from collections.abc import Sequence
 from enum import Enum
 from typing import Any
 
@@ -42,7 +41,7 @@ def _validate(parameter: "AbstractParameter", constraint: str) -> None:
         raise ValueError(errmsg)
 
 
-class AbstractParameter(AbstractModule, Sequence[jnp.ndarray]):
+class AbstractParameter(AbstractModule):
     """Abstract base class for model parameters.
 
     Units are laid out along the first axis.

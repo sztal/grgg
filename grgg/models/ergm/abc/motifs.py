@@ -3,7 +3,7 @@ from typing import TYPE_CHECKING, TypeVar
 
 import equinox as eqx
 
-from grgg.abc import AbstractModule
+from grgg.models.abc import AbstractModelModule
 from grgg.statistics.motifs import (
     QHeadMotif,
     QuadrangleMotif,
@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from .models import AbstractErgm
     from .views import AbstractErgmNodePairView, AbstractErgmNodeView, AbstractErgmView
 
-    T = TypeVar("T", bound="AbstractErgm")
+    T = TypeVar("T", bound=AbstractErgm)
     U = TypeVar("U", bound=AbstractErgmView[T])
     E = TypeVar("E", bound=AbstractErgmNodePairView[T])
     V = TypeVar("V", bound=AbstractErgmNodeView[T])
@@ -25,17 +25,10 @@ if TYPE_CHECKING:
 __all__ = ("AbstractErgmMotifs", "AbstractErgmNodeMotifs", "AbstractErgmNodePairMotifs")
 
 
-class AbstractErgmMotifs[U](AbstractModule):
+class AbstractErgmMotifs[U, T](AbstractModelModule[T]):
     """Abstract base class for ERGM motif statistics."""
 
     view: eqx.AbstractVar[U]
-
-    triangle_cls: eqx.AbstractClassVar[type[TriangleMotif]]
-    twedge_cls: eqx.AbstractClassVar[type[TWedgeMotif]]
-    thead_cls: eqx.AbstractClassVar[type[THeadMotif]]
-    quadrangle_cls: eqx.AbstractClassVar[type[QuadrangleMotif]]
-    qwedge_cls: eqx.AbstractClassVar[type[QWedgeMotif]]
-    qhead_cls: eqx.AbstractClassVar[type[QHeadMotif]]
 
     @property
     def model(self) -> "T":
@@ -46,10 +39,15 @@ class AbstractErgmMotifs[U](AbstractModule):
         return super()._equals(other) and self.view.equals(other.view)
 
 
-class AbstractErgmNodeMotifs[V](AbstractErgmMotifs[V]):
+class AbstractErgmNodeMotifs[V, T](AbstractErgmMotifs[V, T]):
     """Abstract base class for ERGM node motif statistics."""
 
-    view: eqx.AbstractVar[V]
+    triangle_cls: eqx.AbstractClassVar[type[TriangleMotif]]
+    twedge_cls: eqx.AbstractClassVar[type[TWedgeMotif]]
+    thead_cls: eqx.AbstractClassVar[type[THeadMotif]]
+    quadrangle_cls: eqx.AbstractClassVar[type[QuadrangleMotif]]
+    qwedge_cls: eqx.AbstractClassVar[type[QWedgeMotif]]
+    qhead_cls: eqx.AbstractClassVar[type[QHeadMotif]]
 
     @property
     def nodes(self) -> V:
@@ -93,10 +91,8 @@ class AbstractErgmNodeMotifs[V](AbstractErgmMotifs[V]):
         return self.qhead_cls(self)
 
 
-class AbstractErgmNodePairMotifs[E](AbstractErgmMotifs[E]):
+class AbstractErgmNodePairMotifs[E, T](AbstractErgmMotifs[E, T]):
     """Abstract base class for ERGM node pair motif statistics."""
-
-    view: eqx.AbstractVar[E]
 
     @property
     def pairs(self) -> E:

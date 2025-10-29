@@ -41,9 +41,9 @@ if TYPE_CHECKING:
     E = TypeVar("E", bound="AbstractErgmNodePairView")
     S = TypeVar("S", bound=AbstractErgmSampler)
     T = TypeVar("T", bound=AbstractErgm[V, E, S])
-    M = TypeVar("M", bound="AbstractErgmMotifs")
-    MV = TypeVar("M", bound="AbstractErgmNodeMotifs")
-    ME = TypeVar("N", bound="AbstractErgmNodePairMotifs")
+    M = TypeVar("M", bound=AbstractErgmMotifs)
+    MV = TypeVar("MV", bound=AbstractErgmNodeMotifs)
+    ME = TypeVar("ME", bound=AbstractErgmNodePairMotifs)
 
 __all__ = ("AbstractErgmView", "AbstractErgmNodeView", "AbstractErgmNodePairView")
 
@@ -51,7 +51,7 @@ __all__ = ("AbstractErgmView", "AbstractErgmNodeView", "AbstractErgmNodePairView
 class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
     """Abstract base class for ERGM views."""
 
-    model: eqx.AbstractVar[T]
+    model: T
     _index: DynamicIndex | None = eqx.field(repr=False)
 
     motifs_cls: eqx.AbstractClassVar[type[M]]
@@ -200,7 +200,7 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         return model
 
 
-class AbstractErgmNodeView[T, MV](AbstractErgmView[T, MV]):
+class AbstractErgmNodeView[T, MV, S](AbstractErgmView[T, MV]):
     """Abstract base class for ERGM node views."""
 
     degree_cls: eqx.AbstractClassVar[type[Degree]]
@@ -212,6 +212,8 @@ class AbstractErgmNodeView[T, MV](AbstractErgmView[T, MV]):
     complementarity_cls: eqx.AbstractClassVar[type[StructuralComplementarity]]
     tstats_cls: eqx.AbstractClassVar[type[TStatistics]]
     qstats_cls: eqx.AbstractClassVar[type[QStatistics]]
+
+    sampler_cls: eqx.AbstractClassVar[type[S]]
 
     @property
     def _default_homogeneous_index_args(self) -> int:
@@ -235,7 +237,7 @@ class AbstractErgmNodeView[T, MV](AbstractErgmView[T, MV]):
     @property
     def sampler(self) -> "S":
         """Sampler for the view."""
-        return self.model.sampler_cls(self)
+        return self.sampler_cls(self)
 
     @property
     def pairs(self) -> "E":
