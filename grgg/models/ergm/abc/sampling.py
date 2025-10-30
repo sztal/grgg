@@ -13,6 +13,15 @@ if TYPE_CHECKING:
     from .models import AbstractErgm
     from .views import AbstractErgmNodeView
 
+    try:
+        import igraph as ig
+    except ImportError:  # pragma: no cover
+        pass
+    try:
+        from pathcensus import PathCensus
+    except ImportError:  # pragma: no cover
+        pass
+
 __all__ = ("AbstractErgmSampler", "ErgmSample")
 
 
@@ -39,49 +48,37 @@ class ErgmSample:
 
     A: sparray
 
-    try:
-        from pathcensus import PathCensus
+    @cached_property
+    def struct(self) -> "PathCensus":
+        """Return the path census for calculating structural coefficients.
 
-        @cached_property
-        def struct(self) -> PathCensus:  # type: ignore
-            """Return the path census for calculating structural coefficients.
-
-            See :mod:`pathcensus` for details.
-            """
-            from pathcensus import PathCensus  # noqa
-
-            return PathCensus(self.A)
-    except ImportError:  # pragma: no cover
-
-        @cached_property
-        def struct(self) -> None:
+        See :mod:`pathcensus` for details.
+        """
+        try:
+            from pathcensus import PathCensus
+        except ImportError as exc:  # pragma: no cover
             errmsg = (
-                "Path census requires `pathcensus` package. "
-                "Install it with `pip install pathcensus`."
+                "Path census requires 'pathcensus' package. "
+                "Install it, e.g. with `pip install pathcensus`."
             )
-            raise ImportError(errmsg)
+            raise ImportError(errmsg) from exc
+        return PathCensus(self.A)
 
-    try:
-        import igraph as ig
-
-        @cached_property
-        def igraph(self) -> ig.Graph:  # type: ignore
-            """Return the :mod:`igraph` representation of the sampled graph."""
-            import igraph as ig  # noqa
-
-            # Make igraph graph from sparse adjacency matrix
-            edges = np.column_stack(self.A.nonzero())
-            G = ig.Graph(edges, directed=False, n=self.A.shape[0])
-            return G.simplify()
-    except ImportError:  # pragma: no cover
-
-        @cached_property
-        def igraph(self) -> None:
+    @cached_property
+    def igraph(self) -> "ig.Graph":
+        """Return the :mod:`igraph` representation of the sampled graph."""
+        try:
+            import igraph as ig
+        except ImportError as exc:  # pragma: no cover
             errmsg = (
-                "igraph representation requires `python-igraph` package. "
-                "Install it with `pip install python-igraph`."
+                "igraph representation requires 'python-igraph' package. "
+                "Install it, e.g. with `pip install python-igraph`."
             )
-            raise ImportError(errmsg)
+            raise ImportError(errmsg) from exc
+        # Make igraph graph from sparse adjacency matrix
+        edges = np.column_stack(self.A.nonzero())
+        G = ig.Graph(edges, directed=False, n=self.A.shape[0])
+        return G.simplify()
 
     @property
     def G(self):

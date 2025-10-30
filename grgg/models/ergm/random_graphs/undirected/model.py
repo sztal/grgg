@@ -34,8 +34,8 @@ class RandomGraph[V, E](AbstractRandomGraph[V, E]):
     coupling: RandomGraphCoupling = eqx.field(init=False)
 
     is_directed: ClassVar[bool] = False
-    nodes_cls: ClassVar[type[V]] = RandomGraphNodeView  # type: ignore
-    pairs_cls: ClassVar[type[E]] = RandomGraphNodePairView  # type: ignore
+    nodes_cls: ClassVar[type[RandomGraphNodeView]] = RandomGraphNodeView
+    pairs_cls: ClassVar[type[RandomGraphNodePairView]] = RandomGraphNodePairView
 
     def __init__(
         self,

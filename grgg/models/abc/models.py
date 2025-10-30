@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from collections.abc import Mapping
-from typing import Any, Self
+from typing import Any, Self, TypeVar
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -8,16 +8,26 @@ import jax.numpy as jnp
 from grgg._options import options
 from grgg.utils.misc import parse_switch_flag
 
+from .functions import AbstractModelFunctions
 from .modules import AbstractModelModule
 from .parameters import AbstractParameter
 
 __all__ = ("AbstractModel",)
 
 
-class AbstractModel(AbstractModelModule[Self]):
+F = TypeVar("F", bound=AbstractModelFunctions)
+
+
+class AbstractModel[F](AbstractModelModule[Self]):
     """Abstract base class for models."""
 
+    functions: F = eqx.field(init=False)
+
     n_units: eqx.AbstractVar[int]
+    functions_cls: eqx.AbstractClassVar[type[F]]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "functions", self.functions_cls(self))
 
     def __check_init__(self) -> None:
         if self.n_units <= 0:

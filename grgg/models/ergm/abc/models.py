@@ -2,7 +2,7 @@ from typing import Any, TypeVar
 
 import equinox as eqx
 
-from grgg.models.abc import AbstractModel
+from grgg.models.abc import AbstractModel, AbstractModelFunctions
 
 from .sampling import ErgmSample
 from .views import AbstractErgmNodePairView, AbstractErgmNodeView
@@ -12,9 +12,10 @@ __all__ = ("AbstractErgm",)
 
 V = TypeVar("V", bound=AbstractErgmNodeView)
 E = TypeVar("E", bound=AbstractErgmNodePairView)
+F = TypeVar("F", bound=AbstractModelFunctions)
 
 
-class AbstractErgm[V, E](AbstractModel):
+class AbstractErgm[V, E, F](AbstractModel[F]):
     """Abstract base class for ERGMs."""
 
     n_nodes: eqx.AbstractVar[int]

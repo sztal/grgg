@@ -1,15 +1,31 @@
 from abc import abstractmethod
-from typing import Any
+from collections.abc import Callable
+from typing import TYPE_CHECKING, TypeVar
+
+import equinox as eqx
 
 from grgg._typing import Reals
-from grgg.abc import AbstractFunction
+from grgg.models.abc import AbstractModelFunctions
 
-__all__ = ("AbstractCoupling",)
+if TYPE_CHECKING:
+    from .models import AbstractRandomGraph
+
+T = TypeVar("T", bound="AbstractRandomGraph")
+
+__all__ = ("AbstractRandomGraphFunctions",)
+
+CouplingT = Callable[[Reals], Reals]
 
 
-class AbstractCoupling(AbstractFunction):
-    """Abstract base class for coupling functions."""
+class AbstractRandomGraphFunctions[T](AbstractModelFunctions[T]):
+    """Abstract base class for random graph model functions."""
+
+    coupling: CouplingT = eqx.field(static=True)
+
+    def compile(self) -> None:
+        """Bind model functions to the model instance and compile."""
+        self.coupling = self.compile_coupling()
 
     @abstractmethod
-    def __call__(self, *args: Any, **kwargs: Any) -> Reals:
-        """Evaluate the coupling function."""
+    def compile_coupling(self) -> CouplingT:
+        """Compile the coupling function."""

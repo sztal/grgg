@@ -14,7 +14,7 @@ __all__ = ("RandomGraphNodePairView",)
 
 
 T = TypeVar("T", bound="RandomGraph")
-ME = TypeVar("ME", bound="RandomGraphNodePairMotifs")
+ME = TypeVar("ME", bound=RandomGraphNodePairMotifs)
 
 
 class RandomGraphNodePairView[T, ME](AbstractRandomGraphNodePairView[T, ME]):
@@ -84,4 +84,4 @@ class RandomGraphNodePairView[T, ME](AbstractRandomGraphNodePairView[T, ME]):
     True
     """
 
-    motifs_cls: ClassVar[type[ME]] = RandomGraphNodePairMotifs  # type: ignore
+    motifs_cls: ClassVar[type[RandomGraphNodePairMotifs]] = RandomGraphNodePairMotifs
