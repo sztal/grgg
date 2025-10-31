@@ -37,24 +37,20 @@ from .sampling import AbstractErgmSampler
 if TYPE_CHECKING:
     from .models import AbstractErgm
 
-    V = TypeVar("V", bound="AbstractErgmNodeView")
-    E = TypeVar("E", bound="AbstractErgmNodePairView")
-    S = TypeVar("S", bound=AbstractErgmSampler)
-    T = TypeVar("T", bound=AbstractErgm[V, E, S])
-    M = TypeVar("M", bound=AbstractErgmMotifs)
-    MV = TypeVar("MV", bound=AbstractErgmNodeMotifs)
-    ME = TypeVar("ME", bound=AbstractErgmNodePairMotifs)
+    T = TypeVar("T", bound=AbstractErgm)
+    NV = TypeVar("NV", bound="AbstractErgmNodeView[T]")
+    PV = TypeVar("PV", bound="AbstractErgmNodePairView[T]")
 
 __all__ = ("AbstractErgmView", "AbstractErgmNodeView", "AbstractErgmNodePairView")
 
 
-class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
+class AbstractErgmView[T](AbstractModelView[T], Shaped):
     """Abstract base class for ERGM views."""
 
-    model: T
+    motifs: eqx.AbstractVar[AbstractErgmMotifs[T]]
     _index: DynamicIndex | None = eqx.field(repr=False)
 
-    motifs_cls: eqx.AbstractClassVar[type[M]]
+    motifs_cls: eqx.AbstractClassVar[AbstractErgmMotifs[T]]
 
     def __init__(
         self,
@@ -66,6 +62,10 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         if _index is not None and not isinstance(_index, DynamicIndex):
             _index = self.index_expr[_index]
         self._index = _index
+
+    def __post_init__(self) -> None:
+        super().__post_init__()
+        object.__setattr__(self, "motifs", self.motifs_cls(self))
 
     def __check_init__(self) -> None:
         if self._index is not None and (ndim := self._index.ndim) > self.full_ndim:
@@ -141,11 +141,6 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         return math.prod(self.full_shape)
 
     @property
-    def motifs(self) -> M:
-        """Motif statistics for the view."""
-        return self.motifs_cls(self)
-
-    @property
     def coords(self) -> tuple[Integers, ...]:
         """Coordinates for the selected indices."""
         return self.index.coords
@@ -200,8 +195,10 @@ class AbstractErgmView[T, M](AbstractModelView[T], Shaped):
         return model
 
 
-class AbstractErgmNodeView[T, MV, S](AbstractErgmView[T, MV]):
+class AbstractErgmNodeView[T](AbstractErgmView[T]):
     """Abstract base class for ERGM node views."""
+
+    sampler: eqx.AbstractVar[AbstractErgmSampler[T]]
 
     degree_cls: eqx.AbstractClassVar[type[Degree]]
     tclust_cls: eqx.AbstractClassVar[type[TClustering]]
@@ -213,7 +210,8 @@ class AbstractErgmNodeView[T, MV, S](AbstractErgmView[T, MV]):
     tstats_cls: eqx.AbstractClassVar[type[TStatistics]]
     qstats_cls: eqx.AbstractClassVar[type[QStatistics]]
 
-    sampler_cls: eqx.AbstractClassVar[type[S]]
+    motifs_cls: eqx.AbstractClassVar[AbstractErgmNodeMotifs[T]]
+    sampler_cls: eqx.AbstractClassVar[type[AbstractErgmSampler[T]]]
 
     @property
     def _default_homogeneous_index_args(self) -> int:
@@ -235,12 +233,7 @@ class AbstractErgmNodeView[T, MV, S](AbstractErgmView[T, MV]):
         return jnp.unique(indices)
 
     @property
-    def sampler(self) -> "S":
-        """Sampler for the view."""
-        return self.sampler_cls(self)
-
-    @property
-    def pairs(self) -> "E":
+    def pairs(self) -> "PV":
         """View of all node pairs induces by the node view."""
         pairs = self.model.pairs
         if not self.is_active:
@@ -326,8 +319,10 @@ class AbstractErgmNodeView[T, MV, S](AbstractErgmView[T, MV]):
         return super().materialize(indices, copy=copy)
 
 
-class AbstractErgmNodePairView[T, ME](AbstractErgmView[T, ME]):
+class AbstractErgmNodePairView[T](AbstractErgmView[T]):
     """Abstract base class for node pair views."""
+
+    motifs_cls: eqx.AbstractClassVar[AbstractErgmNodePairMotifs[T]]
 
     @property
     def _default_homogeneous_index_args(self) -> tuple[int, int]:
@@ -364,7 +359,7 @@ class AbstractErgmNodePairView[T, ME](AbstractErgmView[T, ME]):
         return jnp.unique(self.unique_indices)
 
     @property
-    def nodes(self) -> "V":
+    def nodes(self) -> "NV":
         """View of all nodes induces by the node pair view."""
         return self.model.nodes[self.node_indices]
 

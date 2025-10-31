@@ -26,8 +26,6 @@ __all__ = ("AbstractErgmSampler", "ErgmSample")
 
 
 T = TypeVar("T", bound="AbstractErgm")
-V = TypeVar("V", bound="AbstractErgmNodeView")
-X = TypeVar("X", bound="ErgmSample")
 
 
 @dataclass(frozen=True)
@@ -86,10 +84,10 @@ class ErgmSample:
         return self.igraph
 
 
-class AbstractErgmSampler[T, V, X](AbstractModelSampler[T]):
+class AbstractErgmSampler[T](AbstractModelSampler[T]):
     """Abstract base class for samplers of static graph models."""
 
-    nodes: eqx.AbstractVar[V]
+    nodes: eqx.AbstractVar[AbstractErgmNodeView[T]]
 
     @property
     def model(self) -> T:
@@ -102,5 +100,5 @@ class AbstractErgmSampler[T, V, X](AbstractModelSampler[T]):
         return self.nodes.n_nodes
 
     @abstractmethod
-    def sample(self, *args: Any, **kwargs: Any) -> X:
+    def sample(self, *args: Any, **kwargs: Any) -> ErgmSample:
         """Sample a graph from the model."""

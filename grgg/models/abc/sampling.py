@@ -1,8 +1,6 @@
 from abc import abstractmethod
 from typing import TYPE_CHECKING, Any, TypeVar
 
-import equinox as eqx
-
 from .modules import AbstractModelModule
 
 if TYPE_CHECKING:
@@ -13,10 +11,8 @@ __all__ = ("AbstractModelSampler",)
 T = TypeVar("T", bound="AbstractModel")
 
 
-class AbstractModelSampler[T](AbstractModelModule[T]):
+class AbstractModelSampler(AbstractModelModule):
     """Abstract base class for samplers."""
-
-    model: eqx.AbstractVar[T]
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self.sample(*args, **kwargs)

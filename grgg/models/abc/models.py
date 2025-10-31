@@ -1,6 +1,6 @@
 from abc import abstractmethod
 from collections.abc import Mapping
-from typing import Any, Self, TypeVar
+from typing import Any, Self
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -15,16 +15,13 @@ from .parameters import AbstractParameter
 __all__ = ("AbstractModel",)
 
 
-F = TypeVar("F", bound=AbstractModelFunctions)
-
-
-class AbstractModel[F](AbstractModelModule[Self]):
+class AbstractModel(AbstractModelModule[Self]):
     """Abstract base class for models."""
 
-    functions: F = eqx.field(init=False)
+    functions: eqx.AbstractVar[AbstractModelFunctions]
 
     n_units: eqx.AbstractVar[int]
-    functions_cls: eqx.AbstractClassVar[type[F]]
+    functions_cls: eqx.AbstractClassVar[type[AbstractModelFunctions]]
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "functions", self.functions_cls(self))

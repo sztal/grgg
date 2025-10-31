@@ -1,6 +1,10 @@
-from abc import abstractmethod
+from collections.abc import Callable
+from typing import TYPE_CHECKING, ClassVar
 
-from .modules import AbstractModelModule
+from grgg.models.abc import AbstractModelModule
+
+if TYPE_CHECKING:
+    from .models import AbstractModel
 
 __all__ = ("AbstractModelFunctions",)
 
@@ -8,12 +12,17 @@ __all__ = ("AbstractModelFunctions",)
 class AbstractModelFunctions[T](AbstractModelModule[T]):
     """Abstract base class for model functions."""
 
-    model: T
+    names: ClassVar[frozenset[str]] = frozenset()
 
-    def __init__(self, model: T) -> None:
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        for name, attr in cls.__dict__.items():
+            if name.startswith("compile_") and isinstance(attr, Callable):
+                cls.names = cls.names.union({name})
+
+    def __init__(self, model: "AbstractModel") -> None:
         self.model = model
-        self.compile()
-
-    @abstractmethod
-    def compile(self) -> None:
-        """Bind model functions to the model instance and compile."""
+        for name in self.names:
+            fname = name.removeprefix("compile_")
+            compiled = getattr(self, name)()
+            object.__setattr__(self, fname, compiled)

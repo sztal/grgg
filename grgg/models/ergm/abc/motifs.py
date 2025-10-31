@@ -18,20 +18,20 @@ if TYPE_CHECKING:
     from .views import AbstractErgmNodePairView, AbstractErgmNodeView, AbstractErgmView
 
     T = TypeVar("T", bound=AbstractErgm)
-    U = TypeVar("U", bound=AbstractErgmView[T])
-    E = TypeVar("E", bound=AbstractErgmNodePairView[T])
-    V = TypeVar("V", bound=AbstractErgmNodeView[T])
+    V = TypeVar("V", bound=AbstractErgmView[T])
+    NV = TypeVar("NV", bound=AbstractErgmNodeView[T])
+    PV = TypeVar("PV", bound=AbstractErgmNodePairView[T])
 
 __all__ = ("AbstractErgmMotifs", "AbstractErgmNodeMotifs", "AbstractErgmNodePairMotifs")
 
 
-class AbstractErgmMotifs[U, T](AbstractModelModule[T]):
+class AbstractErgmMotifs[T](AbstractModelModule[T]):
     """Abstract base class for ERGM motif statistics."""
 
-    view: eqx.AbstractVar[U]
+    view: eqx.AbstractVar[V]
 
     @property
-    def model(self) -> "T":
+    def model(self) -> T:
         """The model the motifs are computed for."""
         return self.view.model
 
@@ -39,8 +39,10 @@ class AbstractErgmMotifs[U, T](AbstractModelModule[T]):
         return super()._equals(other) and self.view.equals(other.view)
 
 
-class AbstractErgmNodeMotifs[V, T](AbstractErgmMotifs[V, T]):
+class AbstractErgmNodeMotifs[T](AbstractErgmMotifs[T]):
     """Abstract base class for ERGM node motif statistics."""
+
+    view: eqx.AbstractVar[NV]
 
     triangle_cls: eqx.AbstractClassVar[type[TriangleMotif]]
     twedge_cls: eqx.AbstractClassVar[type[TWedgeMotif]]
@@ -50,7 +52,7 @@ class AbstractErgmNodeMotifs[V, T](AbstractErgmMotifs[V, T]):
     qhead_cls: eqx.AbstractClassVar[type[QHeadMotif]]
 
     @property
-    def nodes(self) -> V:
+    def nodes(self) -> NV:
         """The node view the motifs are computed for."""
         return self.view
 
@@ -91,10 +93,12 @@ class AbstractErgmNodeMotifs[V, T](AbstractErgmMotifs[V, T]):
         return self.qhead_cls(self)
 
 
-class AbstractErgmNodePairMotifs[E, T](AbstractErgmMotifs[E, T]):
+class AbstractErgmNodePairMotifs[T](AbstractErgmMotifs[T]):
     """Abstract base class for ERGM node pair motif statistics."""
 
+    view: eqx.AbstractVar[PV]
+
     @property
-    def pairs(self) -> E:
+    def pairs(self) -> PV:
         """The node pair view the motifs are computed for."""
         return self.view
