@@ -1,3 +1,4 @@
+from collections.abc import Mapping
 from enum import Enum
 from typing import Any
 
@@ -7,7 +8,7 @@ import jax.numpy as jnp
 from grgg.abc import AbstractModule
 from grgg.utils.misc import format_array
 
-__all__ = ("AbstractParameter", "Constraints")
+__all__ = ("AbstractParameter", "Constraints", "ParametersMapping")
 
 
 class Constraints(Enum):
@@ -131,3 +132,27 @@ class AbstractParameter(AbstractModule):
             and self.constraints == other.constraints
             and jnp.array_equal(self.data, other.data)
         )
+
+
+class ParametersMapping(Mapping[str, AbstractParameter]):
+    """Mapping of model parameters."""
+
+    def __init__(self, parameters: Mapping[str, AbstractParameter]) -> None:
+        self._parameters = parameters
+
+    def __getitem__(self, key: str) -> AbstractParameter:
+        return self._parameters[key]
+
+    def __iter__(self):
+        return iter(self._parameters)
+
+    def __len__(self) -> int:
+        return len(self._parameters)
+
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({repr(self._parameters)})"
+
+    @property
+    def data(self) -> Mapping[str, jnp.ndarray]:
+        """Mapping of parameter data."""
+        return {name: param.data for name, param in self.items()}

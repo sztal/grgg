@@ -23,11 +23,9 @@ __all__ = ("RandomGraphNodeView",)
 
 
 T = TypeVar("T", bound="RandomGraph")
-MV = TypeVar("MV", bound=RandomGraphNodeMotifs)
-S = TypeVar("S", bound=RandomGraphSampler)
 
 
-class RandomGraphNodeView[T, MV, S](AbstractRandomGraphNodeView[T, MV, S]):
+class RandomGraphNodeView[T](AbstractRandomGraphNodeView[T]):
     """Nodes view for undirected random graph models."""
 
     motifs_cls: ClassVar[type[RandomGraphNodeMotifs]] = RandomGraphNodeMotifs

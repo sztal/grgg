@@ -1,21 +1,17 @@
-from typing import ClassVar, TypeVar
+from typing import ClassVar
 
 import equinox as eqx
 
-from grgg._typing import Real, RealVector
+from grgg._typing import Real, Reals, RealVector
 from grgg.models.ergm.random_graphs.abc import AbstractRandomGraph, Mu
 
-from .functions import RandomGraphCoupling
+from .functions import couplings
 from .views import RandomGraphNodePairView, RandomGraphNodeView
 
 __all__ = ("RandomGraph",)
 
 
-V = TypeVar("V", bound=RandomGraphNodeView)
-E = TypeVar("E", bound=RandomGraphNodePairView)
-
-
-class RandomGraph[V, E](AbstractRandomGraph[V, E]):
+class RandomGraph(AbstractRandomGraph):
     """Undirected random graph model.
 
     It is equivalent to the `(n, p)`-Erdős–Rényi model when `mu` is homogeneous,
@@ -31,7 +27,6 @@ class RandomGraph[V, E](AbstractRandomGraph[V, E]):
 
     n_nodes: int = eqx.field(static=True)
     mu: Mu
-    coupling: RandomGraphCoupling = eqx.field(init=False)
 
     is_directed: ClassVar[bool] = False
     nodes_cls: ClassVar[type[RandomGraphNodeView]] = RandomGraphNodeView
@@ -44,17 +39,9 @@ class RandomGraph[V, E](AbstractRandomGraph[V, E]):
     ) -> None:
         self.n_nodes = n_nodes
         self.mu = mu if isinstance(mu, Mu) else Mu(mu)
-        self.coupling = self._init_coupling()
 
     def _repr_inner(self) -> str:
         return f"{self.n_nodes}, {self.mu}"
-
-    @property
-    def parameters(self) -> dict[str, Mu]:
-        return {"mu": self.mu}
-
-    def _init_coupling(self) -> RandomGraphCoupling:
-        return RandomGraphCoupling()
 
     def _equals(self, other: object) -> bool:
         return (
@@ -63,3 +50,13 @@ class RandomGraph[V, E](AbstractRandomGraph[V, E]):
             and self.mu.equals(other.mu)
             and self.coupling.equals(other.coupling)
         )
+
+    # Model functions ----------------------------------------------------------------
+
+    def couplings(self, mu: Reals) -> Reals:
+        """Compute edge couplings."""
+        return couplings(self, mu)
+
+    def free_energy(self, mu: Reals) -> Real:
+        """Compute the free energy of the model."""
+        # vids = jnp.arange(1, self.n_nodes)

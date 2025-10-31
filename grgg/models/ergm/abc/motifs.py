@@ -14,7 +14,7 @@ from grgg.statistics.motifs import (
 )
 
 if TYPE_CHECKING:
-    from .models import AbstractErgm
+    from .model import AbstractErgm
     from .views import AbstractErgmNodePairView, AbstractErgmNodeView, AbstractErgmView
 
     T = TypeVar("T", bound=AbstractErgm)
@@ -28,7 +28,7 @@ __all__ = ("AbstractErgmMotifs", "AbstractErgmNodeMotifs", "AbstractErgmNodePair
 class AbstractErgmMotifs[T](AbstractModelModule[T]):
     """Abstract base class for ERGM motif statistics."""
 
-    view: eqx.AbstractVar[V]
+    view: eqx.AbstractVar["V"]
 
     @property
     def model(self) -> T:
@@ -42,7 +42,7 @@ class AbstractErgmMotifs[T](AbstractModelModule[T]):
 class AbstractErgmNodeMotifs[T](AbstractErgmMotifs[T]):
     """Abstract base class for ERGM node motif statistics."""
 
-    view: eqx.AbstractVar[NV]
+    view: eqx.AbstractVar["NV"]
 
     triangle_cls: eqx.AbstractClassVar[type[TriangleMotif]]
     twedge_cls: eqx.AbstractClassVar[type[TWedgeMotif]]
@@ -52,7 +52,7 @@ class AbstractErgmNodeMotifs[T](AbstractErgmMotifs[T]):
     qhead_cls: eqx.AbstractClassVar[type[QHeadMotif]]
 
     @property
-    def nodes(self) -> NV:
+    def nodes(self) -> "NV":
         """The node view the motifs are computed for."""
         return self.view
 
@@ -96,9 +96,9 @@ class AbstractErgmNodeMotifs[T](AbstractErgmMotifs[T]):
 class AbstractErgmNodePairMotifs[T](AbstractErgmMotifs[T]):
     """Abstract base class for ERGM node pair motif statistics."""
 
-    view: eqx.AbstractVar[PV]
+    view: eqx.AbstractVar["PV"]
 
     @property
-    def pairs(self) -> PV:
+    def pairs(self) -> "PV":
         """The node pair view the motifs are computed for."""
         return self.view

@@ -5,7 +5,7 @@ import equinox as eqx
 from grgg.abc import AbstractModule
 
 if TYPE_CHECKING:
-    from .models import AbstractModel
+    from .model import AbstractModel
 
     T = TypeVar("T", bound=AbstractModel)
 

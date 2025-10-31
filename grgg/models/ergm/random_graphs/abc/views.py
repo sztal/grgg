@@ -6,22 +6,16 @@ import jax.numpy as jnp
 from grgg._typing import Reals
 from grgg.models.ergm.abc import AbstractErgmNodePairView, AbstractErgmNodeView
 
-from .motifs import AbstractRandomGraphNodeMotifs, AbstractRandomGraphNodePairMotifs
-from .sampling import AbstractRandomGraphSampler
-
 if TYPE_CHECKING:
-    from .models import AbstractRandomGraph
+    from .model import AbstractRandomGraph
 
 __all__ = ("AbstractRandomGraphNodeView", "AbstractRandomGraphNodePairView")
 
 
 T = TypeVar("T", bound="AbstractRandomGraph")
-MV = TypeVar("MV", bound=AbstractRandomGraphNodeMotifs)
-ME = TypeVar("ME", bound=AbstractRandomGraphNodePairMotifs)
-S = TypeVar("S", bound=AbstractRandomGraphSampler)
 
 
-class AbstractRandomGraphNodeView[T, MV, S](AbstractErgmNodeView[T, MV, S]):
+class AbstractRandomGraphNodeView[T](AbstractErgmNodeView[T]):
     """Abstract base class for node views of random graph models."""
 
     def materialize(self, *, copy: bool = False) -> T:
@@ -50,12 +44,12 @@ class AbstractRandomGraphNodeView[T, MV, S](AbstractErgmNodeView[T, MV, S]):
         return super().materialize(copy=copy)
 
 
-class AbstractRandomGraphNodePairView[T, ME](AbstractErgmNodePairView[T, ME]):
+class AbstractRandomGraphNodePairView[T](AbstractErgmNodePairView[T]):
     """Abstract base class for node pair views of random graph models."""
 
-    def probs(self, *args: Any, **kwargs: Any) -> Reals:
+    def probs(self, *args: Any, log: bool = False, **kwargs: Any) -> Reals:
         """Compute connection probabilities for selected pairs."""
-        return _pairs_probs(self, *args, **kwargs)
+        return _pairs_probs(self, *args, log=log, **kwargs)
 
 
 # Internals --------------------------------------------------------------------------
@@ -65,9 +59,13 @@ class AbstractRandomGraphNodePairView[T, ME](AbstractErgmNodePairView[T, ME]):
 def _pairs_probs(
     pairs: AbstractRandomGraphNodePairView,
     *args: jnp.ndarray,
+    log: bool = False,
 ) -> Reals:
     """Compute pairwise connection probabilities."""
-    probs = pairs.model.probability(*args, pairs.model.coupling(*pairs.parameters))
+    if log:
+        probs = pairs.model.logprobs(*args, *pairs.parameters)
+    else:
+        probs = pairs.model.probs(*args, *pairs.parameters)
     if pairs.model.is_homogeneous:
         probs = jnp.full(pairs.shape, probs)
     try:

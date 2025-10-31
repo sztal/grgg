@@ -12,16 +12,13 @@ from ._twedge import RandomGraphTWedgeMotif
 if TYPE_CHECKING:
     from grgg.models.ergm.random_graphs.undirected.model import RandomGraph
     from grgg.models.ergm.random_graphs.undirected.views import (
-        RandomGraphNodePairView,
         RandomGraphNodeView,
     )
 
     T = TypeVar("T", bound="RandomGraph")
-    V = TypeVar("V", bound="RandomGraphNodeView")
-    E = TypeVar("E", bound="RandomGraphNodePairView")
 
 
-class RandomGraphNodeMotifs[V, T](AbstractErgmNodeMotifs[V, T]):
+class RandomGraphNodeMotifs[T](AbstractErgmNodeMotifs[T]):
     """Class for undirected node motifs."""
 
     view: "RandomGraphNodeView"

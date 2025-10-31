@@ -14,10 +14,9 @@ __all__ = ("RandomGraphNodePairView",)
 
 
 T = TypeVar("T", bound="RandomGraph")
-ME = TypeVar("ME", bound=RandomGraphNodePairMotifs)
 
 
-class RandomGraphNodePairView[T, ME](AbstractRandomGraphNodePairView[T, ME]):
+class RandomGraphNodePairView[T](AbstractRandomGraphNodePairView[T]):
     r"""Node pair view for undirected random graph models.
 
     Examples

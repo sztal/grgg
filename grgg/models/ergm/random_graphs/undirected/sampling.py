@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING, TypeVar
 
-from grgg.models.ergm.abc import ErgmSample
 from grgg.models.ergm.random_graphs.abc import AbstractRandomGraphSampler
 
 if TYPE_CHECKING:
@@ -11,11 +10,9 @@ __all__ = ("RandomGraphSampler",)
 
 
 T = TypeVar("T", bound="RandomGraph")
-V = TypeVar("V", bound="RandomGraphNodeView")
-X = TypeVar("X", bound="ErgmSample")
 
 
-class RandomGraphSampler[T, V, X](AbstractRandomGraphSampler[T, V, X]):
+class RandomGraphSampler[T](AbstractRandomGraphSampler[T]):
     """Sampler for undirected random graph models."""
 
-    nodes: V
+    nodes: "RandomGraphNodeView"

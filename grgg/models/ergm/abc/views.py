@@ -35,7 +35,7 @@ from .motifs import (
 from .sampling import AbstractErgmSampler
 
 if TYPE_CHECKING:
-    from .models import AbstractErgm
+    from .model import AbstractErgm
 
     T = TypeVar("T", bound=AbstractErgm)
     NV = TypeVar("NV", bound="AbstractErgmNodeView[T]")
@@ -47,7 +47,6 @@ __all__ = ("AbstractErgmView", "AbstractErgmNodeView", "AbstractErgmNodePairView
 class AbstractErgmView[T](AbstractModelView[T], Shaped):
     """Abstract base class for ERGM views."""
 
-    motifs: eqx.AbstractVar[AbstractErgmMotifs[T]]
     _index: DynamicIndex | None = eqx.field(repr=False)
 
     motifs_cls: eqx.AbstractClassVar[AbstractErgmMotifs[T]]
@@ -62,10 +61,6 @@ class AbstractErgmView[T](AbstractModelView[T], Shaped):
         if _index is not None and not isinstance(_index, DynamicIndex):
             _index = self.index_expr[_index]
         self._index = _index
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        object.__setattr__(self, "motifs", self.motifs_cls(self))
 
     def __check_init__(self) -> None:
         if self._index is not None and (ndim := self._index.ndim) > self.full_ndim:
@@ -160,6 +155,11 @@ class AbstractErgmView[T](AbstractModelView[T], Shaped):
         """Index expression for the view."""
         return DynamicIndexExpression(self.full_shape)
 
+    @property
+    def motifs(self) -> AbstractErgmMotifs[T]:
+        """Motif statistics for the view."""
+        return self.motifs_cls(self)
+
     def reset(self) -> None:
         """Reset the view."""
         return self.replace(_index=None)
@@ -197,8 +197,6 @@ class AbstractErgmView[T](AbstractModelView[T], Shaped):
 
 class AbstractErgmNodeView[T](AbstractErgmView[T]):
     """Abstract base class for ERGM node views."""
-
-    sampler: eqx.AbstractVar[AbstractErgmSampler[T]]
 
     degree_cls: eqx.AbstractClassVar[type[Degree]]
     tclust_cls: eqx.AbstractClassVar[type[TClustering]]
@@ -241,6 +239,11 @@ class AbstractErgmNodeView[T](AbstractErgmView[T]):
         coords = jnp.ix_(*(self.coords * 2))
         return pairs[coords]
 
+    @property
+    def sampler(self) -> AbstractErgmSampler[T]:
+        """Sampler for the view."""
+        return self.sampler_cls(self)
+
     def sample(self, *args: Any, **kwargs: Any) -> Any:
         """Sample from the view's sampler."""
         return self.sampler.sample(*args, **kwargs)
@@ -258,6 +261,10 @@ class AbstractErgmNodeView[T](AbstractErgmView[T]):
     def degree(self) -> Degree:
         """Degree statistic for the nodes in the view."""
         return self.degree_cls(self)
+
+    def edge_density(self, *args: Any, **kwargs: Any) -> float:
+        """Expected edge density of the model."""
+        return self.degree(*args, **kwargs).mean() / (self.n_nodes - 1)
 
     @property
     @wraps(TClustering.__init__)

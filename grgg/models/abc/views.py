@@ -16,6 +16,8 @@ __all__ = ("AbstractModelView",)
 class AbstractModelView[T](AbstractModelModule[T]):
     """Abstract base class for model views."""
 
+    model: T
+
     @property
     @abstractmethod
     def is_active(self) -> bool:

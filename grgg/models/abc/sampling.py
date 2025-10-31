@@ -4,14 +4,14 @@ from typing import TYPE_CHECKING, Any, TypeVar
 from .modules import AbstractModelModule
 
 if TYPE_CHECKING:
-    from .models import AbstractModel
+    from .model import AbstractModel
 
 __all__ = ("AbstractModelSampler",)
 
 T = TypeVar("T", bound="AbstractModel")
 
 
-class AbstractModelSampler(AbstractModelModule):
+class AbstractModelSampler[T](AbstractModelModule[T]):
     """Abstract base class for samplers."""
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:

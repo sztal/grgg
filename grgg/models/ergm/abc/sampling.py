@@ -10,8 +10,11 @@ from scipy.sparse import sparray
 from grgg.models.abc import AbstractModelSampler
 
 if TYPE_CHECKING:
-    from .models import AbstractErgm
+    from .model import AbstractErgm
     from .views import AbstractErgmNodeView
+
+    T = TypeVar("T", bound="AbstractErgm")
+    NV = TypeVar("NV", bound="AbstractErgmNodeView")
 
     try:
         import igraph as ig
@@ -23,9 +26,6 @@ if TYPE_CHECKING:
         pass
 
 __all__ = ("AbstractErgmSampler", "ErgmSample")
-
-
-T = TypeVar("T", bound="AbstractErgm")
 
 
 @dataclass(frozen=True)
@@ -87,7 +87,7 @@ class ErgmSample:
 class AbstractErgmSampler[T](AbstractModelSampler[T]):
     """Abstract base class for samplers of static graph models."""
 
-    nodes: eqx.AbstractVar[AbstractErgmNodeView[T]]
+    nodes: eqx.AbstractVar["NV"]
 
     @property
     def model(self) -> T:

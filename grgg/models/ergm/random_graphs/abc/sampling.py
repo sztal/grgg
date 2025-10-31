@@ -2,7 +2,6 @@ from collections.abc import Mapping
 from functools import partial
 from typing import TYPE_CHECKING, Any, TypeVar
 
-import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -16,21 +15,16 @@ from grgg.utils.misc import batch_starts
 from grgg.utils.random import RandomGenerator
 
 if TYPE_CHECKING:
-    from .models import AbstractRandomGraph
-    from .views import AbstractRandomGraphNodeView
+    from .model import AbstractRandomGraph
 
 __all__ = ("AbstractRandomGraphSampler",)
 
 
 T = TypeVar("T", bound="AbstractRandomGraph")
-V = TypeVar("V", bound="AbstractRandomGraphNodeView")
-X = TypeVar("X", bound="ErgmSample")
 
 
-class AbstractRandomGraphSampler[T, V, X](AbstractErgmSampler[T, V, X]):
+class AbstractRandomGraphSampler[T](AbstractErgmSampler[T]):
     """Abstract base class for samplers of random graph models."""
-
-    nodes: eqx.AbstractVar[V]
 
     def sample(
         self,
@@ -38,7 +32,7 @@ class AbstractRandomGraphSampler[T, V, X](AbstractErgmSampler[T, V, X]):
         batch_size: int | None = None,
         rng: RandomGenerator | int | None = None,
         progress: bool | Mapping | None = None,
-    ) -> X:
+    ) -> ErgmSample:
         """Sample a graph from the model.
 
         Parameters

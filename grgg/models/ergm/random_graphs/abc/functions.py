@@ -1,31 +1,25 @@
-from abc import abstractmethod
-from collections.abc import Callable
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any
 
 import equinox as eqx
+import jax
 
 from grgg._typing import Reals
-from grgg.models.abc import AbstractModelFunctions
 
 if TYPE_CHECKING:
-    from .models import AbstractRandomGraph
+    from .model import AbstractRandomGraph
 
-T = TypeVar("T", bound="AbstractRandomGraph")
-
-__all__ = ("AbstractRandomGraphFunctions",)
-
-CouplingT = Callable[[Reals], Reals]
+__all__ = ("logprobs", "probs")
 
 
-class AbstractRandomGraphFunctions[T](AbstractModelFunctions[T]):
-    """Abstract base class for random graph model functions."""
+@eqx.filter_jit
+def logprobs(model: "AbstractRandomGraph", *args: Any, **kwargs: Any) -> Reals:
+    """Compute edge log-probabilities."""
+    couplings = model.couplings(*args, **kwargs)
+    return jax.nn.log_sigmoid(-couplings)
 
-    coupling: CouplingT = eqx.field(static=True)
 
-    def compile(self) -> None:
-        """Bind model functions to the model instance and compile."""
-        self.coupling = self.compile_coupling()
-
-    @abstractmethod
-    def compile_coupling(self) -> CouplingT:
-        """Compile the coupling function."""
+@eqx.filter_jit
+def probs(model: "AbstractRandomGraph", *args: Any, **kwargs: Any) -> Reals:
+    """Compute edge probabilities."""
+    couplings = model.couplings(*args, **kwargs)
+    return jax.nn.sigmoid(-couplings)
