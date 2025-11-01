@@ -1,4 +1,5 @@
 from abc import abstractmethod
+from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Self
 
 import jax.numpy as jnp
@@ -38,9 +39,9 @@ class AbstractModelView[T](AbstractModelModule[T]):
         """Reset the view to its default state."""
 
     @property
-    def parameters(self) -> tuple[jnp.ndarray, ...]:
+    def parameters(self) -> Mapping[str, jnp.ndarray]:
         """Tuple of parameter arrays for the view."""
-        return tuple(self.get_parameter(name) for name in self.model.parameters)
+        return {name: self.get_parameter(name) for name in self.model.parameters}
 
     @abstractmethod
     def get_parameter(self, args: Any, **kwargs: Any) -> Any:

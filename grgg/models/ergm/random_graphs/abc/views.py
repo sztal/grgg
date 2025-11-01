@@ -47,9 +47,13 @@ class AbstractRandomGraphNodeView[T](AbstractErgmNodeView[T]):
 class AbstractRandomGraphNodePairView[T](AbstractErgmNodePairView[T]):
     """Abstract base class for node pair views of random graph models."""
 
-    def probs(self, *args: Any, log: bool = False, **kwargs: Any) -> Reals:
+    def probs(self, *args: Any, **kwargs: Any) -> Reals:
         """Compute connection probabilities for selected pairs."""
-        return _pairs_probs(self, *args, log=log, **kwargs)
+        return _pairs_probs(self, *args, **kwargs)
+
+    def free_energy(self, *args: Any, **kwargs: Any) -> Reals:
+        """Compute edge free energies for selected pairs."""
+        return _pairs_free_energy(self, *args, **kwargs)
 
 
 # Internals --------------------------------------------------------------------------
@@ -59,13 +63,10 @@ class AbstractRandomGraphNodePairView[T](AbstractErgmNodePairView[T]):
 def _pairs_probs(
     pairs: AbstractRandomGraphNodePairView,
     *args: jnp.ndarray,
-    log: bool = False,
+    **kwargs: Any,
 ) -> Reals:
     """Compute pairwise connection probabilities."""
-    if log:
-        probs = pairs.model.logprobs(*args, *pairs.parameters)
-    else:
-        probs = pairs.model.probs(*args, *pairs.parameters)
+    probs = pairs.model.functions.probs(*args, **pairs.parameters, **kwargs)
     if pairs.model.is_homogeneous:
         probs = jnp.full(pairs.shape, probs)
     try:
@@ -74,3 +75,23 @@ def _pairs_probs(
         # This must be a single integer index
         return probs.at[pairs._index].set(0.0)
     return jnp.where(i == j, 0.0, probs)
+
+
+@eqx.filter_jit
+def _pairs_free_energy(
+    pairs: AbstractRandomGraphNodePairView,
+    *args: jnp.ndarray,
+    **kwargs: Any,
+) -> Reals:
+    """Compute pairwise edge free energies."""
+    free_energy = pairs.model.functions.edge_free_energy(
+        *args, **pairs.parameters, **kwargs
+    )
+    if pairs.model.is_homogeneous:
+        free_energy = jnp.full(pairs.shape, free_energy)
+    try:
+        i, j = pairs.coords
+    except ValueError:
+        # This must be a single integer index
+        return free_energy.at[pairs._index].set(jnp.inf)
+    return jnp.where(i == j, jnp.nan, free_energy)

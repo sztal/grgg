@@ -1,3 +1,4 @@
+from .functions import AbstractErgmFunctions
 from .model import AbstractErgm
 from .motifs import (
     AbstractErgmMotifs,

@@ -1,24 +1,31 @@
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import equinox as eqx
 
 from grgg._typing import Reals
 
+from ..abc import AbstractRandomGraphFunctions
+
 if TYPE_CHECKING:
     from .model import AbstractRandomGraph
 
-__all__ = ("couplings",)
+    T = TypeVar("T", bound=AbstractRandomGraph)
+
+__all__ = ("RandomGraphFunctions",)
+
+
+class RandomGraphFunctions[T](AbstractRandomGraphFunctions[T]):
+    """Random graph model functions."""
+
+    def couplings(self, mu: Reals) -> Reals:
+        """Compute edge couplings."""
+        return couplings(self.model, mu)
+
+    def free_energy(self, *args: Any, **kwargs: Any) -> Reals:
+        return super().free_energy(*args, **kwargs) / 2
 
 
 @eqx.filter_jit
-def couplings(model: "AbstractRandomGraph", mu: Reals) -> Reals:  # noqa
+def couplings(funcs: RandomGraphFunctions, mu: Reals) -> Reals:  # noqa
     """Compute edge couplings."""
     return -mu
-
-
-# @eqx.filter_jit
-# def free_energy(model: "AbstractRandomGraph", mu: Reals) -> Real:
-#     """Compute the free energy of the model."""
-#     @fori(1, model.n_nodes, init=0.0)
-#     def F(carry: Real, i: Integer) -> Real:
-#         carry += model.pairs[i, :i].probs(log=True)

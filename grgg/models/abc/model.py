@@ -7,6 +7,7 @@ import jax.numpy as jnp
 from grgg._options import options
 from grgg.utils.misc import parse_switch_flag
 
+from .functions import AbstractModelFunctions
 from .modules import AbstractModelModule
 from .parameters import AbstractParameter, ParametersMapping
 
@@ -17,6 +18,8 @@ class AbstractModel(AbstractModelModule[Self]):
     """Abstract base class for models."""
 
     n_units: eqx.AbstractVar[int]
+
+    functions_cls: eqx.AbstractClassVar[type[AbstractModelFunctions]]
 
     def __check_init__(self) -> None:
         if self.n_units <= 0:
@@ -38,6 +41,11 @@ class AbstractModel(AbstractModelModule[Self]):
     def model(self) -> Self:
         """Self as model."""
         return self
+
+    @property
+    def functions(self) -> AbstractModelFunctions[type[Self]]:
+        """Functions container for the model."""
+        return self.functions_cls(self)
 
     @property
     def is_heterogeneous(self) -> bool:

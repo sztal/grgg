@@ -2,10 +2,10 @@ from typing import ClassVar
 
 import equinox as eqx
 
-from grgg._typing import Real, Reals, RealVector
+from grgg._typing import Real, RealVector
 from grgg.models.ergm.random_graphs.abc import AbstractRandomGraph, Mu
 
-from .functions import couplings
+from .functions import RandomGraphFunctions
 from .views import RandomGraphNodePairView, RandomGraphNodeView
 
 __all__ = ("RandomGraph",)
@@ -29,6 +29,7 @@ class RandomGraph(AbstractRandomGraph):
     mu: Mu
 
     is_directed: ClassVar[bool] = False
+    functions_cls: ClassVar[type[RandomGraphFunctions]] = RandomGraphFunctions
     nodes_cls: ClassVar[type[RandomGraphNodeView]] = RandomGraphNodeView
     pairs_cls: ClassVar[type[RandomGraphNodePairView]] = RandomGraphNodePairView
 
@@ -52,11 +53,3 @@ class RandomGraph(AbstractRandomGraph):
         )
 
     # Model functions ----------------------------------------------------------------
-
-    def couplings(self, mu: Reals) -> Reals:
-        """Compute edge couplings."""
-        return couplings(self, mu)
-
-    def free_energy(self, mu: Reals) -> Real:
-        """Compute the free energy of the model."""
-        # vids = jnp.arange(1, self.n_nodes)

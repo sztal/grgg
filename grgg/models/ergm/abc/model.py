@@ -1,12 +1,11 @@
-from abc import abstractmethod
 from typing import Any
 
 import equinox as eqx
-import jax.numpy as jnp
 
 from grgg._typing import Reals
 from grgg.models.abc import AbstractModel
 
+from .functions import AbstractErgmFunctions
 from .sampling import ErgmSample
 from .views import AbstractErgmNodePairView, AbstractErgmNodeView
 
@@ -18,6 +17,7 @@ class AbstractErgm(AbstractModel):
 
     n_nodes: eqx.AbstractVar[int]
     is_directed: eqx.AbstractClassVar[bool]
+    functions_cls: eqx.AbstractClassVar[type[AbstractErgmFunctions]]
     nodes_cls: eqx.AbstractClassVar[type[AbstractErgmNodeView]]
     pairs_cls: eqx.AbstractClassVar[type[AbstractErgmNodePairView]]
 
@@ -52,10 +52,10 @@ class AbstractErgm(AbstractModel):
 
     # Model functions ----------------------------------------------------------------
 
-    @abstractmethod
     def free_energy(self, *args: Any, **kwargs: Any) -> Reals:
         """Compute the free energy of the model."""
+        return self.functions.free_energy(*args, **kwargs)
 
     def partition_function(self, *args: Any, **kwargs: Any) -> Reals:
         """Compute the partition function of the model."""
-        return jnp.exp(-self.free_energy(*args, **kwargs))
+        return self.functions.partition_function(*args, **kwargs)

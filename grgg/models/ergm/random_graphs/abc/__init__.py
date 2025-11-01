@@ -1,3 +1,4 @@
+from .functions import AbstractRandomGraphFunctions
 from .model import AbstractRandomGraph
 from .parameters import Mu
 from .sampling import AbstractRandomGraphSampler

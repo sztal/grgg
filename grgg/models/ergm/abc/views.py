@@ -26,6 +26,7 @@ from grgg.utils.indexing import (
     IndexArgT,
     Shaped,
 )
+from grgg.utils.misc import cartesian_product
 
 from .motifs import (
     AbstractErgmMotifs,
@@ -355,8 +356,8 @@ class AbstractErgmNodePairView[T](AbstractErgmView[T]):
             indices = jnp.ix_(nodes, nodes)
         else:
             indices = jnp.broadcast_arrays(*self.coords)
-        indices = jnp.stack(indices, axis=-1).reshape(-1, 2)
-        return jnp.unique(indices, axis=1)
+        indices = cartesian_product([i.squeeze() for i in indices])
+        return jnp.unique(indices, axis=0)
 
     @property
     def node_indices(self) -> IntVector:
