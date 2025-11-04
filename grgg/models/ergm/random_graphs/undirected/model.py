@@ -1,4 +1,4 @@
-from typing import ClassVar
+from typing import ClassVar, NamedTuple
 
 import equinox as eqx
 
@@ -25,6 +25,9 @@ class RandomGraph(AbstractRandomGraph):
         Parameter controlling the expected degree of nodes.
     """
 
+    class Parameters(NamedTuple):
+        mu: RealVector
+
     n_nodes: int = eqx.field(static=True)
     mu: Mu
 
@@ -41,15 +44,10 @@ class RandomGraph(AbstractRandomGraph):
         self.n_nodes = n_nodes
         self.mu = mu if isinstance(mu, Mu) else Mu(mu)
 
-    def _repr_inner(self) -> str:
-        return f"{self.n_nodes}, {self.mu}"
+    @property
+    def parameters(self) -> "RandomGraph.Parameters":
+        """Model parameters."""
+        return self.Parameters(mu=self.mu.data)
 
     def _equals(self, other: object) -> bool:
-        return (
-            super()._equals(other)
-            and self.n_nodes == other.n_nodes
-            and self.mu.equals(other.mu)
-            and self.coupling.equals(other.coupling)
-        )
-
-    # Model functions ----------------------------------------------------------------
+        return super()._equals(other)

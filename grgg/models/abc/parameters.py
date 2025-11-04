@@ -1,14 +1,14 @@
-from collections.abc import Mapping
 from enum import Enum
 from typing import Any
 
 import equinox as eqx
 import jax.numpy as jnp
+from jaxtyping import DTypeLike
 
 from grgg.abc import AbstractModule
 from grgg.utils.misc import format_array
 
-__all__ = ("AbstractParameter", "Constraints", "ParametersMapping")
+__all__ = ("AbstractParameter", "Constraints")
 
 
 class Constraints(Enum):
@@ -96,6 +96,11 @@ class AbstractParameter(AbstractModule):
         return self.data
 
     @property
+    def dtype(self) -> DTypeLike:
+        """Data type of the parameter data."""
+        return self.data.dtype
+
+    @property
     def shape(self) -> tuple[int, ...]:
         """Shape of the parameter data."""
         return self.data.shape
@@ -113,7 +118,7 @@ class AbstractParameter(AbstractModule):
     @property
     def is_scalar(self) -> bool:
         """Whether the parameter is a scalar."""
-        return self.data.ndim == 0
+        return hasattr(self.data, "ndim") and self.data.ndim == 0
 
     @property
     def is_homogeneous(self) -> bool:
@@ -132,27 +137,3 @@ class AbstractParameter(AbstractModule):
             and self.constraints == other.constraints
             and jnp.array_equal(self.data, other.data)
         )
-
-
-class ParametersMapping(Mapping[str, AbstractParameter]):
-    """Mapping of model parameters."""
-
-    def __init__(self, parameters: Mapping[str, AbstractParameter]) -> None:
-        self._parameters = parameters
-
-    def __getitem__(self, key: str) -> AbstractParameter:
-        return self._parameters[key]
-
-    def __iter__(self):
-        return iter(self._parameters)
-
-    def __len__(self) -> int:
-        return len(self._parameters)
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({repr(self._parameters)})"
-
-    @property
-    def data(self) -> Mapping[str, jnp.ndarray]:
-        """Mapping of parameter data."""
-        return {name: param.data for name, param in self.items()}

@@ -1,8 +1,5 @@
 from abc import abstractmethod
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Self
-
-import jax.numpy as jnp
 
 from grgg.utils.indexing import IndexArgT
 
@@ -39,9 +36,11 @@ class AbstractModelView[T](AbstractModelModule[T]):
         """Reset the view to its default state."""
 
     @property
-    def parameters(self) -> Mapping[str, jnp.ndarray]:
+    def parameters(self) -> "T.Parameters":
         """Tuple of parameter arrays for the view."""
-        return {name: self.get_parameter(name) for name in self.model.parameters}
+        return self.model.Parameters(
+            *(self.get_parameter(name) for name in self.model.parameters._fields)
+        )
 
     @abstractmethod
     def get_parameter(self, args: Any, **kwargs: Any) -> Any:

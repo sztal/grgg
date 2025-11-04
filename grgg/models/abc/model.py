@@ -1,15 +1,12 @@
 from abc import abstractmethod
-from typing import Any, Self
+from typing import Any, NamedTuple, Self
 
 import equinox as eqx
 import jax.numpy as jnp
-
-from grgg._options import options
-from grgg.utils.misc import parse_switch_flag
+from jaxtyping import DTypeLike
 
 from .functions import AbstractModelFunctions
 from .modules import AbstractModelModule
-from .parameters import AbstractParameter, ParametersMapping
 
 __all__ = ("AbstractModel",)
 
@@ -17,15 +14,21 @@ __all__ = ("AbstractModel",)
 class AbstractModel(AbstractModelModule[Self]):
     """Abstract base class for models."""
 
-    n_units: eqx.AbstractVar[int]
-
+    Parameters: eqx.AbstractClassVar[type[NamedTuple]]
     functions_cls: eqx.AbstractClassVar[type[AbstractModelFunctions]]
+
+    n_units: eqx.AbstractVar[int]
+    parameters: eqx.AbstractVar["Self.Parameters"]
 
     def __check_init__(self) -> None:
         if self.n_units <= 0:
             errmsg = f"'n_units' must be positive, got {self.n_units}."
             raise ValueError(errmsg)
-        for name, parameter in self.parameters.items():
+        if not self.parameters:
+            errmsg = "model must have at least one parameter."
+            raise ValueError(errmsg)
+        for name in self.Parameters._fields:
+            parameter = getattr(self, name)
             if not parameter.is_scalar and len(parameter) != self.n_units:
                 errmsg = (
                     f"all non-scalar parameters must have leading axis size equal to "
@@ -35,12 +38,25 @@ class AbstractModel(AbstractModelModule[Self]):
                 raise ValueError(errmsg)
 
     def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self._repr_inner()})"
+        params = [getattr(self, name) for name in self.Parameters._fields]
+        inner = ", ".join([f"{self.n_units}", ", ".join(map(repr, params))])
+        return f"{self.__class__.__name__}({inner})"
 
     @property
     def model(self) -> Self:
         """Self as model."""
         return self
+
+    @property
+    def dtype(self) -> DTypeLike:
+        """Model parameter data type."""
+        if not self.parameters:
+            errmsg = "cannot determine dtype of empty parameters' set"
+            raise ValueError(errmsg)
+        dtype = self.parameters[0].dtype
+        for param in self.parameters[1:]:
+            dtype = jnp.promote_types(dtype, param.dtype)
+        return dtype
 
     @property
     def functions(self) -> AbstractModelFunctions[type[Self]]:
@@ -50,44 +66,25 @@ class AbstractModel(AbstractModelModule[Self]):
     @property
     def is_heterogeneous(self) -> bool:
         """Whether the model has heterogeneous parameters."""
-        return all(param.is_heterogeneous for param in self.parameters.values())
+        return all(getattr(self, n).is_heterogeneous for n in self.Parameters._fields)
 
     @property
     def is_homogeneous(self) -> bool:
         """Whether the model has homogeneous parameters."""
         return not self.is_heterogeneous
 
-    @property
-    def is_quantized(self) -> bool:
-        """Whether the model is quantized."""
-        return False
-
-    @property
-    def parameters(self) -> ParametersMapping[str, AbstractParameter]:
-        """Parameters of the model."""
-        return ParametersMapping(
-            {
-                field: param
-                for field in self.__dataclass_fields__
-                if isinstance((param := getattr(self, field)), AbstractParameter)
-            }
-        )
-
-    @abstractmethod
-    def _repr_inner(self) -> str:
-        """Inner part of the string representation."""
-        return f"{self.n_units}"
-
-    def _preprocess_inputs(self, *inputs: jnp.ndarray) -> jnp.ndarray:
-        return tuple(jnp.asarray(input) for input in inputs)
-
-    def _get_progress(self, value: bool | None = None) -> tuple[bool, dict[str, Any]]:
-        """Get progress value from value or options."""
-        if value is None:
-            value = self.n_nodes >= options.auto.progress
-        value, opts = parse_switch_flag(value)
-        return value, opts
-
     @abstractmethod
     def sample(self, *args: Any, **kwargs: Any) -> Any:
         """Sample from the model."""
+
+    @abstractmethod
+    def _equals(self, other: object) -> bool:
+        return (
+            super()._equals(other)
+            and self.n_units == other.n_units
+            and len(self.parameters) == len(other.parameters)
+            and all(
+                p1.equals(p2)
+                for p1, p2 in zip(self.parameters, other.parameters, strict=True)
+            )
+        )

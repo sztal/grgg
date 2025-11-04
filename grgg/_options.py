@@ -88,7 +88,7 @@ class LoopOptions(Options):
 @dataclass(slots=True)
 class MonteCarloOptions(Options):
     mc: PositiveInt | bool = 50
-    repeat: PositiveInt = 5
+    repeat: PositiveInt = 1
     average: bool = True
     same_seed: bool = True
 

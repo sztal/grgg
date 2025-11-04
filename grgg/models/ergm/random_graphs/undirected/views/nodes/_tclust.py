@@ -80,7 +80,7 @@ class RandomGraphTClustering(TClustering):
         >>> n = 1000
         >>> model = RandomGraph(n, mu=rng.normal(n) - 2.5)
         >>> tc0 = model.nodes.tclust()
-        >>> tc1 = model.nodes.tclust(mc=300, rng=rng)
+        >>> tc1 = model.nodes.tclust(mc=300, repeat=5, rng=rng)
         >>> err = jnp.linalg.norm(tc0 - tc1) / jnp.linalg.norm(tc0)
         >>> (err < 0.03).item()
         True

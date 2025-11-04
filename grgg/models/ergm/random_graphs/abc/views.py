@@ -66,7 +66,7 @@ def _pairs_probs(
     **kwargs: Any,
 ) -> Reals:
     """Compute pairwise connection probabilities."""
-    probs = pairs.model.functions.probs(*args, **pairs.parameters, **kwargs)
+    probs = pairs.model.functions.probs(pairs.parameters, *args, **kwargs)
     if pairs.model.is_homogeneous:
         probs = jnp.full(pairs.shape, probs)
     try:
@@ -85,7 +85,7 @@ def _pairs_free_energy(
 ) -> Reals:
     """Compute pairwise edge free energies."""
     free_energy = pairs.model.functions.edge_free_energy(
-        *args, **pairs.parameters, **kwargs
+        pairs.parameters, *args, **kwargs
     )
     if pairs.model.is_homogeneous:
         free_energy = jnp.full(pairs.shape, free_energy)
@@ -93,5 +93,5 @@ def _pairs_free_energy(
         i, j = pairs.coords
     except ValueError:
         # This must be a single integer index
-        return free_energy.at[pairs._index].set(jnp.inf)
+        return free_energy.at[pairs._index].set(jnp.nan)
     return jnp.where(i == j, jnp.nan, free_energy)

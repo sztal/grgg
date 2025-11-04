@@ -188,7 +188,8 @@ class AbstractErgmView[T](AbstractModelView[T], Shaped):
             errmsg = "`indices` must be provided to materialize a view"
             raise ValueError(errmsg)
         parameters = {
-            name: param[indices] for name, param in self.model.parameters.items()
+            name: getattr(self.model, name)[indices]
+            for name in self.model.Parameters._fields
         }
         model = self.model.replace(n_nodes=len(indices), **parameters)
         if copy:
@@ -373,11 +374,13 @@ class AbstractErgmNodePairView[T](AbstractErgmView[T]):
 
     def get_parameter(self, idx: int | str) -> jnp.ndarray:
         """Get a model parameter by index or name."""
+        if isinstance(idx, str):
+            idx = self.model.Parameters._fields.index(idx)
         param = self.model.parameters[idx]
         if self.model.is_homogeneous:
-            return param.data
+            return param
         i, j = self.coords if self.is_active else self[...].coords
-        return param.data[i] + param.data[j]
+        return param[i] + param[j]
 
     def materialize(self, *, copy: bool = False) -> T:
         """Materialize the view into a new model instance.
