@@ -89,7 +89,7 @@ class RandomGraphQuadrangleMotif(QuadrangleMotif):
         >>> import jax.numpy as jnp
         >>> from grgg import RandomGraph, RandomGenerator
         >>> rng = RandomGenerator(42)
-        >>> n = 1000
+        >>> n = 500
         >>> model = RandomGraph(n, mu=rng.normal(n) - 2.5)
         >>> q0 = jnp.log(model.nodes.motifs.quadrangle())
         >>> q1 = jnp.log(model.nodes.motifs.quadrangle(mc=50, rng=rng))

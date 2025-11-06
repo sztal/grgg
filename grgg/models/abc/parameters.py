@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any
+from typing import Any, NamedTupleMeta, Self
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -8,7 +8,7 @@ from jaxtyping import DTypeLike
 from grgg.abc import AbstractModule
 from grgg.utils.misc import format_array
 
-__all__ = ("AbstractParameter", "Constraints")
+__all__ = ("AbstractParameter", "ParametersMeta", "Constraints")
 
 
 class Constraints(Enum):
@@ -58,19 +58,25 @@ class AbstractParameter(AbstractModule):
 
     data: jnp.ndarray
     name: str = eqx.field(static=True, repr=False)
+    frozen: bool = eqx.field(static=True)
 
     ndims: eqx.AbstractClassVar[tuple[int, ...]]
     constraints: eqx.AbstractClassVar[tuple[Constraints, ...]]
     default_value: eqx.AbstractClassVar[float]
 
     def __init__(
-        self, data: jnp.ndarray | None = None, name: str | None = None
+        self,
+        data: jnp.ndarray | None = None,
+        name: str | None = None,
+        *,
+        frozen: bool = False,
     ) -> None:
         data = jnp.asarray(data if data is not None else self.default_value)
         if jnp.issubdtype(data.dtype, jnp.integer):
             data = data.astype(float)
         self.data = data
         self.name = name or self.__class__.__name__.lower()
+        self.frozen = frozen
 
     def __check_init__(self):
         if self.data.ndim not in self.ndims:
@@ -80,9 +86,10 @@ class AbstractParameter(AbstractModule):
             _validate(self, constraint.value)
 
     def __repr__(self) -> str:
-        if self.is_scalar:
-            return f"{self.__class__.__name__}({self.data.item()})"
-        return f"{self.__class__.__name__}({format_array(self.data)})"
+        inner = self.data.item() if self.is_scalar else format_array(self.data)
+        if self.frozen:
+            inner += ", frozen=True"
+        return f"{self.__class__.__name__}({inner})"
 
     def __getitem__(self, args: Any) -> jnp.ndarray:
         return self.replace(data=self.data[args])
@@ -137,3 +144,17 @@ class AbstractParameter(AbstractModule):
             and self.constraints == other.constraints
             and jnp.array_equal(self.data, other.data)
         )
+
+
+class ParametersMeta(NamedTupleMeta):
+    """Metaclass for model parameters named tuple."""
+
+    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
+        typ = super().__new__(cls, *args, **kwargs)
+
+        def _data(params: typ) -> typ:
+            return typ(*(getattr(params, name).data for name in typ._fields))
+
+        typ.data = property(_data)
+        typ.names = typ._fields
+        return typ

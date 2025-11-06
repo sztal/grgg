@@ -78,10 +78,10 @@ class RandomGraphQClustering(QClustering):
         >>> import jax.numpy as jnp
         >>> from grgg import RandomGraph, RandomGenerator
         >>> rng = RandomGenerator(303)
-        >>> n = 1000
+        >>> n = 500
         >>> model = RandomGraph(n, mu=rng.normal(n) - 2.5)
         >>> qc0 = model.nodes.qclust()
-        >>> qc1 = model.nodes.qclust(mc=300, rng=rng)
+        >>> qc1 = model.nodes.qclust(mc=50, repeat=10, rng=rng)
         >>> err = jnp.linalg.norm(qc0 - qc1) / jnp.linalg.norm(qc0)
         >>> (err < 0.02).item()
         True

@@ -77,15 +77,15 @@ class RandomGraphTClustering(TClustering):
         >>> import jax.numpy as jnp
         >>> from grgg import RandomGraph, RandomGenerator
         >>> rng = RandomGenerator(17)
-        >>> n = 1000
+        >>> n = 500
         >>> model = RandomGraph(n, mu=rng.normal(n) - 2.5)
         >>> tc0 = model.nodes.tclust()
-        >>> tc1 = model.nodes.tclust(mc=300, repeat=5, rng=rng)
+        >>> tc1 = model.nodes.tclust(mc=100, repeat=20, rng=rng)
         >>> err = jnp.linalg.norm(tc0 - tc1) / jnp.linalg.norm(tc0)
-        >>> (err < 0.03).item()
+        >>> (err < 0.02).item()
         True
         >>> cor = jnp.corrcoef(tc0, tc1)[0, 1]
-        >>> (cor > 0.90).item()
+        >>> (cor > 0.95).item()
         True
         """
         return _m1(self)

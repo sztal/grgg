@@ -82,12 +82,12 @@ class RandomGraphQHeadMotif(QHeadMotif):
         >>> import jax.numpy as jnp
         >>> from grgg import RandomGraph, RandomGenerator
         >>> rng = RandomGenerator(42)
-        >>> n = 1000
+        >>> n = 500
         >>> model = RandomGraph(n, mu=rng.normal(n) - 2.5)
         >>> qh0 = jnp.log(model.nodes.motifs.qhead())
         >>> qh1 = jnp.log(model.nodes.motifs.qhead(mc=50, rng=rng))
         >>> err = jnp.linalg.norm(qh0 - qh1) / jnp.linalg.norm(qh0)
-        >>> (err < 0.05).item()
+        >>> (err < 0.02).item()
         True
         >>> cor = jnp.corrcoef(qh0, qh1)[0, 1]
         >>> (cor > 0.99).item()

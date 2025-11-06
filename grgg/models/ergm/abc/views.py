@@ -251,10 +251,11 @@ class AbstractErgmNodeView[T](AbstractErgmView[T]):
         return self.sampler.sample(*args, **kwargs)
 
     def get_parameter(self, idx: str) -> jnp.ndarray:
+        idx = self.model.Parameters._fields.index(idx)
         param = self.model.parameters[idx]
-        if self.model.is_homogeneous:
+        if param.is_homogeneous:
             return param.data
-        return param[self.index].data
+        return param.data[self.index]
 
     # Statistics ---------------------------------------------------------------------
 
@@ -377,9 +378,10 @@ class AbstractErgmNodePairView[T](AbstractErgmView[T]):
         if isinstance(idx, str):
             idx = self.model.Parameters._fields.index(idx)
         param = self.model.parameters[idx]
-        if self.model.is_homogeneous:
-            return param
+        if param.is_homogeneous:
+            return param.data
         i, j = self.coords if self.is_active else self[...].coords
+        param = param.data
         return param[i] + param[j]
 
     def materialize(self, *, copy: bool = False) -> T:

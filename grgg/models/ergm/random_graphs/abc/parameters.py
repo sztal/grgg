@@ -1,9 +1,10 @@
 from typing import ClassVar
 
-from grgg.models.abc import AbstractParameter, Constraints
+from grgg.models.abc import Constraints
+from grgg.models.ergm.abc import AbstractErgmParameter
 
 
-class Mu(AbstractParameter):
+class Mu(AbstractErgmParameter):
     """Mu parameter (chemical potential).
 
     It controls the density of the network.
@@ -39,3 +40,5 @@ class Mu(AbstractParameter):
     default_value: ClassVar[float] = 0.0
     ndims: ClassVar[tuple[int, ...]] = (0, 1)
     constraints: ClassVar[tuple[Constraints, ...]] = (Constraints.REAL,)
+
+    sufficient_statistic: ClassVar[str] = "degree"

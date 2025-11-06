@@ -16,8 +16,10 @@ class AbstractErgm(AbstractModel):
     """Abstract base class for ERGMs."""
 
     n_nodes: eqx.AbstractVar[int]
+
     is_directed: eqx.AbstractClassVar[bool]
-    functions_cls: eqx.AbstractClassVar[type[AbstractErgmFunctions]]
+    functions: eqx.AbstractClassVar[type[AbstractErgmFunctions]]
+
     nodes_cls: eqx.AbstractClassVar[type[AbstractErgmNodeView]]
     pairs_cls: eqx.AbstractClassVar[type[AbstractErgmNodePairView]]
 
@@ -54,8 +56,8 @@ class AbstractErgm(AbstractModel):
 
     def free_energy(self, *args: Any, **kwargs: Any) -> Reals:
         """Compute the free energy of the model."""
-        return self.functions.free_energy(*args, **kwargs)
+        return self.functions.free_energy(self, *args, **kwargs)
 
     def partition_function(self, *args: Any, **kwargs: Any) -> Reals:
         """Compute the partition function of the model."""
-        return self.functions.partition_function(*args, **kwargs)
+        return self.functions.partition_function(self, *args, **kwargs)

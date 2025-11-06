@@ -3,6 +3,7 @@ from typing import ClassVar, NamedTuple
 import equinox as eqx
 
 from grgg._typing import Real, RealVector
+from grgg.models.abc import ParametersMeta
 from grgg.models.ergm.random_graphs.abc import AbstractRandomGraph, Mu
 
 from .functions import RandomGraphFunctions
@@ -25,14 +26,15 @@ class RandomGraph(AbstractRandomGraph):
         Parameter controlling the expected degree of nodes.
     """
 
-    class Parameters(NamedTuple):
+    class Parameters(NamedTuple, metaclass=ParametersMeta):
         mu: RealVector
 
     n_nodes: int = eqx.field(static=True)
     mu: Mu
 
     is_directed: ClassVar[bool] = False
-    functions_cls: ClassVar[type[RandomGraphFunctions]] = RandomGraphFunctions
+    functions: ClassVar[type[RandomGraphFunctions]] = RandomGraphFunctions
+
     nodes_cls: ClassVar[type[RandomGraphNodeView]] = RandomGraphNodeView
     pairs_cls: ClassVar[type[RandomGraphNodePairView]] = RandomGraphNodePairView
 
@@ -47,7 +49,7 @@ class RandomGraph(AbstractRandomGraph):
     @property
     def parameters(self) -> "RandomGraph.Parameters":
         """Model parameters."""
-        return self.Parameters(mu=self.mu.data)
+        return self.Parameters(mu=self.mu)
 
     def _equals(self, other: object) -> bool:
         return super()._equals(other)

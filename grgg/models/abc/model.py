@@ -15,7 +15,7 @@ class AbstractModel(AbstractModelModule[Self]):
     """Abstract base class for models."""
 
     Parameters: eqx.AbstractClassVar[type[NamedTuple]]
-    functions_cls: eqx.AbstractClassVar[type[AbstractModelFunctions]]
+    functions: eqx.AbstractClassVar[type[AbstractModelFunctions]]
 
     n_units: eqx.AbstractVar[int]
     parameters: eqx.AbstractVar["Self.Parameters"]
@@ -59,14 +59,9 @@ class AbstractModel(AbstractModelModule[Self]):
         return dtype
 
     @property
-    def functions(self) -> AbstractModelFunctions[type[Self]]:
-        """Functions container for the model."""
-        return self.functions_cls(self)
-
-    @property
     def is_heterogeneous(self) -> bool:
         """Whether the model has heterogeneous parameters."""
-        return all(getattr(self, n).is_heterogeneous for n in self.Parameters._fields)
+        return any(p.is_heterogeneous for p in self.parameters)
 
     @property
     def is_homogeneous(self) -> bool:

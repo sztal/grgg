@@ -82,7 +82,7 @@ class RandomGraphQWedgeMotif(QWedgeMotif):
         >>> import jax.numpy as jnp
         >>> from grgg import RandomGraph, RandomGenerator
         >>> rng = RandomGenerator(42)
-        >>> n = 1000
+        >>> n = 500
         >>> model = RandomGraph(n, mu=rng.normal(n) - 2.5)
         >>> qw0 = jnp.log(model.nodes.motifs.qwedge())
         >>> qw1 = jnp.log(model.nodes.motifs.qwedge(mc=50, rng=rng))

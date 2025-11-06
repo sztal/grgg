@@ -1,4 +1,5 @@
 from collections.abc import Callable
+from functools import singledispatchmethod
 from typing import TYPE_CHECKING, Any, ClassVar, Self, TypeVar
 
 import equinox as eqx
@@ -259,6 +260,51 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
         if self.use_mc:
             return getattr(self, f"_heterogeneous_m{n}_monte_carlo")
         return getattr(self, f"_heterogeneous_m{n}_exact")
+
+    def observed(self, obj: Any, *args: Any, **kwargs: Any) -> Reals:
+        """Compute the observed value of the statistic for a given object."""
+        raise NotImplementedError
+
+    @singledispatchmethod
+    def check_observed(self, obj: Any) -> None:
+        """Check if the given object is compatible with the statistic."""
+        n = self.model.n_units
+        try:
+            if obj.shape != (n, n):
+                errmsg = f"expected object of shape ({n}, {n}), got {obj.shape}"
+                raise ValueError(errmsg)
+        except AttributeError as exc:
+            errmsg = f"object of type '{type(obj)}' is not supported"
+            raise TypeError(errmsg) from exc
+
+    try:
+        import igraph as ig
+
+        @check_observed.register
+        def _(self, obj: ig.Graph) -> None:  # noqa
+            n = self.model.n_units
+            if obj.vcount() != n:
+                errmsg = f"expected igraph Graph with {n} vertices, got {obj.vcount()}"
+                raise ValueError(errmsg)
+
+    except ImportError:
+        pass
+
+    try:
+        import networkx as nx
+
+        @check_observed.register
+        def _(self, obj: nx.Graph) -> None:  # noqa
+            n = self.model.n_units
+            if obj.number_of_nodes() != n:
+                errmsg = (
+                    f"expected networkx Graph with {n} nodes, "
+                    f"got {obj.number_of_nodes()}"
+                )
+                raise ValueError(errmsg)
+
+    except ImportError:
+        pass
 
 
 class AbstractErgmViewStatistic[QT](AbstractErgmStatistic[QT]):

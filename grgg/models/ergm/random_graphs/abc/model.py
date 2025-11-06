@@ -13,7 +13,7 @@ class AbstractRandomGraph(AbstractErgm):
     """Abstract base class for random graph models."""
 
     n_nodes: eqx.AbstractVar[int]
-    functions_cls: eqx.AbstractClassVar[type[AbstractRandomGraphFunctions]]
+    functions: eqx.AbstractClassVar[type[AbstractRandomGraphFunctions]]
 
     @property
     def n_units(self) -> int:

@@ -47,6 +47,10 @@ class AbstractRandomGraphNodeView[T](AbstractErgmNodeView[T]):
 class AbstractRandomGraphNodePairView[T](AbstractErgmNodePairView[T]):
     """Abstract base class for node pair views of random graph models."""
 
+    def couplings(self, *args: Any, **kwargs: Any) -> Reals:
+        """Compute connection couplings for selected pairs."""
+        return _couplings(self, *args, **kwargs)
+
     def probs(self, *args: Any, **kwargs: Any) -> Reals:
         """Compute connection probabilities for selected pairs."""
         return _pairs_probs(self, *args, **kwargs)
@@ -60,21 +64,32 @@ class AbstractRandomGraphNodePairView[T](AbstractErgmNodePairView[T]):
 
 
 @eqx.filter_jit
+def _couplings(
+    pairs: AbstractRandomGraphNodePairView,
+    *args: jnp.ndarray,
+    **kwargs: Any,
+) -> Reals:
+    """Compute pairwise couplings."""
+    couplings = pairs.model.functions.couplings(pairs.parameters, *args, **kwargs)
+    if pairs.model.is_homogeneous:
+        couplings = jnp.full(pairs.shape, couplings)
+    try:
+        i, j = pairs.coords
+    except ValueError:
+        # This must be a single integer index
+        return couplings.at[pairs._index].set(jnp.inf)
+    return jnp.where(i == j, jnp.inf, couplings)
+
+
+@eqx.filter_jit
 def _pairs_probs(
     pairs: AbstractRandomGraphNodePairView,
     *args: jnp.ndarray,
     **kwargs: Any,
 ) -> Reals:
     """Compute pairwise connection probabilities."""
-    probs = pairs.model.functions.probs(pairs.parameters, *args, **kwargs)
-    if pairs.model.is_homogeneous:
-        probs = jnp.full(pairs.shape, probs)
-    try:
-        i, j = pairs.coords
-    except ValueError:
-        # This must be a single integer index
-        return probs.at[pairs._index].set(0.0)
-    return jnp.where(i == j, 0.0, probs)
+    couplings = pairs.couplings(*args, **kwargs)
+    return pairs.model.functions.probs(couplings)
 
 
 @eqx.filter_jit
@@ -84,14 +99,5 @@ def _pairs_free_energy(
     **kwargs: Any,
 ) -> Reals:
     """Compute pairwise edge free energies."""
-    free_energy = pairs.model.functions.edge_free_energy(
-        pairs.parameters, *args, **kwargs
-    )
-    if pairs.model.is_homogeneous:
-        free_energy = jnp.full(pairs.shape, free_energy)
-    try:
-        i, j = pairs.coords
-    except ValueError:
-        # This must be a single integer index
-        return free_energy.at[pairs._index].set(jnp.nan)
-    return jnp.where(i == j, jnp.nan, free_energy)
+    couplings = pairs.couplings(*args, **kwargs)
+    return pairs.model.functions.edge_free_energy(couplings)

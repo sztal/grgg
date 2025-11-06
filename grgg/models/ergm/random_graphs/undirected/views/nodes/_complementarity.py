@@ -75,10 +75,10 @@ class RandomGraphStructuralComplementarity(StructuralComplementarity):
         >>> import jax.numpy as jnp
         >>> from grgg import RandomGraph, RandomGenerator
         >>> rng = RandomGenerator(42)
-        >>> n = 1000
+        >>> n = 500
         >>> model = RandomGraph(n, mu=rng.normal(n) - 2.5)
         >>> c0 = model.nodes.complementarity()
-        >>> c1 = model.nodes.complementarity(mc=300, rng=rng)
+        >>> c1 = model.nodes.complementarity(mc=50, repeat=10, rng=rng)
         >>> err = jnp.linalg.norm(c0 - c1) / jnp.linalg.norm(c0)
         >>> (err < 0.02).item()
         True

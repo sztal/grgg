@@ -67,10 +67,10 @@ class RandomGraphTWedgeMotif(TWedgeMotif):
         >>> import jax.numpy as jnp
         >>> from grgg import RandomGraph, RandomGenerator
         >>> rng = RandomGenerator(42)
-        >>> n = 1000
+        >>> n = 500
         >>> model = RandomGraph(n, mu=rng.normal(n) - 2.5)
         >>> tw0 = jnp.log(model.nodes.motifs.twedge())
-        >>> tw1 = jnp.log(model.nodes.motifs.twedge(mc=100, rng=rng))
+        >>> tw1 = jnp.log(model.nodes.motifs.twedge(mc=50, rng=rng))
         >>> err = jnp.linalg.norm(tw0 - tw1) / jnp.linalg.norm(tw0)
         >>> (err < 0.01).item()
         True
