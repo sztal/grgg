@@ -187,11 +187,13 @@ class AbstractErgmView[T](AbstractModelView[T], Shaped):
         if indices is None:
             errmsg = "`indices` must be provided to materialize a view"
             raise ValueError(errmsg)
-        parameters = {
-            name: getattr(self.model, name)[indices]
-            for name in self.model.Parameters._fields
-        }
-        model = self.model.replace(n_nodes=len(indices), **parameters)
+        parameters = self.model.parameters.replace(
+            **{
+                name: getattr(self.model.parameters, name)[indices]
+                for name in self.model.Parameters.names
+            }
+        )
+        model = self.model.replace(n_nodes=len(indices), parameters=parameters)
         if copy:
             model = model.copy(deep=True)
         return model
@@ -251,7 +253,7 @@ class AbstractErgmNodeView[T](AbstractErgmView[T]):
         return self.sampler.sample(*args, **kwargs)
 
     def get_parameter(self, idx: str) -> jnp.ndarray:
-        idx = self.model.Parameters._fields.index(idx)
+        idx = self.model.Parameters.names.index(idx)
         param = self.model.parameters[idx]
         if param.is_homogeneous:
             return param.data
@@ -376,7 +378,7 @@ class AbstractErgmNodePairView[T](AbstractErgmView[T]):
     def get_parameter(self, idx: int | str) -> jnp.ndarray:
         """Get a model parameter by index or name."""
         if isinstance(idx, str):
-            idx = self.model.Parameters._fields.index(idx)
+            idx = self.model.Parameters.names.index(idx)
         param = self.model.parameters[idx]
         if param.is_homogeneous:
             return param.data

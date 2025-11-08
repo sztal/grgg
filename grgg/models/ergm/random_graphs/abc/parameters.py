@@ -1,7 +1,10 @@
 from typing import ClassVar
 
+import jax.numpy as jnp
+
 from grgg.models.abc import Constraints
 from grgg.models.ergm.abc import AbstractErgmParameter
+from grgg.statistics.degree import Degree
 
 
 class Mu(AbstractErgmParameter):
@@ -41,4 +44,9 @@ class Mu(AbstractErgmParameter):
     ndims: ClassVar[tuple[int, ...]] = (0, 1)
     constraints: ClassVar[tuple[Constraints, ...]] = (Constraints.REAL,)
 
-    sufficient_statistic: ClassVar[str] = "degree"
+    statistic: ClassVar[type[Degree]] = Degree
+
+    @property
+    def theta(self) -> jnp.ndarray:
+        """Raw Lagrange multiplier representation of the parameter."""
+        return -self.data

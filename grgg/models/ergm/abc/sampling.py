@@ -24,6 +24,10 @@ if TYPE_CHECKING:
         from pathcensus import PathCensus
     except ImportError:  # pragma: no cover
         pass
+    try:
+        import networkx as nx
+    except ImportError:  # pragma: no cover
+        pass
 
 __all__ = ("AbstractErgmSampler", "ErgmSample")
 
@@ -79,9 +83,32 @@ class ErgmSample:
         return G.simplify()
 
     @property
+    def ig(self) -> "ig.Graph":
+        """Alias for igraph property."""
+        return self.igraph
+
+    @property
     def G(self):
         """Alias for igraph property."""
         return self.igraph
+
+    @property
+    def networkx(self) -> "nx.Graph":
+        """Return the :mod:`networkx` representation of the sampled graph."""
+        try:
+            import networkx as nx
+        except ImportError as exc:  # pragma: no cover
+            errmsg = (
+                "networkx representation requires 'networkx' package. "
+                "Install it, e.g. with `pip install networkx`."
+            )
+            raise ImportError(errmsg) from exc
+        return nx.from_scipy_sparse_array(self.A)
+
+    @property
+    def nx(self) -> "nx.Graph":
+        """Alias for networkx property."""
+        return self.networkx
 
 
 class AbstractErgmSampler[T](AbstractModelSampler[T]):

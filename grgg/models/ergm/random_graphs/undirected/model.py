@@ -1,9 +1,9 @@
-from typing import ClassVar, NamedTuple
+from typing import ClassVar
 
 import equinox as eqx
 
 from grgg._typing import Real, RealVector
-from grgg.models.abc import ParametersMeta
+from grgg.models.abc import AbstractParameters
 from grgg.models.ergm.random_graphs.abc import AbstractRandomGraph, Mu
 
 from .functions import RandomGraphFunctions
@@ -26,11 +26,11 @@ class RandomGraph(AbstractRandomGraph):
         Parameter controlling the expected degree of nodes.
     """
 
-    class Parameters(NamedTuple, metaclass=ParametersMeta):
-        mu: RealVector
+    class Parameters(AbstractParameters):
+        mu: Mu = eqx.field(converter=lambda mu: mu if isinstance(mu, Mu) else Mu(mu))
 
     n_nodes: int = eqx.field(static=True)
-    mu: Mu
+    parameters: Parameters
 
     is_directed: ClassVar[bool] = False
     functions: ClassVar[type[RandomGraphFunctions]] = RandomGraphFunctions
@@ -41,15 +41,12 @@ class RandomGraph(AbstractRandomGraph):
     def __init__(
         self,
         n_nodes: int,
-        mu: Real | RealVector | Mu | None = None,
+        *,
+        parameters: Parameters | None = None,
+        **kwargs: Real | RealVector,
     ) -> None:
         self.n_nodes = n_nodes
-        self.mu = mu if isinstance(mu, Mu) else Mu(mu)
-
-    @property
-    def parameters(self) -> "RandomGraph.Parameters":
-        """Model parameters."""
-        return self.Parameters(mu=self.mu)
+        self.parameters = self._make_parameters(parameters, **kwargs)
 
     def _equals(self, other: object) -> bool:
         return super()._equals(other)

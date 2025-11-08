@@ -261,9 +261,10 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
             return getattr(self, f"_heterogeneous_m{n}_monte_carlo")
         return getattr(self, f"_heterogeneous_m{n}_exact")
 
-    def observed(self, obj: Any, *args: Any, **kwargs: Any) -> Reals:
+    def observed(self, obj: Any, *args: Any, **kwargs: Any) -> Reals:  # noqa
         """Compute the observed value of the statistic for a given object."""
-        raise NotImplementedError
+        errmsg = f"'{self.__class__.__name__}' does not implement 'observed' method"
+        raise NotImplementedError(errmsg)
 
     @singledispatchmethod
     def check_observed(self, obj: Any) -> None:

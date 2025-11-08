@@ -27,7 +27,7 @@ class AbstractRandomGraphNodeView[T](AbstractErgmNodeView[T]):
         >>> from grgg import RandomGraph, RandomGenerator
         >>> rng = RandomGenerator(42)
         >>> mu = rng.normal(100)
-        >>> model = RandomGraph(mu.size, mu)
+        >>> model = RandomGraph(mu.size, mu=mu)
         >>> nodes = model.nodes[:10]
         >>> nodes.n_nodes
         10
@@ -36,7 +36,7 @@ class AbstractRandomGraphNodeView[T](AbstractErgmNodeView[T]):
         >>> submodel = nodes.materialize()
         >>> submodel.n_nodes
         10
-        >>> submodel.mu.shape
+        >>> submodel.params.mu.shape
         (10,)
         >>> jnp.all(submodel.pairs.probs() == model.pairs[:10, :10].probs()).item()
         True
@@ -85,11 +85,12 @@ def _couplings(
 def _pairs_probs(
     pairs: AbstractRandomGraphNodePairView,
     *args: jnp.ndarray,
+    log: bool = False,
     **kwargs: Any,
 ) -> Reals:
     """Compute pairwise connection probabilities."""
     couplings = pairs.couplings(*args, **kwargs)
-    return pairs.model.functions.probs(couplings)
+    return pairs.model.functions.probs(couplings, log=log)
 
 
 @eqx.filter_jit

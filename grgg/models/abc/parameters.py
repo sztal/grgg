@@ -1,5 +1,8 @@
+from abc import abstractmethod
+from collections.abc import Sequence
 from enum import Enum
-from typing import Any, NamedTupleMeta, Self
+from functools import singledispatchmethod
+from typing import Any, NamedTuple
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -8,7 +11,7 @@ from jaxtyping import DTypeLike
 from grgg.abc import AbstractModule
 from grgg.utils.misc import format_array
 
-__all__ = ("AbstractParameter", "ParametersMeta", "Constraints")
+__all__ = ("AbstractParameter", "AbstractParameters", "Constraints")
 
 
 class Constraints(Enum):
@@ -103,6 +106,11 @@ class AbstractParameter(AbstractModule):
         return self.data
 
     @property
+    @abstractmethod
+    def theta(self) -> jnp.ndarray:
+        """Raw Lagrange multiplier representation of the parameter."""
+
+    @property
     def dtype(self) -> DTypeLike:
         """Data type of the parameter data."""
         return self.data.dtype
@@ -146,15 +154,82 @@ class AbstractParameter(AbstractModule):
         )
 
 
-class ParametersMeta(NamedTupleMeta):
-    """Metaclass for model parameters named tuple."""
+class AbstractParameters(AbstractModule, Sequence[AbstractParameter]):
+    """Abstract base class for model parameters container."""
 
-    def __new__(cls, *args: Any, **kwargs: Any) -> Self:
-        typ = super().__new__(cls, *args, **kwargs)
+    names: eqx.AbstractClassVar[tuple[str, ...]]
+    Data: eqx.AbstractClassVar[type[tuple]]
 
-        def _data(params: typ) -> typ:
-            return typ(*(getattr(params, name).data for name in typ._fields))
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        names = list(getattr(cls, "names", []))
+        for param, typ in cls.__annotations__.items():
+            if issubclass(typ, AbstractParameter) and param not in names:
+                names.append(param)
+        cls.names = tuple(names)
+        cls.Data = NamedTuple(
+            f"{cls.__name__}Data", [(name, jnp.ndarray) for name in cls.names]
+        )
 
-        typ.data = property(_data)
-        typ.names = typ._fields
-        return typ
+    def __repr__(self) -> str:
+        return f"{self.__class__.__name__}({self.__repr_inner__()})"
+
+    def __repr_inner__(self) -> str:
+        params = [getattr(self, name) for name in self.names]
+        return ", ".join(map(repr, params))
+
+    @property
+    def data(self) -> tuple:
+        """Tuple of parameter data arrays."""
+        return self.Data(*(getattr(self, name).data for name in self.names))
+
+    @property
+    def theta(self) -> tuple:
+        """Tuple of parameter theta arrays."""
+        return self.Data(*(getattr(self, name).theta for name in self.names))
+
+    @property
+    def are_heterogeneous(self) -> bool:
+        """Whether the parameters container has heterogeneous parameters."""
+        return any(getattr(self, name).is_heterogeneous for name in self.names)
+
+    @property
+    def are_homogeneous(self) -> bool:
+        """Whether the parameters container has homogeneous parameters."""
+        return not self.are_heterogeneous
+
+    @property
+    def dtype(self) -> DTypeLike:
+        """Model parameter data type."""
+        if not self:
+            errmsg = "cannot determine dtype of empty parameters' set"
+            raise ValueError(errmsg)
+        dtype = self[0].dtype
+        for param in self[1:]:
+            dtype = jnp.promote_types(dtype, param.dtype)
+        return dtype
+
+    def __len__(self) -> int:
+        return len(self.names)
+
+    @singledispatchmethod
+    def __getitem__(self, index: Any) -> AbstractParameter:
+        errmsg = f"index must be 'int' or 'str', got '{type(index).__name__}'"
+        raise TypeError(errmsg)
+
+    @__getitem__.register
+    def _(self, index: int) -> AbstractParameter:
+        return getattr(self, self.names[index])
+
+    @__getitem__.register
+    def _(self, name: str) -> AbstractParameter:
+        if name not in self.names:
+            errmsg = f"unknown parameter name '{name}'"
+            raise KeyError(errmsg)
+        return getattr(self, name)
+
+    def _equals(self, other: object) -> bool:
+        return super()._equals(other) and all(
+            jnp.array_equal(getattr(self, name).data, getattr(other, name).data)
+            for name in self.names
+        )

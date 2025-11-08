@@ -1,12 +1,11 @@
 from abc import abstractmethod
-from typing import Any, NamedTuple, Self
+from typing import Any, Self
 
 import equinox as eqx
-import jax.numpy as jnp
-from jaxtyping import DTypeLike
 
 from .functions import AbstractModelFunctions
 from .modules import AbstractModelModule
+from .parameters import AbstractParameters
 
 __all__ = ("AbstractModel",)
 
@@ -14,7 +13,7 @@ __all__ = ("AbstractModel",)
 class AbstractModel(AbstractModelModule[Self]):
     """Abstract base class for models."""
 
-    Parameters: eqx.AbstractClassVar[type[NamedTuple]]
+    Parameters: eqx.AbstractClassVar[type[AbstractParameters]]
     functions: eqx.AbstractClassVar[type[AbstractModelFunctions]]
 
     n_units: eqx.AbstractVar[int]
@@ -24,11 +23,17 @@ class AbstractModel(AbstractModelModule[Self]):
         if self.n_units <= 0:
             errmsg = f"'n_units' must be positive, got {self.n_units}."
             raise ValueError(errmsg)
+        if not isinstance(self.parameters, self.Parameters):
+            errmsg = (
+                f"'parameters' must be an instance of {self.Parameters.__name__}, "
+                f"got {type(self.parameters).__name__} instead."
+            )
+            raise TypeError(errmsg)
         if not self.parameters:
             errmsg = "model must have at least one parameter."
             raise ValueError(errmsg)
-        for name in self.Parameters._fields:
-            parameter = getattr(self, name)
+        for name in self.Parameters.names:
+            parameter = getattr(self.parameters, name)
             if not parameter.is_scalar and len(parameter) != self.n_units:
                 errmsg = (
                     f"all non-scalar parameters must have leading axis size equal to "
@@ -38,9 +43,17 @@ class AbstractModel(AbstractModelModule[Self]):
                 raise ValueError(errmsg)
 
     def __repr__(self) -> str:
-        params = [getattr(self, name) for name in self.Parameters._fields]
-        inner = ", ".join([f"{self.n_units}", ", ".join(map(repr, params))])
-        return f"{self.__class__.__name__}({inner})"
+        cn = self.__class__.__name__
+        return f"{cn}({self.__repr_desc__()}, {self.parameters.__repr_inner__()})"
+
+    def __repr_desc__(self) -> str:
+        desc = f"{self.n_units}"
+        return desc
+
+    def __getattr__(self, name: str) -> Any:
+        if name in self.Parameters.names:
+            return getattr(self.parameters, name)
+        return object.__getattribute__(self, name)
 
     @property
     def model(self) -> Self:
@@ -48,20 +61,14 @@ class AbstractModel(AbstractModelModule[Self]):
         return self
 
     @property
-    def dtype(self) -> DTypeLike:
-        """Model parameter data type."""
-        if not self.parameters:
-            errmsg = "cannot determine dtype of empty parameters' set"
-            raise ValueError(errmsg)
-        dtype = self.parameters[0].dtype
-        for param in self.parameters[1:]:
-            dtype = jnp.promote_types(dtype, param.dtype)
-        return dtype
+    def params(self) -> "Self.Parameters":
+        """Model parameters."""
+        return self.parameters
 
     @property
     def is_heterogeneous(self) -> bool:
         """Whether the model has heterogeneous parameters."""
-        return any(p.is_heterogeneous for p in self.parameters)
+        return self.parameters.are_heterogeneous
 
     @property
     def is_homogeneous(self) -> bool:
@@ -83,3 +90,14 @@ class AbstractModel(AbstractModelModule[Self]):
                 for p1, p2 in zip(self.parameters, other.parameters, strict=True)
             )
         )
+
+    @classmethod
+    def _make_parameters(
+        cls, parameters: AbstractParameters | None, **kwargs: Any
+    ) -> AbstractParameters:
+        if parameters is None:
+            return cls.Parameters(**kwargs)
+        if kwargs:
+            errmsg = "cannot specify both 'parameters' and parameter keyword arguments"
+            raise ValueError(errmsg)
+        return parameters

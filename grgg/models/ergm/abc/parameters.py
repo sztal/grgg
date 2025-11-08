@@ -1,6 +1,7 @@
 import equinox as eqx
 
 from grgg.models.abc import AbstractParameter
+from grgg.statistics.abc import AbstractErgmStatistic
 
 __all__ = ("AbstractErgmParameter",)
 
@@ -8,4 +9,4 @@ __all__ = ("AbstractErgmParameter",)
 class AbstractErgmParameter(AbstractParameter):
     """Abstract base class for ERGM parameters."""
 
-    sufficient_statistic: eqx.AbstractClassVar[str]
+    statistic: eqx.AbstractClassVar[type[AbstractErgmStatistic]]

@@ -36,11 +36,16 @@ class AbstractModelView[T](AbstractModelModule[T]):
         """Reset the view to its default state."""
 
     @property
-    def parameters(self) -> "T.Parameters":
+    def parameters(self) -> "T.Parameters.Data":
         """Tuple of parameter arrays for the view."""
-        return self.model.Parameters(
-            *(self.get_parameter(name) for name in self.model.parameters._fields)
+        return self.model.Parameters.Data(
+            *(self.get_parameter(name) for name in self.model.Parameters.names)
         )
+
+    @property
+    def params(self) -> "T.Parameters.Data":
+        """Tuple of parameter arrays for the view."""
+        return self.parameters
 
     @abstractmethod
     def get_parameter(self, args: Any, **kwargs: Any) -> Any:

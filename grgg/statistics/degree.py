@@ -55,5 +55,10 @@ class Degree(AbstractErgmNodeStatistic):
             self.check_observed(obj)
             return jnp.asarray([d for _, d in obj.degree(*args, **kwargs)])
 
+        @observed.register
+        def _(self, obj: nx.DiGraph, *args: Any, **kwargs: Any) -> Reals:  # noqa
+            self.check_observed(obj)
+            return jnp.asarray([d for _, d in obj.degree(*args, **kwargs)])
+
     except ImportError:
         pass
