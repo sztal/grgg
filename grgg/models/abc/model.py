@@ -5,6 +5,7 @@ import equinox as eqx
 
 from .functions import AbstractModelFunctions
 from .modules import AbstractModelModule
+from .optimize import AbstractModelOptimizer
 from .parameters import AbstractParameters
 
 __all__ = ("AbstractModel",)
@@ -15,6 +16,7 @@ class AbstractModel(AbstractModelModule[Self]):
 
     Parameters: eqx.AbstractClassVar[type[AbstractParameters]]
     functions: eqx.AbstractClassVar[type[AbstractModelFunctions]]
+    optimizer_cls: eqx.AbstractClassVar[type[AbstractModelOptimizer]]
 
     n_units: eqx.AbstractVar[int]
     parameters: eqx.AbstractVar["Self.Parameters"]
@@ -74,6 +76,11 @@ class AbstractModel(AbstractModelModule[Self]):
     def is_homogeneous(self) -> bool:
         """Whether the model has homogeneous parameters."""
         return not self.is_heterogeneous
+
+    @property
+    def optimize(self) -> "Self.optimizer_cls":
+        """Optimizer for the model."""
+        return self.optimizer_cls(self)
 
     @abstractmethod
     def sample(self, *args: Any, **kwargs: Any) -> Any:

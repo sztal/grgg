@@ -15,13 +15,11 @@ ForiCallT = Callable[[ForiBodyT], jnp.ndarray]
 ForEachBodyT = Callable[[CarryT, CarryT], tuple[CarryT, CarryT]]
 ForEachCallT = Callable[[ForEachBodyT], CarryT]
 
-MapT = Callable[[jnp.ndarray, ...], jnp.ndarray]
-ReduceT = Callable[[jnp.ndarray, jnp.ndarray], jnp.ndarray]
+MapBodyT = Callable[[jnp.ndarray], jnp.ndarray]
+MapCallT = Callable[[MapBodyT], jnp.ndarray]
 
-ScanLoopBodyT = Callable[[jnp.ndarray, ...], tuple[jnp.ndarray, jnp.ndarray | None]]
-ScanLoopT = Callable[[], tuple[jnp.ndarray, jnp.ndarray | None]]
 
-__all__ = ("fori", "foreach")
+__all__ = ("fori", "foreach", "map")
 
 
 def fori(
@@ -119,5 +117,26 @@ def foreach(
 
         result = jax.lax.scan(__body, init, xs, **kwargs)
         return result[1] if one_arg_body else result
+
+    return __call
+
+
+def map(xs: jnp.ndarray, *, batch_size: int | None = None) -> MapCallT:
+    """Map abstraction based on :func:`jax.lax.map`.
+
+    Examples
+    --------
+    >>> import jax
+    >>> import jax.numpy as jnp
+    >>> from grgg.utils.compute import map
+    >>> @map(jnp.arange(5))
+    ... def body(x):
+    ...     return x ** 2
+    >>> body
+    Array([ 0,  1,  4,  9, 16], ...)
+    """
+
+    def __call(body: MapBodyT) -> jnp.ndarray:
+        return jax.lax.map(body, xs, batch_size=batch_size)
 
     return __call

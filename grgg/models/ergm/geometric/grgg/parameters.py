@@ -9,8 +9,11 @@ from jax.lax import stop_gradient
 
 from grgg._typing import IntVector, Real, RealVector
 from grgg.abc.modules import AbstractModule
-from grgg.utils.lazy import LazyOuter
+
+# from grgg.utils.lazy import LazyOuter
 from grgg.utils.misc import format_array
+
+LazyOuter = object
 
 ParamT = Real | RealVector
 

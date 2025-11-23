@@ -1,4 +1,4 @@
-from functools import partial, singledispatchmethod
+from functools import singledispatchmethod
 from typing import TYPE_CHECKING, Any
 
 import equinox as eqx
@@ -11,6 +11,7 @@ from grgg.utils.compute import fori
 
 if TYPE_CHECKING:
     from .model import AbstractRandomGraph
+    from .views import AbstractRandomGraphNodeView
 
 __all__ = ("AbstractRandomGraphFunctions",)
 
@@ -65,6 +66,19 @@ class AbstractRandomGraphFunctions(AbstractErgmFunctions):
     >>> efe1 = model.pairs.free_energy()
     >>> jax.numpy.allclose(efe0, efe1).item()
     True
+
+    Check gradient computations of free energy:
+    >>> def fe(model): return model.free_energy()
+    >>> def fe_naive(model): return model.pairs.free_energy().sum() / 2
+    >>> grad = jax.grad(fe)(model)
+    >>> grad_naive = jax.grad(fe_naive)(model)
+    >>> jnp.allclose(grad.mu.data, grad_naive.mu.data).item()
+    True
+
+    Check theoretical consistency of free energy gradients
+    in undirected soft configuration model.
+    >>> jnp.allclose(grad.mu.theta, model.nodes.degree(), rtol=1e-3).item()
+    True
     """
 
     @classmethod
@@ -77,43 +91,44 @@ class AbstractRandomGraphFunctions(AbstractErgmFunctions):
 
     @singledispatchmethod
     @classmethod
-    @eqx.filter_jit
     def probs(
         cls,
         params: "AbstractRandomGraph.Parameters",
         *args: Any,
-        log: bool = False,
         **kwargs: Any,
     ) -> Reals:
         """Compute edge probabilities."""
-        couplings = cls.couplings(params, *args, **kwargs)
-        return cls.probs(couplings, log=log)
+        return cls._probs_params(params, *args, **kwargs)
 
     @probs.register
     @classmethod
-    @eqx.filter_jit
-    def _(cls, couplings: jnp.ndarray, *, log: bool = False) -> Reals:
+    def _(cls, couplings: jnp.ndarray, *args: Any, **kwargs: Any) -> Reals:
         """Compute edge probabilities from couplings."""
-        if log:
-            return jax.nn.log_sigmoid(-couplings)
-        return jax.nn.sigmoid(-couplings)
+        return cls._probs_couplings(couplings, *args, **kwargs)
 
     @singledispatchmethod
     @classmethod
-    @eqx.filter_jit
     def edge_free_energy(
         cls, params: "AbstractRandomGraph.Parameters", *args: Any, **kwargs: Any
     ) -> Reals:
         """Compute the edge free energy."""
-        couplings = cls.couplings(params, *args, **kwargs)
-        return cls.edge_free_energy(couplings)
+        return cls._edge_free_energy_params(params, *args, **kwargs)
 
     @edge_free_energy.register
     @classmethod
-    @eqx.filter_jit
     def _(cls, couplings: jnp.ndarray) -> Reals:
         """Compute edge free energy from couplings."""
-        return jax.nn.log_sigmoid(couplings)
+        return cls._edge_free_energy_couplings(couplings)
+
+    @classmethod
+    @eqx.filter_jit
+    def node_free_energy(
+        cls, nodes: "AbstractRandomGraphNodeView", *args: Any, **kwargs: Any
+    ) -> Reals:
+        """Compute the free energy contributions from nodes."""
+        if nodes.model.is_heterogeneous:
+            return cls._node_free_energy_heterogeneous(nodes, *args, **kwargs)
+        return cls._node_free_energy_homogeneous(nodes, *args, **kwargs)
 
     @classmethod
     @eqx.filter_jit
@@ -121,16 +136,144 @@ class AbstractRandomGraphFunctions(AbstractErgmFunctions):
         cls, model: "AbstractRandomGraph", *args: Any, **kwargs: Any
     ) -> Real:
         """Compute the free energy of the model."""
-        vids = jnp.arange(model.n_nodes)
+        if model.is_heterogeneous:
+            return cls._free_energy_heterogeneous(model, *args, **kwargs)
+        return cls._free_energy_homogeneous(model, *args, **kwargs)
 
-        @jax.jit
-        @partial(jax.checkpoint)
-        def partial_sum(model: "AbstractRandomGraph", i: Integer) -> Real:
-            j = jnp.delete(vids, jnp.array([i]), assume_unique_indices=True)
-            return model.pairs[i, j].free_energy(*args, **kwargs).sum()
+    # Internals ----------------------------------------------------------------------
 
-        @fori(0, model.n_nodes, init=0.0)
-        def fe(i: Integer, carry: Real) -> Real:
-            return carry + partial_sum(model, i)
+    @classmethod
+    @eqx.filter_jit
+    def _probs_couplings(cls, couplings: Reals, *, log: bool = False) -> Reals:
+        """Compute edge probabilities from couplings."""
+        if log:
+            return jax.nn.log_sigmoid(-couplings)
+        return jax.nn.sigmoid(-couplings)
 
-        return fe
+    @classmethod
+    @eqx.filter_jit
+    def _probs_params(
+        cls,
+        params: "AbstractRandomGraph.Parameters",
+        *args: Any,
+        log: bool = False,
+        **kwargs: Any,
+    ) -> Reals:
+        couplings = cls.couplings(params, *args, **kwargs)
+        return cls._probs_couplings(couplings, log=log)
+
+    @classmethod
+    @eqx.filter_jit
+    def _edge_free_energy_couplings(cls, couplings: Reals) -> Reals:
+        """Compute the edge free energy from couplings."""
+        return jax.nn.log_sigmoid(couplings)
+
+    @classmethod
+    @eqx.filter_jit
+    def _edge_free_energy_params(
+        cls, params: "AbstractRandomGraph.Parameters.Data", *args: Any, **kwargs: Any
+    ) -> Reals:
+        """Compute the edge free energy from model parameters."""
+        couplings = cls.couplings(params, *args, **kwargs)
+        return cls._edge_free_energy_couplings(couplings)
+
+    @classmethod
+    @eqx.filter_jit
+    def _free_energy_homogeneous(
+        cls, model: "AbstractRandomGraph", *args: Any, **kwargs: Any
+    ) -> Real:
+        """Compute the free energy of a homogeneous model."""
+        fe = cls._node_free_energy_homogeneous(model.nodes[0], *args, **kwargs)[0]
+        return fe * model.n_nodes
+
+    @classmethod
+    @eqx.filter_jit
+    def _free_energy_heterogeneous(
+        cls, model: "AbstractRandomGraph", *args: Any, **kwargs: Any
+    ) -> Real:
+        """Compute the free energy of a heterogeneous model."""
+        return _free_energy_heterogeneous(model, *args, **kwargs)
+
+    @classmethod
+    @eqx.filter_jit
+    def F_i(
+        cls, model: "AbstractRandomGraph", i: Integer, *args: Any, **kwargs: Any
+    ) -> Real:
+        """Compute the free energy contribution from node i."""
+        return model.pairs[i].free_energy(*args, **kwargs).sum()
+
+    @classmethod
+    @eqx.filter_jit
+    def _node_free_energy_homogeneous(
+        cls, nodes: "AbstractRandomGraphNodeView", *args: Any, **kwargs: Any
+    ) -> Reals:
+        """Compute the free energy contributions from nodes in a homogeneous model."""
+        n = nodes.model.n_nodes
+        if n < 2:
+            fe = nodes.model.pairs[0, 0].free_energy(*args, **kwargs)
+        else:
+            fe = nodes.model.pairs[1, 0].free_energy(*args, **kwargs)
+        return jnp.full((nodes.size,), fe * (n - 1))
+
+    @classmethod
+    def _node_free_energy_heterogeneous(
+        cls, nodes: "AbstractRandomGraphNodeView", *args: Any, **kwargs: Any
+    ) -> Reals:
+        """Compute the free energy contribution from node i in a heterogeneous model."""
+        return jax.lax.map(
+            lambda i: cls.F_i(nodes.model, i, *args, **kwargs), nodes.coords[0]
+        )
+
+
+# Pure function internals for heterogeneous free energy ------------------------------
+
+
+@eqx.filter_custom_vjp
+@eqx.filter_jit
+def _free_energy_heterogeneous(
+    model: "AbstractRandomGraph", *args: Any, **kwargs: Any
+) -> Real:
+    """Compute the free energy of a heterogeneous model."""
+
+    @fori(0, model.n_nodes, init=0.0)
+    def fe(i: Integer, carry: Real) -> Real:
+        return carry + model.functions.F_i(model, i, *args, **kwargs)
+
+    return fe
+
+
+@_free_energy_heterogeneous.def_fwd
+@eqx.filter_jit
+def _free_energy_heterogeneous_fwd(
+    _, model: "AbstractRandomGraph", *args: Any, **kwargs: Any
+) -> tuple[Real, None]:
+    """Forward pass for custom VJP of free energy."""
+    return _free_energy_heterogeneous(model, *args, **kwargs), None
+
+
+@_free_energy_heterogeneous.def_bwd
+@eqx.filter_jit
+def _free_energy_heterogeneous_bwd(
+    _,
+    g_out: Real,
+    __,
+    model: "AbstractRandomGraph",
+    *args: Any,
+    **kwargs: Any,
+) -> "AbstractRandomGraph":
+    """Backward pass for custom VJP of free energy."""
+    # Initialize gradients with zeros matching the model structure
+    init_grads = jax.tree_util.tree_map(jnp.zeros_like, model)
+    # Pre-compile the gradient function for a single index
+    grad_fn = jax.grad(model.functions.F_i, argnums=0)
+
+    @fori(0, model.n_nodes, init=init_grads)
+    def gradient(i: Integer, carry: "AbstractRandomGraph") -> "AbstractRandomGraph":
+        # Compute gradient for the i-th pair/node
+        g_i = grad_fn(model, i, *args, **kwargs)
+        # Accumulate gradients
+        return jax.tree_util.tree_map(jnp.add, carry, g_i)
+
+    # Apply the chain rule:
+    # multiply accumulated grads by the output gradient (g_out)
+    return jax.tree_util.tree_map(lambda g: g * g_out, gradient)

@@ -9,12 +9,16 @@ from grgg.models.abc import (
     AbstractStaticGraphModelNodePairView,
     AbstractStaticGraphModelNodeView,
 )
-from grgg.models.geometric.abc import AbstractGeometricGraph
-from grgg.utils.lazy import LazyOuter
+
+# from grgg.models.geometric.abc import AbstractGeometricGraph
+# from grgg.utils.lazy import LazyOuter
 from grgg.utils.misc import split_kwargs_by_signature, squareform
 
 from ._sampling import GeometricSample, GeometricSampler
 from .integrals import DegreeIntegral, EdgeProbabilityIntegral
+
+LazyOuter = object
+AbstractGeometricGraph = object
 
 if TYPE_CHECKING:
     from .model import GRGG
@@ -120,7 +124,7 @@ class NodeView(AbstractStaticGraphModelNodeView):
         >>> submodel.layers[0].beta.shape
         (10,)
         """
-        if not isinstance(self.model, AbstractGeometricGraph):
+        if not isinstance(self.model, "AbstractGeometricGraph"):
             errmsg = "only views of the full GRGG model can be materialized"
             raise TypeError(errmsg)
         if self._index is None:

@@ -5,6 +5,7 @@ from .motifs import (
     AbstractErgmNodeMotifs,
     AbstractErgmNodePairMotifs,
 )
+from .optimize import ErgmOptimizer
 from .parameters import AbstractErgmParameter
 from .sampling import AbstractErgmSampler, ErgmSample
 from .views import AbstractErgmNodePairView, AbstractErgmNodeView, AbstractErgmView

@@ -27,7 +27,10 @@ class RandomGraph(AbstractRandomGraph):
     """
 
     class Parameters(AbstractParameters):
-        mu: Mu = eqx.field(converter=lambda mu: mu if isinstance(mu, Mu) else Mu(mu))
+        mu: Mu = eqx.field(
+            default_factory=lambda: Mu(),
+            converter=lambda mu: mu if isinstance(mu, Mu) else Mu(mu),
+        )
 
     n_nodes: int = eqx.field(static=True)
     parameters: Parameters

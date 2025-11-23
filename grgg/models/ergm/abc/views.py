@@ -8,7 +8,7 @@ import equinox as eqx
 import jax.numpy as jnp
 
 from grgg._typing import Integers, IntVector
-from grgg.models.abc import AbstractModelView
+from grgg.models.abc import AbstractModelView, AbstractParameter
 from grgg.statistics import (
     Degree,
     QClosure,
@@ -252,12 +252,12 @@ class AbstractErgmNodeView[T](AbstractErgmView[T]):
         """Sample from the view's sampler."""
         return self.sampler.sample(*args, **kwargs)
 
-    def get_parameter(self, idx: str) -> jnp.ndarray:
+    def get_parameter(self, idx: str) -> AbstractParameter:
         idx = self.model.Parameters.names.index(idx)
         param = self.model.parameters[idx]
-        if param.is_homogeneous:
-            return param.data
-        return param.data[self.index]
+        if param.is_homogeneous or self._index is None:
+            return param
+        return param[self.index.coords]
 
     # Statistics ---------------------------------------------------------------------
 
@@ -375,7 +375,7 @@ class AbstractErgmNodePairView[T](AbstractErgmView[T]):
         """View of all nodes induces by the node pair view."""
         return self.model.nodes[self.node_indices]
 
-    def get_parameter(self, idx: int | str) -> jnp.ndarray:
+    def get_parameter(self, idx: int | str) -> AbstractParameter:
         """Get a model parameter by index or name."""
         if isinstance(idx, str):
             idx = self.model.Parameters.names.index(idx)
@@ -383,7 +383,6 @@ class AbstractErgmNodePairView[T](AbstractErgmView[T]):
         if param.is_homogeneous:
             return param.data
         i, j = self.coords if self.is_active else self[...].coords
-        param = param.data
         return param[i] + param[j]
 
     def materialize(self, *, copy: bool = False) -> T:

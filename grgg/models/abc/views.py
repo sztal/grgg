@@ -4,6 +4,7 @@ from typing import TYPE_CHECKING, Any, Self
 from grgg.utils.indexing import IndexArgT
 
 from .modules import AbstractModelModule
+from .parameters import AbstractParameter
 
 if TYPE_CHECKING:
     pass
@@ -36,19 +37,19 @@ class AbstractModelView[T](AbstractModelModule[T]):
         """Reset the view to its default state."""
 
     @property
-    def parameters(self) -> "T.Parameters.Data":
+    def parameters(self) -> "T.Parameters":
         """Tuple of parameter arrays for the view."""
-        return self.model.Parameters.Data(
+        return self.model.Parameters(
             *(self.get_parameter(name) for name in self.model.Parameters.names)
         )
 
     @property
-    def params(self) -> "T.Parameters.Data":
+    def params(self) -> "T.Parameters":
         """Tuple of parameter arrays for the view."""
         return self.parameters
 
     @abstractmethod
-    def get_parameter(self, args: Any, **kwargs: Any) -> Any:
+    def get_parameter(self, args: Any, **kwargs: Any) -> AbstractParameter:
         """Get a model parameter by index or name."""
 
     @abstractmethod

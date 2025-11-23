@@ -1,9 +1,6 @@
-from collections.abc import Callable
-from functools import singledispatchmethod
 from typing import TYPE_CHECKING, Any
 
 import equinox as eqx
-import jax
 import jax.numpy as jnp
 
 from grgg._typing import Real, Reals
@@ -13,9 +10,6 @@ if TYPE_CHECKING:
     from grgg.models.ergm.abc import AbstractErgm
 
 __all__ = ("AbstractErgmFunctions",)
-
-
-LagrangianT = Callable[..., Real]
 
 
 class AbstractErgmFunctions(AbstractModelFunctions):
@@ -59,49 +53,45 @@ class AbstractErgmFunctions(AbstractModelFunctions):
         free_energy = cls.free_energy(model, *args, **kwargs)
         return jnp.exp(-free_energy)
 
-    @singledispatchmethod
     @classmethod
-    def hamiltonian(cls, obj: Any, model, **kwargs: Any) -> Real:
+    def hamiltonian(cls, model: "AbstractErgm", obj: tuple, **kwargs: Any) -> Real:
         """Compute the Hamiltonian of the model."""
-        stats = model.sufficient_statistics(obj, **kwargs)
-        return cls.hamiltonian(stats, model, **kwargs)
+        stats = (
+            obj
+            if isinstance(obj, tuple)
+            else model.sufficient_statistics(obj, **kwargs)
+        )
+        return cls._hamiltonian(model, stats)
 
-    @hamiltonian.register
+    @classmethod
+    def lagrangian(cls, model: "AbstractErgm", obj: tuple, **kwargs: Any) -> Real:
+        """Compute the Lagrangian of the model."""
+        stats = (
+            obj
+            if isinstance(obj, tuple)
+            else model.sufficient_statistics(obj, **kwargs)
+        )
+        return cls._lagrangian(model, stats)
+
+    # Internals ----------------------------------------------------------------------
+
     @classmethod
     @eqx.filter_jit
-    def _(cls, stats: tuple, model) -> Real:
-        return _hamiltonian(model, stats)
+    def _hamiltonian(cls, model: "AbstractErgm", stats: tuple) -> Real:
+        H = 0.0
+        params = model.parameters
+        for name in model.Parameters.names:
+            stat = getattr(stats, name)
+            param = getattr(params, name)
+            H_i = jnp.sum(param.theta * stat)  # 'param.theta' is Lagrange multiplier
+            if not model.is_directed and model.is_homogeneous:
+                H_i /= 2
+            H += H_i
+        return H
 
-    @singledispatchmethod
     @classmethod
-    def define_lagrangian(cls, obj: Any, model, **kwargs: Any) -> LagrangianT:
-        """Define the Lagrangian function for the model given an object."""
-        stats = model.sufficient_statistics(obj, **kwargs)
-        return cls.define_lagrangian(stats, model, **kwargs)
-
-    @define_lagrangian.register
-    @classmethod
-    def _(cls, stats: tuple, model) -> LagrangianT:  # noqa
-        @jax.jit
-        def lagrangian(model: "AbstractErgm") -> Real:
-            H = model.hamiltonian(stats)
-            F = model.free_energy()
-            return H - F
-
-        return lagrangian
-
-
-# Internals --------------------------------------------------------------------------
-
-
-def _hamiltonian(model: "AbstractErgm", stats: tuple) -> Real:
-    H = jax.new_ref(0.0)
-    params = model.parameters
-    for i, _ in enumerate(model.Parameters.names):
-        stat = stats[i]
-        param = params[i]
-        H_i = jnp.sum(param.theta * stat)  # 'param.theta' is Lagrange multiplier
-        if not model.is_directed and model.is_homogeneous:
-            H_i /= 2
-        H[...] += H_i
-    return H[...]
+    @eqx.filter_jit
+    def _lagrangian(cls, model: "AbstractErgm", stats: tuple) -> Real:
+        H = cls._hamiltonian(model, stats)
+        F = model.free_energy()
+        return H - F

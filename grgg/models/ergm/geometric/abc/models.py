@@ -4,7 +4,7 @@ import equinox as eqx
 import jax.numpy as jnp
 
 from grgg.manifolds import Manifold
-from grgg.models.random_graphs.abc import AbstractRandomGraph
+from grgg.models.ergm.random_graphs.abc import AbstractRandomGraph
 
 __all__ = ("AbstractGeometricGraph",)
 

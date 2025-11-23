@@ -2,13 +2,15 @@ from abc import abstractmethod
 from collections.abc import Sequence
 from enum import Enum
 from functools import singledispatchmethod
-from typing import Any, NamedTuple
+from typing import Any, Self
 
 import equinox as eqx
 import jax.numpy as jnp
 from jaxtyping import DTypeLike
 
+from grgg._typing import Number, Numbers
 from grgg.abc import AbstractModule
+from grgg.utils.indexing import Shaped
 from grgg.utils.misc import format_array
 
 __all__ = ("AbstractParameter", "AbstractParameters", "Constraints")
@@ -40,12 +42,10 @@ def _validate(parameter: "AbstractParameter", constraint: str) -> None:
     else:
         errmsg = f"unknown constraint '{constraint}'"
         raise ValueError(errmsg)
-    if is_bad:
-        errmsg = f"'{parameter.name}' must be {constraint}"
-        raise ValueError(errmsg)
+    eqx.error_if(parameter, is_bad, f"'{parameter.name}' must be {constraint}")
 
 
-class AbstractParameter(AbstractModule):
+class AbstractParameter(Shaped):
     """Abstract base class for model parameters.
 
     Units are laid out along the first axis.
@@ -59,39 +59,35 @@ class AbstractParameter(AbstractModule):
         Constraints on the parameter value(s).
     """
 
-    data: jnp.ndarray
+    data: Numbers
     name: str = eqx.field(static=True, repr=False)
-    frozen: bool = eqx.field(static=True)
 
-    ndims: eqx.AbstractClassVar[tuple[int, ...]]
     constraints: eqx.AbstractClassVar[tuple[Constraints, ...]]
-    default_value: eqx.AbstractClassVar[float]
+    default_value: eqx.AbstractClassVar[Number]
 
     def __init__(
         self,
         data: jnp.ndarray | None = None,
-        name: str | None = None,
         *,
-        frozen: bool = False,
+        name: str | None = None,
     ) -> None:
-        data = jnp.asarray(data if data is not None else self.default_value)
-        if jnp.issubdtype(data.dtype, jnp.integer):
-            data = data.astype(float)
-        self.data = data
+        self.data = jnp.asarray(data if data is not None else self.default_value)
+        if not eqx.is_inexact_array(self.data):
+            self.data = self.data.astype(float)
         self.name = name or self.__class__.__name__.lower()
-        self.frozen = frozen
+
+    def __jax_array__(self) -> Numbers:
+        return self.data
 
     def __check_init__(self):
-        if self.data.ndim not in self.ndims:
-            errmsg = f"'data.ndim' must be in {self.ndims}, got {self.data.ndim}"
-            raise ValueError(errmsg)
         for constraint in self.constraints:
             _validate(self, constraint.value)
 
     def __repr__(self) -> str:
-        inner = self.data.item() if self.is_scalar else format_array(self.data)
-        if self.frozen:
-            inner += ", frozen=True"
+        if not isinstance(self.data, jnp.ndarray):
+            inner = self.data
+        else:
+            inner = self.data.item() if self.is_scalar else format_array(self.data)
         return f"{self.__class__.__name__}({inner})"
 
     def __getitem__(self, args: Any) -> jnp.ndarray:
@@ -99,6 +95,40 @@ class AbstractParameter(AbstractModule):
 
     def __len__(self) -> int:
         return len(self.data)
+
+    def __pos__(self) -> Self:
+        return self.replace(data=+self.data)
+
+    def __neg__(self) -> Self:
+        return self.replace(data=-self.data)
+
+    def __add__(self, other: Numbers) -> Self:
+        if isinstance(other, type(self)):
+            return self.replace(data=self.data + other.data)
+        if isinstance(other, AbstractParameter):
+            return jnp.add(self, other)
+        return self.replace(data=self.data + other)
+
+    def __sub__(self, other: Numbers) -> Self:
+        if isinstance(other, type(self)):
+            return self.replace(data=self.data - other.data)
+        if isinstance(other, AbstractParameter):
+            return jnp.subtract(self, other)
+        return self.replace(data=self.data - other)
+
+    def __mul__(self, other: Numbers) -> Self:
+        if isinstance(other, type(self)):
+            return self.replace(data=self.data * other.data)
+        if isinstance(other, AbstractParameter):
+            return jnp.multiply(self, other)
+        return self.replace(data=self.data * other)
+
+    def __div__(self, other: Numbers) -> Self:
+        if isinstance(other, type(self)):
+            return self.replace(data=self.data / other.data)
+        if isinstance(other, AbstractParameter):
+            return jnp.divide(self, other)
+        return self.replace(data=self.data / other)
 
     @property
     def value(self) -> jnp.ndarray:
@@ -119,16 +149,6 @@ class AbstractParameter(AbstractModule):
     def shape(self) -> tuple[int, ...]:
         """Shape of the parameter data."""
         return self.data.shape
-
-    @property
-    def ndim(self) -> int:
-        """Number of dimensions of the parameter data."""
-        return self.data.ndim
-
-    @property
-    def size(self) -> int:
-        """Number of elements in the parameter data."""
-        return self.data.size
 
     @property
     def is_scalar(self) -> bool:
@@ -153,12 +173,14 @@ class AbstractParameter(AbstractModule):
             and jnp.array_equal(self.data, other.data)
         )
 
+    def astype(self, dtype: DTypeLike) -> Self:
+        return self.replace(data=self.data.astype(dtype))
+
 
 class AbstractParameters(AbstractModule, Sequence[AbstractParameter]):
     """Abstract base class for model parameters container."""
 
     names: eqx.AbstractClassVar[tuple[str, ...]]
-    Data: eqx.AbstractClassVar[type[tuple]]
 
     def __init_subclass__(cls) -> None:
         super().__init_subclass__()
@@ -167,9 +189,6 @@ class AbstractParameters(AbstractModule, Sequence[AbstractParameter]):
             if issubclass(typ, AbstractParameter) and param not in names:
                 names.append(param)
         cls.names = tuple(names)
-        cls.Data = NamedTuple(
-            f"{cls.__name__}Data", [(name, jnp.ndarray) for name in cls.names]
-        )
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.__repr_inner__()})"
@@ -179,19 +198,9 @@ class AbstractParameters(AbstractModule, Sequence[AbstractParameter]):
         return ", ".join(map(repr, params))
 
     @property
-    def data(self) -> tuple:
-        """Tuple of parameter data arrays."""
-        return self.Data(*(getattr(self, name).data for name in self.names))
-
-    @property
-    def theta(self) -> tuple:
-        """Tuple of parameter theta arrays."""
-        return self.Data(*(getattr(self, name).theta for name in self.names))
-
-    @property
     def are_heterogeneous(self) -> bool:
         """Whether the parameters container has heterogeneous parameters."""
-        return any(getattr(self, name).is_heterogeneous for name in self.names)
+        return any(param.is_heterogeneous for param in self)
 
     @property
     def are_homogeneous(self) -> bool:
@@ -200,12 +209,13 @@ class AbstractParameters(AbstractModule, Sequence[AbstractParameter]):
 
     @property
     def dtype(self) -> DTypeLike:
-        """Model parameter data type."""
+        """Resolved parameter data type."""
         if not self:
             errmsg = "cannot determine dtype of empty parameters' set"
             raise ValueError(errmsg)
         dtype = self[0].dtype
-        for param in self[1:]:
+        for i in range(1, len(self)):
+            param = self[i]
             dtype = jnp.promote_types(dtype, param.dtype)
         return dtype
 
@@ -233,3 +243,8 @@ class AbstractParameters(AbstractModule, Sequence[AbstractParameter]):
             jnp.array_equal(getattr(self, name).data, getattr(other, name).data)
             for name in self.names
         )
+
+    def resolve_dtype(self) -> Self:
+        """Return `self` with resolved dtypes."""
+        dtype = self.dtype
+        return self.__class__(*(param.astype(dtype) for param in self))

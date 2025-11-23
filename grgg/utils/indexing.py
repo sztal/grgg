@@ -411,7 +411,8 @@ class DynamicIndex(Shaped, Sequence):
         """
         slice_map, array_map, newaxis_map = self.index_maps
         # Broadcast advanced indices
-        advanced = jnp.broadcast_arrays(*array_map.values()) if array_map else ()
+        advanced = tuple(array_map.values()) if array_map else ()
+        jnp.broadcast_shapes(*(a.shape for a in advanced))
         for k, a in zip(array_map, advanced, strict=True):
             array_map[k] = a
         # Create a meshgrid of all slice indices

@@ -60,6 +60,20 @@ class Options(MutableMapping[str, Any]):
         """Pretty-print the options."""
         pprint(self)
 
+    def get(self, option: str, value: Any = None) -> Any:
+        """Get an option value with a default."""
+        if option not in self.__dataclass_fields__:
+            errmsg = f"option '{option}' does not exist"
+            raise AttributeError(errmsg)
+        if value is None:
+            return getattr(self, option)
+        return getattr(self.replace(**{option: value}), option)
+
+    def set(self, option: str, value: Any) -> None:
+        """Set an option value."""
+        new = self.replace(**{option: value})
+        setattr(self, option, getattr(new, option))
+
 
 @dataclass(slots=True)
 class RandomGraphOptions(Options):
@@ -77,6 +91,11 @@ class GeometricOptions(Options):
 class ModelOptions(Options):
     random_graph: RandomGraphOptions = Field(default_factory=RandomGraphOptions)
     geometric: GeometricOptions = Field(default_factory=GeometricOptions)
+
+
+@dataclass(slots=True)
+class SamplingOptions(Options):
+    batch_size: PositiveInt = 10000
 
 
 @dataclass(slots=True)
@@ -136,6 +155,7 @@ class AutoOptions(Options):
 @dataclass(slots=True)
 class PackageOptions(Options):
     model: ModelOptions = Field(default_factory=ModelOptions)
+    sampling: SamplingOptions = Field(default_factory=SamplingOptions)
     loop: LoopOptions = Field(default_factory=LoopOptions)
     monte_carlo: MonteCarloOptions = Field(default_factory=MonteCarloOptions)
     progress: ProgressOptions = Field(default_factory=ProgressOptions)

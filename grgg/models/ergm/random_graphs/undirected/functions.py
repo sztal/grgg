@@ -2,12 +2,13 @@ from typing import TYPE_CHECKING, Any
 
 import equinox as eqx
 
-from grgg._typing import Reals
+from grgg._typing import Integer, Real, Reals
 
 from ..abc import AbstractRandomGraphFunctions
 
 if TYPE_CHECKING:
     from .model import RandomGraph
+    from .views import RandomGraphNodeView
 
 __all__ = ("RandomGraphFunctions",)
 
@@ -36,6 +37,14 @@ class RandomGraphFunctions(AbstractRandomGraphFunctions):
 
     @classmethod
     @eqx.filter_jit
-    def free_energy(cls, model: "RandomGraph", *args: Any, **kwargs: Any) -> Reals:
-        """Compute the free energy of the model."""
-        return super().free_energy(model, *args, **kwargs) / 2
+    def F_i(cls, model: "RandomGraph", i: Integer, *args: Any, **kwargs: Any) -> Real:
+        """Compute the contribution to the free energy from node i."""
+        return super().F_i(model, i, *args, **kwargs) / 2
+
+    @classmethod
+    @eqx.filter_jit
+    def _node_free_energy_homogeneous(
+        cls, nodes: "RandomGraphNodeView", *args: Any, **kwargs: Any
+    ) -> Reals:
+        """Compute the free energy contributions from nodes in a homogeneous model."""
+        return super()._node_free_energy_homogeneous(nodes, *args, **kwargs) / 2

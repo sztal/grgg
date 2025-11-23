@@ -68,8 +68,7 @@ class AbstractRandomGraphSampler[T](AbstractErgmSampler[T]):
         if self.nodes.is_active:
             nodes = self.nodes.materialize(copy=False).nodes
             self = nodes.sampler
-        if batch_size is None:
-            batch_size = options.loop.batch_size or self.model.n_nodes
+        batch_size = options.sampling.get("batch_size", batch_size)
         rng = RandomGenerator.from_seed(rng)
         n_nodes = self.nodes.n_nodes
         starts = batch_starts(n_nodes, batch_size, repeat=2)

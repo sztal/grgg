@@ -7,7 +7,7 @@ from grgg.models.ergm.random_graphs.abc import (
 from ...motifs.nodes import RandomGraphNodeMotifs
 from ...sampling import RandomGraphSampler
 from ._complementarity import RandomGraphStructuralComplementarity
-from ._degree import RandomGraphDegreeStatistic
+from ._degree import RandomGraphDegree
 from ._qclosure import RandomGraphQClosure
 from ._qclust import RandomGraphQClustering
 from ._qstats import RandomGraphQStatistics
@@ -31,7 +31,7 @@ class RandomGraphNodeView[T](AbstractRandomGraphNodeView[T]):
     motifs_cls: ClassVar[type[RandomGraphNodeMotifs]] = RandomGraphNodeMotifs
     sampler_cls: ClassVar[type[RandomGraphSampler]] = RandomGraphSampler
 
-    degree_cls: ClassVar[type[RandomGraphDegreeStatistic]] = RandomGraphDegreeStatistic
+    degree_cls: ClassVar[type[RandomGraphDegree]] = RandomGraphDegree
     tclust_cls: ClassVar[type[RandomGraphTClustering]] = RandomGraphTClustering
     tclosure_cls: ClassVar[type[RandomGraphTClosure]] = RandomGraphTClosure
     similarity_cls: ClassVar[

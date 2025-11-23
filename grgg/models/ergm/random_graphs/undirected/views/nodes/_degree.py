@@ -1,14 +1,17 @@
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import equinox as eqx
 import jax
-import jax.numpy as jnp
 
-from grgg._typing import Integer, Reals
+from grgg._typing import Integer, Real, Reals
 from grgg.statistics import Degree
+from grgg.utils.compute import map
+
+if TYPE_CHECKING:
+    from ...model import RandomGraph
 
 
-class RandomGraphDegreeStatistic(Degree):
+class RandomGraphDegree(Degree):
     def _homogeneous_m1(self, **kwargs: Any) -> Reals:  # noqa
         """Expected degree for homogeneous undirected random graph models.
 
@@ -41,6 +44,7 @@ class RandomGraphDegreeStatistic(Degree):
 
         Examples
         --------
+        >>> import jax
         >>> import jax.numpy as jnp
         >>> from grgg import RandomGraph, RandomGenerator
         >>> rng = RandomGenerator(42)
@@ -60,12 +64,77 @@ class RandomGraphDegreeStatistic(Degree):
         (4,)
         >>> jnp.allclose(D, K[vids], rtol=1e-1).item()
         True
+
+        Check gradients via autodiff.
+        >>> def degsum(model): return model.nodes.degree().sum()
+        >>> def degsum_naive(model):
+        ...     return model.pairs.probs().sum(axis=1).sum()
+        >>> grad = jax.grad(degsum)(model)
+        >>> grad_naive = jax.grad(degsum_naive)(model)
+        >>> jnp.allclose(grad.mu.data, grad_naive.mu.data).item()
+        True
         """
         indices = self.nodes.coords[0]
 
-        @eqx.filter_checkpoint
+        @map(indices, batch_size=self.batch_size)
         @eqx.filter_jit
-        def node_degree(i: Integer) -> jnp.ndarray:
-            return self.model.pairs[i].probs().sum(-1)
+        @eqx.filter_checkpoint
+        def degree(i: Integer) -> Real:
+            return self.f_i(i)
 
-        return jax.lax.map(node_degree, indices, batch_size=self.batch_size)
+        return degree
+
+    def f_i(self, i: Integer) -> Real:
+        """Compute the expected degree of node i."""
+        return _node_degree(self.model, i)
+
+
+@eqx.filter_custom_jvp
+@eqx.filter_jit
+def _node_degree(model: "RandomGraph", i: Integer) -> Real:
+    """Compute the degree of a node in a heterogeneous model."""
+    return model.pairs[i].probs().sum()
+
+
+@_node_degree.def_jvp
+@eqx.filter_jit
+def _node_degree_jvp(
+    primals: tuple["RandomGraph", Integer],
+    tangents: tuple["RandomGraph", Any],
+) -> tuple[Real, Real]:
+    """JVP rule for custom JVP of node degree."""
+    model, i = primals
+    model_dot, _ = tangents
+    primal_out = _node_degree(model, i)
+    tangent_out = jax.jvp(lambda m: m.pairs[i].probs().sum(), (model,), (model_dot,))[1]
+    return primal_out, tangent_out
+
+
+# @eqx.filter_custom_vjp
+# @eqx.filter_jit
+# def _node_degree(model: "RandomGraph", i: Integer) -> Real:
+#     """Compute the degree of a node in a heterogeneous model."""
+#     return model.pairs[i].probs().sum()
+
+
+# @_node_degree.def_fwd
+# @eqx.filter_jit
+# def _node_degree_fwd(_, model: "RandomGraph", i: Integer) -> tuple[Real, None]:
+#     """Forward pass for custom VJP of node degree."""
+#     return _node_degree(model, i), None
+
+
+# @_node_degree.def_bwd
+# @eqx.filter_jit
+# def _node_degree_bwd(
+#     _,
+#     g_out: Real,
+#     __,
+#     model: "RandomGraph",
+#     i: Integer,
+# ) -> "RandomGraph":
+#     """Backward pass for custom VJP of node degree."""
+#     prob_grad = jax.grad(lambda model, j: model.pairs[i, j].probs().sum(), argnums=0)
+#     gradient = prob_grad(model, slice(model.n_nodes))
+
+#     return jax.tree_util.tree_map(lambda g: g_out * g, gradient)

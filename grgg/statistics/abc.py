@@ -181,7 +181,7 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
             `rng` is an alias for `key`.
         """
         if not self.supports_monte_carlo:
-            if (field := "mc") in kwargs:
+            if kwargs.get((field := "mc"), False):
                 cn = self.__class__.__name__
                 errmsg = (
                     f"'{cn}' does not support Monte Carlo sampling "
@@ -267,13 +267,16 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
         raise NotImplementedError(errmsg)
 
     @singledispatchmethod
-    def check_observed(self, obj: Any) -> None:
+    def validate_object(self, obj: Any) -> Any:
         """Check if the given object is compatible with the statistic."""
         n = self.model.n_units
         try:
+            if not hasattr(obj, "shape"):
+                obj = jnp.asarray(obj)
             if obj.shape != (n, n):
                 errmsg = f"expected object of shape ({n}, {n}), got {obj.shape}"
                 raise ValueError(errmsg)
+            return obj
         except AttributeError as exc:
             errmsg = f"object of type '{type(obj)}' is not supported"
             raise TypeError(errmsg) from exc
@@ -281,12 +284,13 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
     try:
         import igraph as ig
 
-        @check_observed.register
-        def _(self, obj: ig.Graph) -> None:  # noqa
+        @validate_object.register
+        def _(self, obj: ig.Graph) -> ig.Graph:  # noqa
             n = self.model.n_units
             if obj.vcount() != n:
                 errmsg = f"expected igraph Graph with {n} vertices, got {obj.vcount()}"
                 raise ValueError(errmsg)
+            return obj
 
     except ImportError:
         pass
@@ -294,8 +298,8 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
     try:
         import networkx as nx
 
-        @check_observed.register
-        def _(self, obj: nx.Graph) -> None:  # noqa
+        @validate_object.register
+        def _(self, obj: nx.Graph) -> nx.Graph:  # noqa
             n = self.model.n_units
             if obj.number_of_nodes() != n:
                 errmsg = (
@@ -303,6 +307,18 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
                     f"got {obj.number_of_nodes()}"
                 )
                 raise ValueError(errmsg)
+            return obj
+
+        @validate_object.register
+        def _(self, obj: nx.DiGraph) -> nx.DiGraph:  # noqa
+            n = self.model.n_units
+            if obj.number_of_nodes() != n:
+                errmsg = (
+                    f"expected networkx DiGraph with {n} nodes, "
+                    f"got {obj.number_of_nodes()}"
+                )
+                raise ValueError(errmsg)
+            return obj
 
     except ImportError:
         pass

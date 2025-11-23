@@ -1,7 +1,7 @@
 from collections.abc import Callable
 from functools import singledispatchmethod
 from types import NoneType
-from typing import Any, NamedTuple
+from typing import Any, ClassVar, NamedTuple
 
 import equinox as eqx
 
@@ -15,6 +15,7 @@ from grgg.statistics.motifs import (
 from grgg.utils.misc import split_kwargs_by_signature
 
 from .functions import AbstractErgmFunctions
+from .optimize import ErgmOptimizer
 from .sampling import ErgmSample
 from .views import AbstractErgmNodePairView, AbstractErgmNodeView
 
@@ -33,6 +34,7 @@ class AbstractErgm(AbstractModel):
 
     nodes_cls: eqx.AbstractClassVar[type[AbstractErgmNodeView]]
     pairs_cls: eqx.AbstractClassVar[type[AbstractErgmNodePairView]]
+    optimizer_cls: ClassVar[type[ErgmOptimizer]] = ErgmOptimizer
 
     def __check_init__(self) -> None:
         if self.n_nodes <= 0:
@@ -104,32 +106,8 @@ class AbstractErgm(AbstractModel):
 
     @_sufficient_statistics.register
     def _(self, _: NoneType, **stats: Any) -> NamedTuple:
-        return self.Parameters.Data(*(stats[name] for name in self.Parameters.names))
+        return self.Parameters(*(stats[name] for name in self.Parameters.names))
 
     def hamiltonian(self, obj: Any, **kwargs: Any) -> Real:
         """Compute the Hamiltonian of the model."""
-        return self.functions.hamiltonian(obj, self, **kwargs)
-
-    def define_lagrangian(self, obj: Any, **kwargs: Any) -> LagrangianT:
-        """Define the Lagrangian function for the model given an object.
-
-        Examples
-        --------
-        >>> import jax
-        >>> import jax.numpy as jnp
-        >>> from grgg import RandomGraph, RandomGenerator
-        >>> n = 1000
-        >>> rng = RandomGenerator(303)
-        >>> model = RandomGraph(n, mu=rng.normal(n) - 2.5)
-        >>> S = model.sample(rng=rng)
-        >>> lagrangian = model.define_lagrangian(S.A)
-        >>> nll1 = lagrangian(model)  # negative log-likelihood
-        >>> nll2 = model.hamiltonian(S.A) - model.free_energy()
-        >>> jnp.isclose(nll1, nll2).item()
-        True
-
-        Lagrangian function can be differentiated w.r.t. model parameters
-        >>> jax.grad(lagrangian)(model).mu
-        Mu(...[1000])
-        """
-        return self.functions.define_lagrangian(obj, self, **kwargs)
+        return self.functions.hamiltonian(self, obj, **kwargs)

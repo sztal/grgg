@@ -27,17 +27,6 @@ class Mu(AbstractErgmParameter):
     Mu(1.0)
     >>> Mu([1, 2, 3])  # heterogeneous value
     Mu(f32[3])
-
-    Error is raised for invalid values.
-    >>> Mu(1+1j)  # complex value
-    Traceback (most recent call last):
-        ...
-    ValueError: 'mu' must be real
-
-    >>> Mu(jnp.ones((2, 2)))  # wrong shape
-    Traceback (most recent call last):
-        ...
-    ValueError: 'data.ndim' must be in (0, 1), got 2
     """
 
     default_value: ClassVar[float] = 0.0
