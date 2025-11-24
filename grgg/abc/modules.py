@@ -1,7 +1,7 @@
 from abc import abstractmethod
 from copy import deepcopy
 from dataclasses import replace
-from typing import Any, Self
+from typing import Any, ClassVar, Self, get_origin
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -49,6 +49,24 @@ class AbstractModule(eqx.Module):
     def replace(self, **kwargs: Any) -> Self:
         """Create a copy with some attributes replaced."""
         return replace(self, **kwargs)
+
+    @classmethod
+    def get_class_fields(cls) -> list[str]:
+        """Get the list of class fields."""
+        return [
+            name
+            for name, field in cls.__dataclass_fields__.items()
+            if get_origin(field.type) is ClassVar
+        ]
+
+    @classmethod
+    def get_instance_fields(cls) -> list[str]:
+        """Get the list of instance fields."""
+        return [
+            name
+            for name, field in cls.__dataclass_fields__.items()
+            if get_origin(field.type) is not ClassVar
+        ]
 
 
 class AbstractCallable(AbstractModule):

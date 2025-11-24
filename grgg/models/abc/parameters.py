@@ -1,7 +1,5 @@
 from abc import abstractmethod
-from collections.abc import Sequence
 from enum import Enum
-from functools import singledispatchmethod
 from typing import Any, Self
 
 import equinox as eqx
@@ -9,7 +7,7 @@ import jax.numpy as jnp
 from jaxtyping import DTypeLike
 
 from grgg._typing import Number, Numbers
-from grgg.abc import AbstractModule
+from grgg.utils.containers import ArrayBundle
 from grgg.utils.indexing import Shaped
 from grgg.utils.misc import format_array
 
@@ -177,21 +175,8 @@ class AbstractParameter(Shaped):
         return self.replace(data=self.data.astype(dtype))
 
 
-class AbstractParameters(AbstractModule, Sequence[AbstractParameter]):
+class AbstractParameters(ArrayBundle[AbstractParameter]):
     """Abstract base class for model parameters container."""
-
-    names: eqx.AbstractClassVar[tuple[str, ...]]
-
-    def __init_subclass__(cls) -> None:
-        super().__init_subclass__()
-        names = list(getattr(cls, "names", []))
-        for param, typ in cls.__annotations__.items():
-            if issubclass(typ, AbstractParameter) and param not in names:
-                names.append(param)
-        cls.names = tuple(names)
-
-    def __repr__(self) -> str:
-        return f"{self.__class__.__name__}({self.__repr_inner__()})"
 
     def __repr_inner__(self) -> str:
         params = [getattr(self, name) for name in self.names]
@@ -206,45 +191,3 @@ class AbstractParameters(AbstractModule, Sequence[AbstractParameter]):
     def are_homogeneous(self) -> bool:
         """Whether the parameters container has homogeneous parameters."""
         return not self.are_heterogeneous
-
-    @property
-    def dtype(self) -> DTypeLike:
-        """Resolved parameter data type."""
-        if not self:
-            errmsg = "cannot determine dtype of empty parameters' set"
-            raise ValueError(errmsg)
-        dtype = self[0].dtype
-        for i in range(1, len(self)):
-            param = self[i]
-            dtype = jnp.promote_types(dtype, param.dtype)
-        return dtype
-
-    def __len__(self) -> int:
-        return len(self.names)
-
-    @singledispatchmethod
-    def __getitem__(self, index: Any) -> AbstractParameter:
-        errmsg = f"index must be 'int' or 'str', got '{type(index).__name__}'"
-        raise TypeError(errmsg)
-
-    @__getitem__.register
-    def _(self, index: int) -> AbstractParameter:
-        return getattr(self, self.names[index])
-
-    @__getitem__.register
-    def _(self, name: str) -> AbstractParameter:
-        if name not in self.names:
-            errmsg = f"unknown parameter name '{name}'"
-            raise KeyError(errmsg)
-        return getattr(self, name)
-
-    def _equals(self, other: object) -> bool:
-        return super()._equals(other) and all(
-            jnp.array_equal(getattr(self, name).data, getattr(other, name).data)
-            for name in self.names
-        )
-
-    def resolve_dtype(self) -> Self:
-        """Return `self` with resolved dtypes."""
-        dtype = self.dtype
-        return self.__class__(*(param.astype(dtype) for param in self))

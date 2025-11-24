@@ -1,3 +1,9 @@
+from .fitting import (
+    AbstractModelFit,
+    AbstractObservedStatistics,
+    AbstractSufficientStatistics,
+    LagrangianErgmFit,
+)
 from .functions import AbstractErgmFunctions
 from .model import AbstractErgm
 from .motifs import (

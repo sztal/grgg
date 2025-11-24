@@ -144,6 +144,7 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
     key: Integers | None
 
     supports_monte_carlo: ClassVar[bool] = True
+    namespace: eqx.AbstractClassVar[str]
 
     def __init__(
         self,
@@ -188,7 +189,7 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
                     f"(got '{field}={kwargs[field]}')"
                 )
                 raise NotImplementedError(errmsg)
-            kwargs[field] = False
+            kwargs["mc"] = False
         super().__init__(module)
         loop_kwargs, mc_kwargs = split_kwargs(options.loop.__annotations__, **kwargs)
         loop_opts = options.loop.replace(**loop_kwargs)
@@ -341,6 +342,7 @@ class AbstractErgmViewStatistic[QT](AbstractErgmStatistic[QT]):
 
 class AbstractErgmNodeStatistic[VT](AbstractErgmViewStatistic[VT]):
     module: eqx.AbstractVar["VT"]
+    namespace: ClassVar[str] = "nodes"
 
     @property
     def nodes(self) -> "VT":
@@ -353,6 +355,7 @@ class AbstractErgmNodeStatistic[VT](AbstractErgmViewStatistic[VT]):
 
 class AbstractErgmNodePairStatistic[ET](AbstractErgmViewStatistic[ET]):
     module: eqx.AbstractVar["ET"]
+    namespace: ClassVar[str] = "pairs"
 
     @property
     def pairs(self) -> "ET":

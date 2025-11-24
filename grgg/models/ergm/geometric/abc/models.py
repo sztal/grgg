@@ -4,12 +4,11 @@ import equinox as eqx
 import jax.numpy as jnp
 
 from grgg.manifolds import Manifold
-from grgg.models.ergm.random_graphs.abc import AbstractRandomGraph
 
 __all__ = ("AbstractGeometricGraph",)
 
 
-class AbstractGeometricGraph(AbstractRandomGraph):
+class AbstractGeometricGraph:
     """Abstract base class for geometric graphs."""
 
     manifold: eqx.AbstractVar[Manifold]

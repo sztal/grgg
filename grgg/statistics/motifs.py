@@ -62,6 +62,7 @@ class AbstractErgmNodeMotifStatistic[MV](
     AbstractErgmNodeStatistic[MV], AbstractErgmViewMotifStatistic[MV]
 ):
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
+    namespace: ClassVar[str] = "nodes.motifs"
 
     @property
     def nodes(self) -> MV:
@@ -72,6 +73,8 @@ class AbstractErgmNodeMotifStatistic[MV](
 class AbstractErgmNodePairMotifStatistic[ME](
     AbstractErgmNodePairStatistic[ME], AbstractErgmViewMotifStatistic[ME]
 ):
+    namespace: ClassVar[str] = "pairs.motifs"
+
     @property
     def pairs(self) -> ME:
         """The node pair motifs of the view the statistic is computed on."""

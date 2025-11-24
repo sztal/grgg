@@ -7,7 +7,7 @@ from grgg._typing import Real, Reals
 from grgg.models.abc import AbstractModelFunctions
 
 if TYPE_CHECKING:
-    from grgg.models.ergm.abc import AbstractErgm
+    from grgg.models.ergm.abc import AbstractErgm, AbstractSufficientStatistics
 
 __all__ = ("AbstractErgmFunctions",)
 
@@ -56,42 +56,29 @@ class AbstractErgmFunctions(AbstractModelFunctions):
     @classmethod
     def hamiltonian(cls, model: "AbstractErgm", obj: tuple, **kwargs: Any) -> Real:
         """Compute the Hamiltonian of the model."""
-        stats = (
-            obj
-            if isinstance(obj, tuple)
-            else model.sufficient_statistics(obj, **kwargs)
-        )
-        return cls._hamiltonian(model, stats)
+        fit = model.fit(obj, **kwargs)
+        return cls._hamiltonian(model, fit.target)
 
     @classmethod
     def lagrangian(cls, model: "AbstractErgm", obj: tuple, **kwargs: Any) -> Real:
         """Compute the Lagrangian of the model."""
-        stats = (
-            obj
-            if isinstance(obj, tuple)
-            else model.sufficient_statistics(obj, **kwargs)
-        )
-        return cls._lagrangian(model, stats)
+        fit = model.fit(obj, **kwargs)
+        return cls._lagrangian(model, fit.target)
 
     # Internals ----------------------------------------------------------------------
 
     @classmethod
     @eqx.filter_jit
-    def _hamiltonian(cls, model: "AbstractErgm", stats: tuple) -> Real:
-        H = 0.0
-        params = model.parameters
-        for name in model.Parameters.names:
-            stat = getattr(stats, name)
-            param = getattr(params, name)
-            H_i = jnp.sum(param.theta * stat)  # 'param.theta' is Lagrange multiplier
-            if not model.is_directed and model.is_homogeneous:
-                H_i /= 2
-            H += H_i
-        return H
+    def _hamiltonian(
+        cls, model: "AbstractErgm", stats: "AbstractSufficientStatistics"
+    ) -> Real:
+        return model.fit(stats).hamiltonian()
 
     @classmethod
     @eqx.filter_jit
-    def _lagrangian(cls, model: "AbstractErgm", stats: tuple) -> Real:
+    def _lagrangian(
+        cls, model: "AbstractErgm", stats: "AbstractSufficientStatistics"
+    ) -> Real:
         H = cls._hamiltonian(model, stats)
         F = model.free_energy()
         return H - F

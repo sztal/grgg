@@ -8,7 +8,6 @@ import jax.numpy as jnp
 from grgg import options
 from grgg._typing import Reals
 from grgg.manifolds import CompactManifold
-from grgg.models.ergm.random_graphs.abc import AbstractRandomGraph
 
 from .functions import CouplingFunction, ProbabilityFunction
 from .parameters import Beta, Mu, Parameters
@@ -17,7 +16,7 @@ if TYPE_CHECKING:
     from .model import GRGG
 
 
-class AbstractLayer(AbstractRandomGraph):
+class AbstractLayer:
     """Abstract base class for layers.
 
     Attributes

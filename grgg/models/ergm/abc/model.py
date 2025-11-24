@@ -1,18 +1,12 @@
 from collections.abc import Callable
-from functools import singledispatchmethod
-from types import NoneType
-from typing import Any, ClassVar, NamedTuple
+from inspect import getmembers, isabstract
+from typing import Any, ClassVar
 
 import equinox as eqx
 
 from grgg._typing import Real, Reals
 from grgg.models.abc import AbstractModel
-from grgg.statistics.abc import AbstractErgmNodePairStatistic, AbstractErgmNodeStatistic
-from grgg.statistics.motifs import (
-    AbstractErgmNodeMotifStatistic,
-    AbstractErgmNodePairMotifStatistic,
-)
-from grgg.utils.misc import split_kwargs_by_signature
+from grgg.statistics.abc import AbstractErgmStatistic
 
 from .functions import AbstractErgmFunctions
 from .optimize import ErgmOptimizer
@@ -35,6 +29,37 @@ class AbstractErgm(AbstractModel):
     nodes_cls: eqx.AbstractClassVar[type[AbstractErgmNodeView]]
     pairs_cls: eqx.AbstractClassVar[type[AbstractErgmNodePairView]]
     optimizer_cls: ClassVar[type[ErgmOptimizer]] = ErgmOptimizer
+
+    fit_default_method: ClassVar[str] = "lagrangian"
+
+    supported_statistics: eqx.AbstractClassVar[dict[str, str]]
+
+    def __init_subclass__(cls) -> None:
+        super().__init_subclass__()
+        stats = {}
+        if not isabstract(cls):
+            for typ in (
+                cls,
+                cls.nodes_cls,
+                cls.nodes_cls.motifs_cls,
+                cls.pairs_cls,
+                cls.pairs_cls.motifs_cls,
+            ):
+                for _, member in getmembers(
+                    typ,
+                    lambda x: (
+                        isinstance(x, type) and issubclass(x, AbstractErgmStatistic)
+                    ),
+                ):
+                    if member.label in stats:
+                        errmsg = (
+                            f"Duplicate statistic label '{member.label}' found "
+                            f"in '{stats[member.label].__qualname__}' and "
+                            f"'{member.__qualname__}'. Statistic labels must be unique."
+                        )
+                        raise ValueError(errmsg)
+                    stats[member.label] = member.namespace
+            cls.supported_statistics = stats
 
     def __check_init__(self) -> None:
         if self.n_nodes <= 0:
@@ -61,6 +86,21 @@ class AbstractErgm(AbstractModel):
         """Node pair view of the model."""
         return self.pairs_cls(self)
 
+    def get_statistic(self, label: str) -> AbstractErgmStatistic:
+        """Get a statistic by its label."""
+        try:
+            namespace = self.supported_statistics.get(label)
+        except KeyError as exc:
+            cn = self.__class__.__name__
+            errmsg = f"'{label}' statistic is not supported by '{cn}'"
+            raise ValueError(errmsg) from exc
+        obj = self
+        for part in (*namespace.split("."), label):
+            obj = getattr(obj, part)
+        return obj
+
+    # Sampling -----------------------------------------------------------------------
+
     def sample(self, *args: Any, **kwargs: Any) -> ErgmSample:
         """Sample from the model."""
         return self.nodes.sample(*args, **kwargs)
@@ -75,39 +115,10 @@ class AbstractErgm(AbstractModel):
         """Compute the partition function of the model."""
         return self.functions.partition_function(self, *args, **kwargs)
 
-    def param_statistic(self, name: str, obj: Any, **kwargs: Any) -> Reals:
-        """Compute the sufficient statistic for a given parameter based on object."""
-        param = getattr(self.parameters, name)
-        if issubclass(param.statistic, AbstractErgmNodeStatistic):
-            statfun = getattr(self.nodes, param.statistic.label)
-        elif issubclass(param.statistic, AbstractErgmNodePairStatistic):
-            statfun = getattr(self.pairs, param.statistic.label)
-        elif issubclass(param.statistic, AbstractErgmNodeMotifStatistic):
-            statfun = getattr(self.nodes.motifs, param.statistic.label)
-        elif issubclass(param.statistic, AbstractErgmNodePairMotifStatistic):
-            statfun = getattr(self.pairs.motifs, param.statistic.label)
-        else:
-            statfun = getattr(self, param.statistic.label)
-        kwargs, _ = split_kwargs_by_signature(statfun.observed, **kwargs)
-        return statfun.observed(obj, **kwargs)
-
-    def sufficient_statistics(
-        self, obj: Any | None = None, **kwargs: Any
-    ) -> NamedTuple:
-        """Compute the sufficient statistics of the model."""
-        return self._sufficient_statistics(obj, **kwargs)
-
-    @singledispatchmethod
-    def _sufficient_statistics(self, obj: Any, **kwargs: Any) -> NamedTuple:
-        stats = {}
-        for name in self.Parameters.names:
-            stats[name] = self.param_statistic(name, obj, **kwargs)
-        return self._sufficient_statistics(None, **stats)
-
-    @_sufficient_statistics.register
-    def _(self, _: NoneType, **stats: Any) -> NamedTuple:
-        return self.Parameters(*(stats[name] for name in self.Parameters.names))
-
     def hamiltonian(self, obj: Any, **kwargs: Any) -> Real:
         """Compute the Hamiltonian of the model."""
         return self.functions.hamiltonian(self, obj, **kwargs)
+
+    def lagrangian(self, obj: Any, **kwargs: Any) -> Real:
+        """Compute the Lagrangian of the model."""
+        return self.functions.lagrangian(self, obj, **kwargs)

@@ -1,11 +1,13 @@
 from abc import abstractmethod
+from collections.abc import Mapping
 from typing import Any, Self
 
 import equinox as eqx
+from plum import dispatch
 
+from .fitting import AbstractFitTarget, AbstractModelFit
 from .functions import AbstractModelFunctions
 from .modules import AbstractModelModule
-from .optimize import AbstractModelOptimizer
 from .parameters import AbstractParameters
 
 __all__ = ("AbstractModel",)
@@ -16,10 +18,20 @@ class AbstractModel(AbstractModelModule[Self]):
 
     Parameters: eqx.AbstractClassVar[type[AbstractParameters]]
     functions: eqx.AbstractClassVar[type[AbstractModelFunctions]]
-    optimizer_cls: eqx.AbstractClassVar[type[AbstractModelOptimizer]]
+    fit_default_method: eqx.AbstractClassVar[str]
+    fit_targets: eqx.AbstractClassVar[Mapping[str, type[AbstractFitTarget]]]
 
     n_units: eqx.AbstractVar[int]
     parameters: eqx.AbstractVar["Self.Parameters"]
+
+    def __init_subclass__(cls) -> None:
+        for name in getattr(cls, "fit_targets", {}):
+            if name not in (registry := AbstractModelFit.__available_fitters__):
+                errmsg = (
+                    f"fit target '{name}' has no corresponding fitter registered in "
+                    f"AbstractModelFit; should be one of {list(registry)}"
+                )
+                raise ValueError(errmsg)
 
     def __check_init__(self) -> None:
         if self.n_units <= 0:
@@ -77,10 +89,47 @@ class AbstractModel(AbstractModelModule[Self]):
         """Whether the model has homogeneous parameters."""
         return not self.is_heterogeneous
 
-    @property
-    def optimize(self) -> "Self.optimizer_cls":
-        """Optimizer for the model."""
-        return self.optimizer_cls(self)
+    @dispatch
+    def fit(  # type: ignore  # noqa
+        self,
+        *,
+        method: str | None = None,
+        **kwargs: Any,
+    ) -> AbstractModelFit:
+        """Get a fitting procedure for the model without target data."""
+        method = method or self.fit_default_method
+        target = self.fit_targets[method](**kwargs)
+        fitter_cls = AbstractModelFit.__available_fitters__[method]
+        return fitter_cls(self, target)
+
+    @dispatch
+    def fit(  # type: ignore  # noqa
+        self,
+        target: AbstractFitTarget,
+        *,
+        method: str | None = None,
+    ) -> AbstractModelFit:
+        """Get a fitting procedure for the model given a fit target."""
+        method = method or self.fit_default_method
+        fitter_cls = AbstractModelFit.__available_fitters__[method]
+        return fitter_cls(self, target)
+
+    @dispatch
+    def fit(  # type: ignore  # noqa
+        self,
+        target: Any,
+        *,
+        method: str | None = None,
+        **kwargs: Any,
+    ) -> AbstractModelFit:
+        """Get a fitting procedure for the model."""
+        method = method or self.fit_default_method
+        if method not in (methods := AbstractModelFit.__available_fitters__):
+            errmsg = f"unknown fit method '{method}', should be one of {list(methods)}"
+            raise ValueError(errmsg)
+        fitter_cls = methods[method]
+        target = fitter_cls.make_target(self, target, **kwargs)
+        return fitter_cls(self, target)
 
     @abstractmethod
     def sample(self, *args: Any, **kwargs: Any) -> Any:

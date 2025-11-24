@@ -1,3 +1,4 @@
+from .fitting import AbstractFitTarget, AbstractModelFit
 from .functions import AbstractModelFunctions
 from .model import AbstractModel
 from .modules import AbstractModelModule

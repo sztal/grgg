@@ -43,6 +43,10 @@ class AbstractRandomGraphNodeView[T](AbstractErgmNodeView[T]):
         """
         return super().materialize(copy=copy)
 
+    def free_energy(self, *args: Any, **kwargs: Any) -> Reals:
+        """Compute node free energies for selected nodes."""
+        return _nodes_free_energy(self, *args, **kwargs)
+
 
 class AbstractRandomGraphNodePairView[T](AbstractErgmNodePairView[T]):
     """Abstract base class for node pair views of random graph models."""
@@ -61,6 +65,16 @@ class AbstractRandomGraphNodePairView[T](AbstractErgmNodePairView[T]):
 
 
 # Internals --------------------------------------------------------------------------
+
+
+@eqx.filter_jit
+def _nodes_free_energy(
+    nodes: AbstractRandomGraphNodeView,
+    *args: jnp.ndarray,
+    **kwargs: Any,
+) -> Reals:
+    """Compute node free energies."""
+    return nodes.model.functions.node_free_energy(nodes, *args, **kwargs)
 
 
 @eqx.filter_jit

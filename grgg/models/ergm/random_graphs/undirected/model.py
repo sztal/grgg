@@ -1,11 +1,16 @@
+from collections.abc import Mapping
 from typing import ClassVar
 
 import equinox as eqx
 
 from grgg._typing import Real, RealVector
 from grgg.models.abc import AbstractParameters
+from grgg.models.ergm.abc import (
+    AbstractObservedStatistics,
+)
 from grgg.models.ergm.random_graphs.abc import AbstractRandomGraph, Mu
 
+from .fitting import RandomGraphSufficientStatistics
 from .functions import RandomGraphFunctions
 from .views import RandomGraphNodePairView, RandomGraphNodeView
 
@@ -40,6 +45,10 @@ class RandomGraph(AbstractRandomGraph):
 
     nodes_cls: ClassVar[type[RandomGraphNodeView]] = RandomGraphNodeView
     pairs_cls: ClassVar[type[RandomGraphNodePairView]] = RandomGraphNodePairView
+
+    fit_targets: ClassVar[Mapping[str, type[AbstractObservedStatistics]]] = {
+        "lagrangian": RandomGraphSufficientStatistics
+    }
 
     def __init__(
         self,
