@@ -158,7 +158,8 @@ doctest_optionflags = [
 ]
 filterwarnings = [
     "ignore:jax.interpreters.batching.NotMapped is deprecated:DeprecationWarning",
-    "ignore:invalid escape sequence '\\|':SyntaxWarning",
+    "ignore::SyntaxWarning:bicm.*",
+    "ignore::SyntaxWarning:NEMtropy.*",
 ]
 
 [tool.coverage.paths]

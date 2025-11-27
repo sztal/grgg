@@ -2,7 +2,7 @@ from collections.abc import Iterator, Mapping, MutableMapping
 from copy import deepcopy
 from dataclasses import replace
 from types import TracebackType
-from typing import Any, Self
+from typing import Any, Literal, Self
 
 from pydantic import NonNegativeFloat, PositiveInt
 from pydantic.dataclasses import Field, dataclass
@@ -153,6 +153,11 @@ class AutoOptions(Options):
 
 
 @dataclass(slots=True)
+class ConstraintsOptions(Options):
+    method: Literal["log", "logexp1m"] = "logexp1m"
+
+
+@dataclass(slots=True)
 class PackageOptions(Options):
     model: ModelOptions = Field(default_factory=ModelOptions)
     sampling: SamplingOptions = Field(default_factory=SamplingOptions)
@@ -160,6 +165,7 @@ class PackageOptions(Options):
     monte_carlo: MonteCarloOptions = Field(default_factory=MonteCarloOptions)
     progress: ProgressOptions = Field(default_factory=ProgressOptions)
     auto: AutoOptions = Field(default_factory=AutoOptions)
+    constraints: ConstraintsOptions = Field(default_factory=ConstraintsOptions)
 
 
 options = PackageOptions()

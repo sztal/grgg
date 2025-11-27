@@ -7,8 +7,8 @@ from grgg._typing import Reals
 from .abc import AbstractErgmNodeStatistic
 
 if TYPE_CHECKING:
-    from grgg.models.abc import AbstractModel, AbstractModelModule
-    from grgg.models.ergm.abc.model import AbstractErgm, E, P, S, V
+    from grgg.models.base.ergm.model import AbstractErgm, E, P, S, V
+    from grgg.models.base.model import AbstractModel, AbstractModelModule
 
     T = TypeVar("T", bound=AbstractModel)
     M = TypeVar("M", bound=AbstractModelModule[T])

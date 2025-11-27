@@ -10,17 +10,17 @@ from grgg.statistics.abc import (
 )
 
 if TYPE_CHECKING:
-    from grgg.models.abc import AbstractModel, AbstractModelModule
-    from grgg.models.ergm.abc import (
+    from grgg.models.base.ergm import (
         AbstractErgmNodePairView,
         AbstractErgmNodeView,
         AbstractErgmView,
     )
-    from grgg.models.ergm.abc.motifs import (
+    from grgg.models.base.ergm.motifs import (
         AbstractErgmMotifs,
         AbstractErgmNodeMotifs,
         AbstractErgmNodePairMotifs,
     )
+    from grgg.models.base.model import AbstractModel, AbstractModelModule
 
     T = TypeVar("T", bound=AbstractModel)
     TT = TypeVar("TT", bound=AbstractModelModule[T])
@@ -62,7 +62,6 @@ class AbstractErgmNodeMotifStatistic[MV](
     AbstractErgmNodeStatistic[MV], AbstractErgmViewMotifStatistic[MV]
 ):
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
-    namespace: ClassVar[str] = "nodes.motifs"
 
     @property
     def nodes(self) -> MV:
@@ -73,7 +72,7 @@ class AbstractErgmNodeMotifStatistic[MV](
 class AbstractErgmNodePairMotifStatistic[ME](
     AbstractErgmNodePairStatistic[ME], AbstractErgmViewMotifStatistic[ME]
 ):
-    namespace: ClassVar[str] = "pairs.motifs"
+    supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
     @property
     def pairs(self) -> ME:

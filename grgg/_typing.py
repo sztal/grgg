@@ -1,3 +1,4 @@
+from beartype.vale import IsAttr, IsEqual
 from jaxtyping import Array, Bool, Float, Integer, Num
 
 __all__ = (
@@ -17,6 +18,8 @@ __all__ = (
     "Number",
     "Vector",
     "Matrix",
+    "IsHomogeneous",
+    "IsHeterogeneous",
 )
 
 Numbers = Num[Array, "..."]  # Array of numeric values (float or int)
@@ -38,3 +41,6 @@ Booleans = Bool[Array, "..."]  # Array of boolean values
 Boolean = Bool[Array, ""]  # Scalar boolean value
 BoolVector = Bool[Array, "#values"]  # 1D array of boolean values
 BoolMatrix = Bool[Array, "#rows #cols"]  # 2D array of boolean values
+
+IsHomogeneous = IsAttr["is_homogeneous", IsEqual[True]]
+IsHeterogeneous = IsAttr["is_heterogeneous", IsEqual[True]]

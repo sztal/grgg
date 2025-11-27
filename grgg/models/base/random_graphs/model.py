@@ -1,0 +1,155 @@
+from collections.abc import Mapping
+from typing import Any
+
+import equinox as eqx
+import jax.numpy as jnp
+import numpy as np
+from rich.progress import track
+from scipy.sparse import csr_array
+
+from grgg._options import options
+from grgg._typing import Booleans, BoolVector, Integer, IntVector
+from grgg.models.base.ergm import AbstractErgm, ErgmSample
+from grgg.utils.dispatch import dispatch
+from grgg.utils.misc import batch_starts
+from grgg.utils.random import RandomGenerator
+
+from .functions import AbstractRandomGraphFunctions
+from .views import AbstractRandomGraphNodePairView, AbstractRandomGraphNodeView
+
+__all__ = ("AbstractRandomGraph",)
+
+
+class AbstractRandomGraph(AbstractErgm):
+    """Abstract base class for random graph models."""
+
+    functions: eqx.AbstractClassVar[type[AbstractRandomGraphFunctions]]
+
+    nodes_cls: eqx.AbstractClassVar[type[AbstractRandomGraphNodeView]]
+    pairs_cls: eqx.AbstractClassVar[type[AbstractRandomGraphNodePairView]]
+
+    # Model functions ----------------------------------------------------------------
+
+    def edge_density(self, *args: Any, **kwargs: Any) -> float:
+        """Expected edge density of the model."""
+        return self.nodes.edge_density(*args, **kwargs)
+
+    # Model fitting interface --------------------------------------------------------
+
+    @dispatch
+    def get_default_fit_method(self, data: Any) -> str:  # noqa
+        """Get the default fitting method for a given model and target statistics."""
+        return "lagrangian"
+
+    # Model sampling interface -------------------------------------------------------
+
+    def sample(
+        self,
+        *,
+        batch_size: int | None = None,
+        rng: RandomGenerator | int | None = None,
+        progress: bool | Mapping | None = None,
+    ) -> ErgmSample:
+        """Sample a graph from the model.
+
+        Parameters
+        ----------
+        batch_size
+            Batch size for processing node pairs.
+            If less than or equal to 0, process all node pairs at once.
+        rngs
+            Random state for reproducibility, can be an integer seed,
+            a `nnx.Rngs` object, or `None` for random initialization.
+        progress
+            Whether to display a progress bar. Can be a boolean or a
+            dictionary of keyword arguments passed to `tqdm.tqdm`.
+        """
+        i, j = (
+            np.asarray(k)
+            for k in _sample_impl(
+                self,
+                batch_size=batch_size,
+                rng=rng,
+                progress=progress,
+            )
+        )
+        n_nodes = self.model.nodes.n_nodes
+        A = csr_array((np.ones_like(i), (i, j)), shape=(n_nodes, n_nodes))
+        if not self.model.is_directed:
+            A = A + A.T  # make symmetric
+        return ErgmSample(A)
+
+
+# Implementation ---------------------------------------------------------------------
+
+
+def _sample_impl(
+    model: AbstractRandomGraph,
+    *,
+    batch_size: int | None = None,
+    rng: RandomGenerator | int | None = None,
+    progress: bool | Mapping | None = None,
+) -> tuple[IntVector, IntVector]:
+    batch_size = options.sampling.get("batch_size", batch_size)
+    rng = RandomGenerator.from_seed(rng)
+    n_nodes = model.nodes.n_nodes
+    starts = batch_starts(n_nodes, batch_size, repeat=2)
+    starts = starts[starts[:, 0] <= starts[:, 1]]
+    Ai = []
+    Aj = []
+    progress_opts = options.progress.from_steps(
+        len(starts), progress, description="Sampling..."
+    )
+    for s1, s2 in track(starts, **progress_opts):
+        if not model.is_directed and s1 > s2:
+            continue
+        if s1 == s2:
+            bs = int(min(batch_size, n_nodes - s1))
+            i, j, M = _sample_impl_diag(model, s1, bs, rng)
+            i = i[M]
+            j = j[M]
+        else:
+            bs1 = int(min(batch_size, n_nodes - s1))
+            bs2 = int(min(batch_size, n_nodes - s2))
+            M = _sample_impl_offdiag(model, s1, s2, bs1, bs2, rng)
+            i, j = jnp.where(M)
+            i += s1
+            j += s2
+        Ai.append(i)
+        Aj.append(j)
+    Ai = jnp.concatenate(Ai)
+    Aj = jnp.concatenate(Aj)
+    return Ai, Aj
+
+
+@eqx.filter_jit
+def _sample_impl_diag(
+    model: AbstractRandomGraph,
+    s: Integer,
+    batch_size: int,
+    rng: RandomGenerator,
+) -> tuple[IntVector, IntVector, BoolVector]:
+    """Sample edges for the diagonal block."""
+    i, j = jnp.triu_indices(batch_size, k=1)
+    i += s
+    j += s
+    p = model.pairs[i, j].probs()
+    mask = rng.uniform(shape=p.shape) < p
+    return i, j, mask
+
+
+@eqx.filter_jit
+def _sample_impl_offdiag(
+    model: AbstractRandomGraph,
+    s1: Integer,
+    s2: Integer,
+    batch_size1: int,
+    batch_size2: int,
+    rng: RandomGenerator,
+) -> Booleans:
+    """Sample edges for the off-diagonal block."""
+    i = jnp.arange(batch_size1) + s1
+    j = jnp.arange(batch_size2) + s2
+    p = model.pairs[jnp.ix_(i, j)].probs()
+    mask = rng.uniform(shape=p.shape) < p
+    return mask

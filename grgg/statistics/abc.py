@@ -13,8 +13,8 @@ from grgg.utils.misc import split_kwargs
 from grgg.utils.random import RandomGenerator
 
 if TYPE_CHECKING:
-    from grgg.models.abc import AbstractModel, AbstractModelModule
-    from grgg.models.ergm.abc.model import AbstractErgm, E, P, Q, S, V
+    from grgg.models.base.ergm.model import AbstractErgm, E, P, Q, S, V
+    from grgg.models.base.model import AbstractModel, AbstractModelModule
 
     T = TypeVar("T", bound=AbstractModel)
     M = TypeVar("M", bound=AbstractModelModule[T])
@@ -144,7 +144,6 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
     key: Integers | None
 
     supports_monte_carlo: ClassVar[bool] = True
-    namespace: eqx.AbstractClassVar[str]
 
     def __init__(
         self,
@@ -342,7 +341,6 @@ class AbstractErgmViewStatistic[QT](AbstractErgmStatistic[QT]):
 
 class AbstractErgmNodeStatistic[VT](AbstractErgmViewStatistic[VT]):
     module: eqx.AbstractVar["VT"]
-    namespace: ClassVar[str] = "nodes"
 
     @property
     def nodes(self) -> "VT":
@@ -355,7 +353,6 @@ class AbstractErgmNodeStatistic[VT](AbstractErgmViewStatistic[VT]):
 
 class AbstractErgmNodePairStatistic[ET](AbstractErgmViewStatistic[ET]):
     module: eqx.AbstractVar["ET"]
-    namespace: ClassVar[str] = "pairs"
 
     @property
     def pairs(self) -> "ET":

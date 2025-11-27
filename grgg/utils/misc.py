@@ -1,4 +1,4 @@
-from collections.abc import Callable, Container, Iterator, Mapping, Sequence
+from collections.abc import Callable, Container, Hashable, Iterator, Mapping, Sequence
 from functools import partial, wraps
 from inspect import Signature, signature
 from itertools import product
@@ -9,14 +9,27 @@ import jax
 import jax.numpy as jnp
 from equinox import tree_pformat
 from jax.scipy.special import expit
+from grgg.utils.dispatch import dispatch
 
-from grgg._typing import IntMatrix, Real, RealMatrix, Reals, RealVector
+from grgg._typing import IntMatrix, Numbers, Real, RealMatrix, Reals, RealVector
 
 
 @jax.jit
 def sigmoid(x: Reals) -> Reals:
     """Compute the sigmoid function."""
     return expit(-x)
+
+
+@jax.jit
+def logexp1m(x: Numbers) -> Numbers:
+    """Compute the log(exp(x) - 1) function."""
+    return jnp.log(jnp.expm1(x))
+
+
+@jax.jit
+def logexp1p(x: Numbers) -> Numbers:
+    """Compute the log(exp(x) + 1) function."""
+    return jnp.log1p(jnp.exp(x))
 
 
 @jax.jit
@@ -450,6 +463,7 @@ def split_kwargs_by_signature(
     return split_kwargs(sig.parameters, **kwargs)
 
 
+@dispatch
 def format_array(x: jnp.ndarray) -> str:
     """Format a JAX array for display."""
     if jnp.isscalar(x):
@@ -518,3 +532,103 @@ def is_abstract(cls: type) -> bool:
         for x in dir(cls)
         if (obj := getattr(cls, x, None))
     )
+
+
+def partition_choices(
+    choices: Container[Hashable], **groups: bool | Hashable | Container[Hashable]
+) -> tuple[list[Hashable], ...]:
+    """Get disjoint lists of choices forming a partition.
+
+    Parameters
+    ----------
+    choices
+        The set of all possible choices.
+    **groups
+        Named groups must be provided as keyword arguments.
+        Each group can be:
+        - `True`: all choices not in other groups are included
+        - `False`: group is explicitly empty (other groups must be specified)
+        - A hashable value or container of hashable values: explicit choices
+
+    Returns
+    -------
+    tuple
+        A tuple of lists, one for each group, containing the choices.
+
+    Examples
+    --------
+    >>> from grgg.utils.misc import partition_choices
+    >>> partition_choices(
+    ...     ["a", "b", "c", "d", "e"],
+    ...     group1=["a", "b"],
+    ...     group2=True,
+    ... )
+    (['a', 'b'], ['c', 'd', 'e'])
+    >>> partition_choices(
+    ...     [1, 2, 3, 4, 5, 6],
+    ...     evens=[2, 4, 6],
+    ...     odds=[1, 3, 5],
+    ... )
+    ([2, 4, 6], [1, 3, 5])
+    >>> partition_choices(
+    ...     ["x", "y", "z"],
+    ...     groupA=True,
+    ...     groupB=False,
+    ... )
+    (['x', 'y', 'z'], [])
+    >>> partition_choices(
+    ...     ["p", "q", "r", "s"],
+    ...     first=["p", "q"],
+    ...     second=["r"],
+    ...     third=True,
+    ... )
+    (['p', 'q'], ['r'], ['s'])
+    >>> partition_choices(
+    ...     [10, 20, 30],
+    ...     tens=True,
+    ... )
+    ([10, 20, 30],)
+    >>> partition_choices(
+    ...     [100, 200, 300],
+    ...     hundreds=False,
+    ... )
+    Traceback (most recent call last):
+        ...
+    ValueError: choice '100' was not assigned to any group
+    """
+    # ruff: noqa
+    # Validate that all groups are specified
+    if not groups:
+        errmsg = "At least one group must be specified"
+        raise ValueError(errmsg)
+    if any(group_name is None for group_name in groups):
+        errmsg = "group names cannot be 'None'"
+        raise ValueError(errmsg)
+
+    partitions = {group_name: [] for group_name in groups}
+    for choice in choices:
+        assigned_to = None
+        for group_name, group in groups.items():
+            if not group or group is True:
+                continue
+            if not isinstance(group, bool) and not isinstance(group, Container):
+                group = {group}
+            if choice in group:
+                if assigned_to is not None:
+                    errmsg = (
+                        f"choice '{choice}' cannot be assigned to '{group_name}', "
+                        f"since it is already assigned to '{assigned_to}'"
+                    )
+                    raise ValueError(errmsg)
+                partitions[group_name].append(choice)
+                assigned_to = group_name
+        if assigned_to is None:
+            for group_name, group in groups.items():
+                if group is True:
+                    partitions[group_name].append(choice)
+                    assigned_to = group_name
+                    break
+            else:
+                errmsg = f"choice '{choice}' was not assigned to any group"
+                raise ValueError(errmsg)
+    return tuple(partitions.values())
