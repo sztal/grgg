@@ -141,7 +141,7 @@ class RandomGraph(AbstractRandomGraph, Undirected, Unweighted):
     >>> G = ig.Graph.Erdos_Renyi(n=100, p=0.1)
     >>> model = RandomGraph(100)
     >>> fit = model.fit(G, homogeneous=True)
-    >>> fit.parameters.mu.is_homogeneous  # infers homogeneous structure
+    >>> fit.model.parameters.mu.is_homogeneous  # infers homogeneous structure
     True
     >>> jnp.isclose(fit.model.edge_density(), G.density()).item()
     True
@@ -199,6 +199,6 @@ class RandomGraph(AbstractRandomGraph, Undirected, Unweighted):
         """Erdős–Rényi initialization."""
         D = target.degree
         n = self.n_nodes
-        p = D / (n * (n - 1)) if target.reduction == "sum" else D / (n - 1)
+        p = jnp.asarray(D / (n * (n - 1)) if target.reduction == "sum" else D / (n - 1))
         theta = jnp.log((1 - p) / p)
         return param.replace(data=-theta)

@@ -160,6 +160,7 @@ filterwarnings = [
     "ignore:jax.interpreters.batching.NotMapped is deprecated:DeprecationWarning",
     "ignore::SyntaxWarning:bicm.*",
     "ignore::SyntaxWarning:NEMtropy.*",
+    "ignore::plum.resolver.MethodRedefinitionWarning",
 ]
 
 [tool.coverage.paths]
