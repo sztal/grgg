@@ -1,30 +1,21 @@
 from collections.abc import Callable
-from functools import singledispatchmethod
 from typing import TYPE_CHECKING, Any, ClassVar, Self, TypeVar
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+from scipy.sparse import sparray, spmatrix
 
 from grgg._options import options
 from grgg._typing import Integers, Reals
 from grgg.abc import AbstractModule
+from grgg.utils.dispatch import dispatch
 from grgg.utils.misc import split_kwargs
 from grgg.utils.random import RandomGenerator
 
 if TYPE_CHECKING:
     from grgg.models.base.ergm.model import AbstractErgm, E, P, Q, S, V
     from grgg.models.base.model import AbstractModel, AbstractModelModule
-
-    T = TypeVar("T", bound=AbstractModel)
-    M = TypeVar("M", bound=AbstractModelModule[T])
-    TE = TypeVar("TE", bound=AbstractErgm[P, V, E, S])
-    ME = TypeVar("ME", bound=AbstractModelModule[TE])
-
-MT = TypeVar("MT", bound="ME")
-QT = TypeVar("QT", bound="Q")
-VT = TypeVar("VT", bound="V")
-ET = TypeVar("ET", bound="E")
 
 __all__ = (
     "AbstractStatistic",
@@ -34,6 +25,13 @@ __all__ = (
     "AbstractErgmNodePairStatistic",
 )
 
+
+T = TypeVar("T", bound="AbstractModel")
+TE = TypeVar("TE", bound="AbstractErgm[P, V, E, S]")
+MT = TypeVar("MT", bound="AbstractModelModule[TE]")
+QT = TypeVar("QT", bound="Q")
+VT = TypeVar("VT", bound="V")
+ET = TypeVar("ET", bound="E")
 
 OptsT = dict[str, Any]
 ComputeKwargsT = tuple[OptsT, ...]
@@ -52,8 +50,6 @@ class AbstractStatistic[MT](AbstractModule):
     """
 
     module: eqx.AbstractVar[MT]
-
-    label: eqx.AbstractClassVar[str]
 
     def __init__(self, module: MT) -> None:
         self.module = module
@@ -261,15 +257,33 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
             return getattr(self, f"_heterogeneous_m{n}_monte_carlo")
         return getattr(self, f"_heterogeneous_m{n}_exact")
 
+    # Methods for validating input objects for observed statistics -------------------
+
     def observed(self, obj: Any, *args: Any, **kwargs: Any) -> Reals:  # noqa
         """Compute the observed value of the statistic for a given object."""
-        errmsg = f"'{self.__class__.__name__}' does not implement 'observed' method"
+        observed = self._observed(self.model, obj, *args, **kwargs)
+        return self._postprocess_observed(self.model, observed)
+
+    @dispatch
+    def _observed(self, model: Any, obj: Any, *args: Any, **kwargs: Any) -> Reals:  # noqa
+        errmsg = (
+            f"cannot compute observed value of '{self.__class__.__name__}' "
+            f"for '{type(model).__name__}' with '{type(obj).__name__}' instance"
+        )
         raise NotImplementedError(errmsg)
 
-    @singledispatchmethod
+    @dispatch
+    def _postprocess_observed(self, model: Any, observed: Reals) -> Reals:  # noqa
+        return observed
+
     def validate_object(self, obj: Any) -> Any:
         """Check if the given object is compatible with the statistic."""
-        n = self.model.n_units
+        return self._validate_object(self.model, obj)
+
+    @dispatch
+    def _validate_object(self, model: Any, obj: Any) -> Any:
+        """Check if the given object is compatible with the statistic."""
+        n = model.n_units
         try:
             if not hasattr(obj, "shape"):
                 obj = jnp.asarray(obj)
@@ -281,12 +295,26 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
             errmsg = f"object of type '{type(obj)}' is not supported"
             raise TypeError(errmsg) from exc
 
+    @_validate_object.dispatch
+    def _(self, model: Any, obj: sparray | spmatrix) -> sparray | spmatrix:
+        """Check if the given object is compatible with the statistic."""
+        n = model.n_units
+        if obj.shape != (n, n):
+            errmsg = f"expected object of shape ({n}, {n}), got {obj.shape}"
+            raise ValueError(errmsg)
+        return obj
+
     try:
         import igraph as ig
 
-        @validate_object.register
-        def _(self, obj: ig.Graph) -> ig.Graph:  # noqa
-            n = self.model.n_units
+        @_validate_object.dispatch
+        def _(self, model: Any, obj: ig.Graph) -> ig.Graph:
+            n = model.n_units
+            if obj.is_directed() and model.is_undirected:
+                errmsg = (
+                    "cannot compute statistic for undirected model with directed graph"
+                )
+                raise ValueError(errmsg)
             if obj.vcount() != n:
                 errmsg = f"expected igraph Graph with {n} vertices, got {obj.vcount()}"
                 raise ValueError(errmsg)
@@ -298,23 +326,19 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
     try:
         import networkx as nx
 
-        @validate_object.register
-        def _(self, obj: nx.Graph) -> nx.Graph:  # noqa
-            n = self.model.n_units
-            if obj.number_of_nodes() != n:
+        @_validate_object.dispatch
+        def _(self, model: Any, obj: nx.Graph | nx.DiGraph) -> nx.Graph:
+            import networkx as nx
+
+            if nx.is_directed(obj) and model.is_undirected:
                 errmsg = (
-                    f"expected networkx Graph with {n} nodes, "
-                    f"got {obj.number_of_nodes()}"
+                    "cannot compute statistic for undirected model with directed graph"
                 )
                 raise ValueError(errmsg)
-            return obj
-
-        @validate_object.register
-        def _(self, obj: nx.DiGraph) -> nx.DiGraph:  # noqa
-            n = self.model.n_units
+            n = model.n_units
             if obj.number_of_nodes() != n:
                 errmsg = (
-                    f"expected networkx DiGraph with {n} nodes, "
+                    f"expected networkx {type(obj).__name__} with {n} nodes, "
                     f"got {obj.number_of_nodes()}"
                 )
                 raise ValueError(errmsg)

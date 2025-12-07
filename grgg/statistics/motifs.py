@@ -31,7 +31,18 @@ if TYPE_CHECKING:
     MV = TypeVar("MV", bound=AbstractErgmNodeMotifs[VV])
     ME = TypeVar("ME", bound=AbstractErgmNodePairMotifs[VE])
 
-__all__ = ("AbstractErgmNodeMotifStatistic",)
+__all__ = (
+    "AbstractErgmNodeMotifStatistic",
+    "AbstractErgmNodePairMotifStatistic",
+    "AbstractErgmViewMotifStatistic",
+    "AbstractMotifStatistic",
+    "TWedgeMotif",
+    "THeadMotif",
+    "TriangleMotif",
+    "QWedgeMotif",
+    "QHeadMotif",
+    "QuadrangleMotif",
+)
 
 
 TT = TypeVar("TT", bound="TT")
@@ -86,39 +97,32 @@ class AbstractErgmNodePairMotifStatistic[ME](
 class TWedgeMotif(AbstractErgmNodeMotifStatistic):
     module: MV
 
-    label: ClassVar[str] = "twedge"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
 
 class THeadMotif(AbstractErgmNodeMotifStatistic):
     module: MV
 
-    label: ClassVar[str] = "thead"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
 
 class TriangleMotif(AbstractErgmNodeMotifStatistic):
     module: MV
 
-    label: ClassVar[str] = "triangle"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
 
 class QWedgeMotif(AbstractErgmNodeMotifStatistic):
     module: MV
 
-    label: ClassVar[str] = "qwedge"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
 
 class QHeadMotif(AbstractErgmNodeMotifStatistic):
     module: MV
 
-    label: ClassVar[str] = "qhead"
-
 
 class QuadrangleMotif(AbstractErgmNodeMotifStatistic):
     module: MV
 
-    label: ClassVar[str] = "quadrangle"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)

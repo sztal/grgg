@@ -1,10 +1,12 @@
 from abc import abstractmethod
 from copy import deepcopy
 from dataclasses import replace
-from typing import Any, ClassVar, Self, get_origin
+from typing import Any, Self
 
 import equinox as eqx
 import jax.numpy as jnp
+
+from grgg.utils.misc import get_class_fields, get_instance_fields
 
 __all__ = ("AbstractModule", "AbstractCallable", "AbstractFunction")
 
@@ -53,20 +55,12 @@ class AbstractModule(eqx.Module):
     @classmethod
     def get_class_fields(cls) -> list[str]:
         """Get the list of class fields."""
-        return [
-            name
-            for name, field in cls.__dataclass_fields__.items()
-            if get_origin(field.type) is ClassVar
-        ]
+        return get_class_fields(cls)
 
     @classmethod
     def get_instance_fields(cls) -> list[str]:
         """Get the list of instance fields."""
-        return [
-            name
-            for name, field in cls.__dataclass_fields__.items()
-            if get_origin(field.type) is not ClassVar
-        ]
+        return get_instance_fields(cls)
 
 
 class AbstractCallable(AbstractModule):

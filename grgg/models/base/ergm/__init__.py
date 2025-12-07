@@ -1,7 +1,7 @@
 from .fitting import (
-    AbstractExpectedStatistics,
-    AbstractSufficientStatistics,
+    ExpectedStatistics,
     LagrangianFit,
+    SufficientStatistics,
 )
 from .functions import AbstractErgmFunctions
 from .model import AbstractErgm, ErgmSample

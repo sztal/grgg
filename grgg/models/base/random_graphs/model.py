@@ -28,12 +28,6 @@ class AbstractRandomGraph(AbstractErgm):
     nodes_cls: eqx.AbstractClassVar[type[AbstractRandomGraphNodeView]]
     pairs_cls: eqx.AbstractClassVar[type[AbstractRandomGraphNodePairView]]
 
-    # Model functions ----------------------------------------------------------------
-
-    def edge_density(self, *args: Any, **kwargs: Any) -> float:
-        """Expected edge density of the model."""
-        return self.nodes.edge_density(*args, **kwargs)
-
     # Model fitting interface --------------------------------------------------------
 
     @dispatch

@@ -1,45 +1,18 @@
+from collections.abc import Callable
 from typing import Annotated, Any, ClassVar, Literal
 
 import equinox as eqx
 import jax.numpy as jnp
 
-from grgg._typing import IsHeterogeneous, IsHomogeneous
-from grgg.models.base.ergm import (
-    AbstractExpectedStatistics,
-    AbstractSufficientStatistics,
-)
-from grgg.models.base.model import AbstractParameters
-from grgg.models.base.observables import Degree
+from grgg._typing import IsHeterogeneous, IsHomogeneous, Real, Reals
+from grgg.models.base.model import Parameters
 from grgg.models.base.random_graphs import AbstractRandomGraph, Mu
 from grgg.models.base.traits import Undirected, Unweighted
-from grgg.utils.dispatch import dispatch
 
 from .functions import RandomGraphFunctions
 from .views import RandomGraphNodePairView, RandomGraphNodeView
 
-__all__ = (
-    "RandomGraph",
-    "RandomGraphSufficientStatistics",
-    "RandomGraphExpectedStatistics",
-)
-
-
-class RandomGraphSufficientStatistics(AbstractSufficientStatistics):
-    """Sufficient statistics for undirected random graph ERGM models."""
-
-    degree: Degree = eqx.field(
-        converter=Degree,
-        metadata={"parameter": "mu", "statistic": "nodes.degree"},
-    )
-
-
-class RandomGraphExpectedStatistics(AbstractExpectedStatistics):
-    """Expected statistics for undirected random graph ERGM models."""
-
-    degree: Degree = eqx.field(
-        converter=Degree,
-        metadata={"parameter": "mu", "statistic": "nodes.degree"},
-    )
+__all__ = ("RandomGraph",)
 
 
 class RandomGraph(AbstractRandomGraph, Undirected, Unweighted):
@@ -147,7 +120,7 @@ class RandomGraph(AbstractRandomGraph, Undirected, Unweighted):
     True
     """
 
-    class Parameters(AbstractParameters):
+    class Parameters(Parameters):
         mu: Mu = eqx.field(default_factory=lambda: Mu(), converter=Mu)
 
     n_nodes: int = eqx.field(static=True)
@@ -164,41 +137,66 @@ class RandomGraph(AbstractRandomGraph, Undirected, Unweighted):
 
     # Model fitting interface --------------------------------------------------------
 
-    @dispatch
-    def get_target_cls(
-        self,
-        method: Literal["lagrangian"],  # noqa
-    ) -> type[RandomGraphSufficientStatistics]:
-        return RandomGraphSufficientStatistics
-
-    @get_target_cls.dispatch
+    @AbstractRandomGraph._init_param.dispatch
     def _(
-        self,
-        method: Literal["least_squares"],  # noqa
-    ) -> type[RandomGraphExpectedStatistics]:
-        return RandomGraphExpectedStatistics
+        self: "RandomGraph",
+        param: Mu,
+        target: Reals,
+        homogeneous: Literal[True],  # noqa
+    ) -> Mu:
+        return self._init_erdos_renyi(param, target)
 
-    @dispatch
+    @AbstractRandomGraph._init_param.dispatch
+    def _(
+        self: "RandomGraph",
+        param: Mu,
+        target: Reals,
+        homogeneous: Literal[False],  # noqa
+    ) -> Mu:
+        return self._init_chung_lu(param, target)
+
     @eqx.filter_jit
-    def init_param(
+    def _init_chung_lu(
         self,
         param: Annotated[Mu, IsHeterogeneous],
-        target: RandomGraphSufficientStatistics | RandomGraphExpectedStatistics,
+        degree: Reals,
     ) -> Mu:
         """Chung-Lu initialization."""
-        D = target.degree
-        return param.replace(data=jnp.log(D / jnp.sqrt(jnp.sum(D))))
+        return param.replace(data=jnp.log(degree / jnp.sqrt(jnp.sum(degree))))
 
-    @init_param.dispatch
     @eqx.filter_jit
-    def _(
+    def _init_erdos_renyi(
         self,
         param: Annotated[Mu, IsHomogeneous],
-        target: RandomGraphSufficientStatistics | RandomGraphExpectedStatistics,
+        ecount: Real,
     ) -> Mu:
         """Erdős–Rényi initialization."""
-        D = target.degree
         n = self.n_nodes
-        p = jnp.asarray(D / (n * (n - 1)) if target.reduction == "sum" else D / (n - 1))
+        p = ecount / (n * (n - 1))
+        if self.is_undirected:
+            p *= 2
         theta = jnp.log((1 - p) / p)
         return param.replace(data=-theta)
+
+
+# Mapping between parameters and observables -----------------------------------------
+
+
+@Mu._get_statistic.dispatch
+def _(
+    self,  # noqa
+    model: RandomGraph,
+    homogeneous: Literal[True],  # noqa
+    method: Literal["lagrangian", "least_squares"],  # noqa
+) -> tuple[Literal["edge_count"], Callable[..., Real]]:
+    return "edge_count", model.edge_count
+
+
+@Mu._get_statistic.dispatch
+def _(
+    self,  # noqa
+    model: RandomGraph,
+    homogeneous: Literal[False],  # noqa
+    method: Literal["lagrangian", "least_squares"],  # noqa
+) -> tuple[Literal["degree"], Callable[..., Reals]]:
+    return "degree", model.nodes.degree

@@ -1,4 +1,5 @@
 from .degree import Degree
+from .edge_count import EdgeCount
 from .motifs import (
     QHeadMotif,
     QuadrangleMotif,

@@ -2,7 +2,7 @@ from collections.abc import Callable, Container, Hashable, Iterator, Mapping, Se
 from functools import partial, wraps
 from inspect import Signature, signature
 from itertools import product
-from typing import Any
+from typing import Any, ClassVar, get_origin
 
 import equinox as eqx
 import jax
@@ -12,6 +12,24 @@ from jax.scipy.special import expit
 from grgg.utils.dispatch import dispatch
 
 from grgg._typing import IntMatrix, Numbers, Real, RealMatrix, Reals, RealVector
+
+
+def get_class_fields(cls) -> list[str]:
+    """Get the list of class fields."""
+    return [
+        name
+        for name, field in cls.__dataclass_fields__.items()
+        if get_origin(field.type) is ClassVar
+    ]
+
+
+def get_instance_fields(cls) -> list[str]:
+    """Get the list of instance fields."""
+    return [
+        name
+        for name, field in cls.__dataclass_fields__.items()
+        if get_origin(field.type) is not ClassVar
+    ]
 
 
 @jax.jit

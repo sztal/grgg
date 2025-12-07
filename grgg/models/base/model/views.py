@@ -40,7 +40,7 @@ class AbstractModelView[T](AbstractModelModule[T]):
     def parameters(self) -> "T.Parameters":
         """Tuple of parameter arrays for the view."""
         return self.model.Parameters(
-            *(self.get_parameter(name) for name in self.model.parameters.names)
+            **{name: self.get_parameter(name) for name in self.model.parameters.names}
         )
 
     @property

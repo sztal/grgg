@@ -190,7 +190,7 @@ class AbstractErgmView[T](AbstractModelView[T], Shaped):
         parameters = self.model.parameters.replace(
             **{
                 name: param[indices]
-                for name, param in self.model.parameters.to_dict().items()
+                for name, param in self.model.parameters.mapping.items()
             }
         )
         model = self.model.replace(n_nodes=len(indices), parameters=parameters)
@@ -206,7 +206,7 @@ class AbstractErgmView[T](AbstractModelView[T], Shaped):
 class AbstractErgmNodeView[T](AbstractErgmView[T]):
     """Abstract base class for ERGM node views."""
 
-    motifs_cls: ClassVar[ErgmNodeMotifs] = ErgmNodeMotifs
+    motifs_cls: ClassVar[ErgmNodeMotifs] = ErgmNodeMotifs  # type: ignore
 
     @property
     def _default_homogeneous_index_args(self) -> int:
@@ -250,10 +250,6 @@ class AbstractErgmNodeView[T](AbstractErgmView[T]):
     def degree(self) -> Degree:
         """Degree statistic for the nodes in the view."""
         return self._get_statistic("degree")
-
-    def edge_density(self, *args: Any, **kwargs: Any) -> float:
-        """Expected edge density of the model."""
-        return self.degree(*args, **kwargs).mean() / (self.n_nodes - 1)
 
     @property
     @wraps(TClustering.__init__)
@@ -318,7 +314,7 @@ class AbstractErgmNodeView[T](AbstractErgmView[T]):
 class AbstractErgmNodePairView[T](AbstractErgmView[T]):
     """Abstract base class for node pair views."""
 
-    motifs_cls: ClassVar[ErgmNodePairMotifs] = ErgmNodePairMotifs
+    motifs_cls: ClassVar[ErgmNodePairMotifs] = ErgmNodePairMotifs  # type: ignore
 
     @property
     def _default_homogeneous_index_args(self) -> tuple[int, int]:

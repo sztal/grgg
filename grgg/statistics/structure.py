@@ -15,6 +15,19 @@ if TYPE_CHECKING:
     TE = TypeVar("TE", bound=AbstractErgm[P, V, E, S])
     ME = TypeVar("ME", bound=AbstractModelModule[TE])
 
+__all__ = (
+    "AbstractErgmNodeLocalStructureStatistic",
+    "TClustering",
+    "TClosure",
+    "StructuralSimilarity",
+    "TStatistics",
+    "QClustering",
+    "QClosure",
+    "StructuralComplementarity",
+    "QStatistics",
+)
+
+
 VT = TypeVar("VT", bound="V")
 
 
@@ -30,28 +43,24 @@ class AbstractErgmNodeLocalStructureStatistic[VT](AbstractErgmNodeStatistic[VT])
 class TClustering(AbstractErgmNodeLocalStructureStatistic):
     module: VT
 
-    label: ClassVar[str] = "tclust"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
 
 class TClosure(AbstractErgmNodeLocalStructureStatistic):
     module: VT
 
-    label: ClassVar[str] = "tclosure"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
 
 class StructuralSimilarity(AbstractErgmNodeLocalStructureStatistic):
     module: VT
 
-    label: ClassVar[str] = "similarity"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
 
 class TStatistics(AbstractErgmNodeLocalStructureStatistic):
     module: VT
 
-    label: ClassVar[str] = "tstats"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
 
@@ -61,26 +70,22 @@ class TStatistics(AbstractErgmNodeLocalStructureStatistic):
 class QClustering(AbstractErgmNodeLocalStructureStatistic):
     module: VT
 
-    label: ClassVar[str] = "qclust"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
 
 class QClosure(AbstractErgmNodeLocalStructureStatistic):
     module: VT
 
-    label: ClassVar[str] = "qclosure"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
 
 class StructuralComplementarity(AbstractErgmNodeLocalStructureStatistic):
     module: VT
 
-    label: ClassVar[str] = "complementarity"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)
 
 
 class QStatistics(AbstractErgmNodeLocalStructureStatistic):
     module: VT
 
-    label: ClassVar[str] = "qstats"
     supported_moments: ClassVar[tuple[int, ...]] = (1,)

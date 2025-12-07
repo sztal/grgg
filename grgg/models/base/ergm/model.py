@@ -1,17 +1,17 @@
 from dataclasses import dataclass
-from functools import cached_property
-from typing import TYPE_CHECKING, Any, TypeVar
+from functools import cached_property, wraps
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 import equinox as eqx
 import numpy as np
 from scipy.sparse import sparray
 
 from grgg._typing import Real, Reals
-from grgg.utils.dispatch import dispatch
+from grgg.statistics import EdgeCount
 
 from ..model import AbstractModel
 from ..traits import EdgeDirection, EdgeWeighting
-from .fitting import AbstractSufficientStatistics, LagrangianFit
+from .fitting import ExpectedStatistics, LagrangianFit, SufficientStatistics
 from .functions import AbstractErgmFunctions
 from .views import AbstractErgmNodePairView, AbstractErgmNodeView
 
@@ -76,6 +76,42 @@ class AbstractErgm(AbstractModel, EdgeDirection, EdgeWeighting):
         """Node pair view of the model."""
         return self.pairs_cls(self)
 
+    # Statistics ---------------------------------------------------------------------
+
+    @property
+    @wraps(EdgeCount.__init__)
+    def edge_count(self) -> EdgeCount:
+        """Edge count statistic of the model.
+
+        Examples
+        --------
+        >>> import igraph as ig
+        >>> import jax.numpy as jnp
+        >>> from grgg import RandomGraph
+        >>> n = 100
+        >>> model = RandomGraph(n)
+        >>> degree = model.nodes.degree()
+        >>> jnp.isclose(model.edge_count(), degree * n / 2).item()
+        True
+        >>> model = RandomGraph(n, mu=jnp.zeros(n))
+        >>> degree = model.nodes.degree()
+        >>> jnp.isclose(model.edge_count(), degree.sum() / 2).item()
+        True
+        >>> G = ig.Graph.Full(n)
+        >>> (model.edge_count.observed(G) == G.ecount()).item()
+        True
+        """
+        return EdgeCount(self)
+
+    def edge_density(self, *args: Any, **kwargs: Any) -> float:
+        """Expected edge density of the model."""
+        n = self.n_nodes
+        ecount = self.edge_count(*args, **kwargs).mean() / (self.n_nodes - 1)
+        density = ecount / (n * (n - 1))
+        if self.is_undirected:
+            density *= 2
+        return density
+
     # Model functions ----------------------------------------------------------------
 
     def free_energy(self, *args: Any, **kwargs: Any) -> Reals:
@@ -96,9 +132,23 @@ class AbstractErgm(AbstractModel, EdgeDirection, EdgeWeighting):
 
     # Model fitting interface --------------------------------------------------------
 
-    @dispatch
-    def fit(self, target: AbstractSufficientStatistics) -> LagrangianFit:
+    @AbstractModel.fit.dispatch
+    def _(self: "AbstractErgm", target: SufficientStatistics) -> LagrangianFit:
         return LagrangianFit(self, target)
+
+    @AbstractModel.get_target_cls.dispatch
+    def _(
+        self: "AbstractErgm",
+        method: Literal["lagrangian"],  # noqa
+    ) -> type[SufficientStatistics]:
+        return SufficientStatistics
+
+    @AbstractModel.get_target_cls.dispatch
+    def _(
+        self: "AbstractErgm",
+        method: Literal["least_squares"],  # noqa
+    ) -> type[ExpectedStatistics]:
+        return ExpectedStatistics
 
 
 # ERGM Sample ------------------------------------------------------------------------

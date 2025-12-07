@@ -3,36 +3,32 @@ from collections.abc import Container
 from typing import Any, Self, TypeVar
 
 import equinox as eqx
-import jax
 
-from grgg.models.base.observables import AbstractObservables
 from grgg.utils.dispatch import dispatch
-from grgg.utils.dotpath import dotget
 from grgg.utils.misc import partition_choices
+from grgg.utils.variables import ArrayBundle
 
-from .fitting import ModelFit
+from .fitting import AbstractModelFit, LeastSquaresFit
 from .functions import AbstractModelFunctions
 from .modules import AbstractModelModule
-from .parameters import AbstractParameter, AbstractParameters
+from .parameters import AbstractParameter, Parameters
 
 __all__ = ("AbstractModel",)
 
-O = TypeVar("O", bound="AbstractObservables")
+O = TypeVar("O", bound="ArrayBundle")
 
 
 class AbstractModel(AbstractModelModule[Self]):
     """Abstract base class for models."""
 
-    Parameters: eqx.AbstractClassVar[type[AbstractParameters]]
+    Parameters: eqx.AbstractClassVar[type[Parameters]]
     functions: eqx.AbstractClassVar[type[AbstractModelFunctions]]
 
     n_units: eqx.AbstractVar[int]
     parameters: eqx.AbstractVar["Self.Parameters"]
 
     @abstractmethod
-    def __init__(
-        self, parameters: AbstractParameters | None = None, **kwargs: Any
-    ) -> None:
+    def __init__(self, parameters: Parameters | None = None, **kwargs: Any) -> None:
         if parameters is not None and kwargs:
             errmsg = "cannot specify both 'parameters' and parameter keyword arguments"
             raise ValueError(errmsg)
@@ -53,7 +49,7 @@ class AbstractModel(AbstractModelModule[Self]):
         if not self.parameters:
             errmsg = "model must have at least one parameter."
             raise ValueError(errmsg)
-        for name, parameter in self.parameters.to_dict().items():
+        for name, parameter in self.parameters.mapping.items():
             if not parameter.is_scalar and len(parameter) != self.n_units:
                 errmsg = (
                     f"all non-scalar parameters must have leading axis size equal to "
@@ -112,16 +108,17 @@ class AbstractModel(AbstractModelModule[Self]):
         return "least_squares"
 
     @dispatch.abstract
-    def get_target_cls(self, method: str) -> type[AbstractObservables]:
+    def get_target_cls(self, method: str) -> type[ArrayBundle]:
         """Get the target statistics class for a given fitting method."""
 
-    @dispatch
     def prepare_fit_target(
         self,
         method: str,
         data: Any,
-        **kwargs: Any,
-    ) -> AbstractObservables:
+        *,
+        homogeneous: bool | str | Container[str] | None = None,
+        heterogeneous: bool | str | Container[str] | None = None,
+    ) -> ArrayBundle:
         """Prepare target statistics for model fitting.
 
         Parameters
@@ -133,51 +130,35 @@ class AbstractModel(AbstractModelModule[Self]):
         **kwargs
             Additional arguments passed to :meth:`~prepare_fit_target`.
         """
-        target_cls = self.get_target_cls(method)
+        if homogeneous is None and heterogeneous is None:
+            _homogeneous = []
+            for name, param in self.parameters.mapping.items():
+                if param.is_homogeneous:
+                    _homogeneous.append(name)
+        else:
+            if homogeneous is False and heterogeneous is None:
+                heterogeneous = True
+            elif heterogeneous is False and homogeneous is None:
+                homogeneous = True
+            _homogeneous, _ = partition_choices(
+                self.parameters.names,
+                homogeneous=homogeneous,
+                heterogeneous=heterogeneous,
+            )
         observables = {}
-        for name, field in target_cls.get_fields().items():
-            statmethod = dotget(self, field.metadata["statistic"])
+        for name, param in self.parameters.mapping.items():
+            stat, statmethod = param.get_statistic(
+                self, method, homogeneous=name in _homogeneous
+            )
             observable = statmethod.observed(data)
-            observables[name] = observable
-        target = target_cls(**observables)
-        return self.prepare_fit_target(target, **kwargs)
-
-    @prepare_fit_target.dispatch
-    def _(
-        self,
-        target: AbstractObservables,
-        *,
-        homogeneous: bool | str | Container[str] | None = None,
-        heterogeneous: bool | str | Container[str] | None = None,
-    ) -> AbstractObservables:
-        """Prepare target statistics for model fitting.
-
-        Parameters
-        ----------
-        target
-            Target statistics.
-        homogeneous
-            Observables to treat as homogeneous.
-        heterogeneous
-            Observables to treat as heterogeneous.
-        """
-        if homogeneous is None and heterogeneous is None or homogeneous is False:
-            heterogeneous = True
-        if heterogeneous is False and homogeneous is None:
-            homogeneous = True
-        _homogeneous, _ = partition_choices(
-            target.names, homogeneous=homogeneous, heterogeneous=heterogeneous
-        )
-        stats = {
-            name: target.reduce(stat) if name in _homogeneous else stat
-            for name, stat in target.to_dict().items()
-        }
-        return target.replace(**stats)
+            observables[stat] = observable
+        target_cls = self.get_target_cls(method)
+        return target_cls(**observables)
 
     @dispatch
-    def fit(self, target: AbstractObservables) -> ModelFit:
+    def fit(self, target: ArrayBundle) -> LeastSquaresFit:
         """Prepare a model fitting procedure."""
-        return ModelFit(self, target)
+        return LeastSquaresFit(self, target)
 
     @fit.dispatch
     def _(
@@ -187,7 +168,7 @@ class AbstractModel(AbstractModelModule[Self]):
         method: str | None = None,
         init_params: bool = True,
         **kwargs: Any,
-    ) -> ModelFit:
+    ) -> AbstractModelFit:
         """Prepare a model fitting procedure."""
         if not method:
             method = self.get_default_fit_method(data)
@@ -196,19 +177,32 @@ class AbstractModel(AbstractModelModule[Self]):
             self = self.init_params(target)
         return self.fit(target)
 
-    def init_params(self, target: AbstractObservables) -> Self:
+    def init_params(self, target: ArrayBundle) -> Self:
         """Initialize model parameters for fitting."""
-        params = jax.tree.map(
-            lambda p: self.init_param(p, target),
-            self.model.parameters,
-            is_leaf=lambda x: isinstance(x, AbstractParameter),
-        )
-        return self.replace(parameters=params)
+        params = {}
+        for param, stat in zip(
+            self.model.parameters.mapping.items(),
+            target,
+            strict=True,
+        ):
+            name, param = param
+            params[name] = self.init_param(param, stat)
+        return self.replace(parameters=self.parameters.replace(**params))
+
+    def init_param(
+        self,
+        param: AbstractParameter,
+        target: ArrayBundle,
+    ) -> AbstractParameter:
+        """Abstract method to initialize model parameters for fitting."""
+        return self._init_param(param, target, target.shape == ())
 
     @dispatch.abstract
-    def init_param(
+    def _init_param(
+        self,
         param: AbstractParameter,
-        target: AbstractObservables,
+        target: ArrayBundle,
+        homogeneous: bool,
     ) -> AbstractParameter:
         """Abstract method to initialize model parameters for fitting."""
 

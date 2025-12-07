@@ -1,13 +1,15 @@
 from abc import abstractmethod
+from collections.abc import Callable
 from typing import Any, ClassVar
 
 import equinox as eqx
 import jax.numpy as jnp
 
-from grgg._typing import Real, Reals
-from grgg.utils.variables import ArrayBundle, Constraints, Variable
+from grgg._typing import Numbers, Real, Reals
+from grgg.utils.dispatch import dispatch
+from grgg.utils.variables import AbstractArrayBundle, Constraints, Variable
 
-__all__ = ("AbstractParameter", "AbstractParameters")
+__all__ = ("AbstractParameter", "Parameters")
 
 
 class AbstractParameter(Variable):
@@ -44,9 +46,52 @@ class AbstractParameter(Variable):
         """Whether the parameter is heterogeneous (not all values identical)."""
         return not self.is_homogeneous
 
+    def get_statistic(
+        self, model: Any, method: str, *, homogeneous: bool | str | None = None
+    ) -> tuple[str, Callable[..., Numbers]]:
+        """Get observable statistics corresponding to the parameter.
 
-class AbstractParameters(ArrayBundle[AbstractParameter]):
-    """Abstract base class for model parameters container."""
+        Parameters
+        ----------
+        model
+            The model to get statistics from.
+        method
+            The fitting method to use.
+        homogeneous
+            Whether to get homogeneous statistics.
+            Defaults to the parameter's homogeneity.
+
+        Returns
+        -------
+        name, statmethod
+            The name and statistic method corresponding to the parameter.
+        """
+        if homogeneous is None:
+            homogeneous = self.is_homogeneous
+        return self._get_statistic(model, homogeneous, method)
+
+    @dispatch.abstract
+    def _get_statistic(
+        self,
+        model: Any,  # noqa
+        homogeneous: bool,  # noqa
+        method: str,  # noqa
+    ) -> tuple[str, Callable[..., Numbers]]:
+        """Get observable statistics corresponding to the parameter."""
+
+
+class Parameters(AbstractArrayBundle[AbstractParameter]):
+    """Model parameters container."""
+
+    @property
+    def mapping(self) -> dict[str, AbstractParameter]:
+        """Mapping of parameter names to parameter objects."""
+        return {name: getattr(self, name) for name in self.names}
+
+    @property
+    def names(self) -> list[str]:
+        """List of parameter names."""
+        return list(self.get_instance_fields())
 
     @property
     def are_heterogeneous(self) -> bool:
