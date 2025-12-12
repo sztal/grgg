@@ -1,8 +1,4 @@
-from .fitting import (
-    ExpectedStatistics,
-    LagrangianFit,
-    SufficientStatistics,
-)
+from .fitting import LagrangianFit
 from .functions import AbstractErgmFunctions
 from .model import AbstractErgm, ErgmSample
 from .motifs import (

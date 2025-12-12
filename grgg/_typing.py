@@ -1,9 +1,14 @@
+from collections.abc import Callable
+from typing import Any
+
 import jax.numpy as jnp
 from beartype.vale import Is, IsAttr, IsEqual
-from jaxtyping import Array, Bool, Integer, Num
+from jaxtyping import Array, ArrayLike, Bool, Integer, Num, PyTree  # noqa
 from jaxtyping import Float as _Float
 
 __all__ = (
+    "PyTree",
+    "ArrayLike",
     "Reals",
     "Real",
     "RealVector",
@@ -26,6 +31,7 @@ __all__ = (
     "Matrix",
     "IsHomogeneous",
     "IsHeterogeneous",
+    "ObjectiveFunction",
 )
 
 Numbers = Num[Array, "..."]  # Array of numeric values (float or int)
@@ -56,3 +62,5 @@ BoolMatrix = Bool[Array, "#rows #cols"]  # 2D array of boolean values
 IsScalar = Is[lambda x: jnp.asarray(x).shape == ()]
 IsHomogeneous = IsAttr["is_homogeneous", IsEqual[True]]
 IsHeterogeneous = IsAttr["is_heterogeneous", IsEqual[True]]
+
+ObjectiveFunction = Callable[[PyTree[Numbers], PyTree[Any]], Float]

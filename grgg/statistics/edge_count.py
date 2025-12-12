@@ -33,18 +33,20 @@ class EdgeCount(AbstractErgmStatistic):
         return ecount
 
     @dispatch
-    def _observed(self, model: Any, obj: Any, *args: Any, **kwargs: Any) -> Reals:
-        return super()._observed(model, obj, *args, **kwargs)
-
-    @_observed.dispatch
-    def _(self, _, obj: jnp.ndarray) -> Reals:
+    def _observed(self, _, obj: Any) -> Reals:
         obj = self.validate_object(obj)
-        return jnp.sum(obj)
+        ecount = jnp.sum(obj)
+        if self.model.is_undirected:
+            ecount = ecount / 2
+        return ecount
 
     @_observed.dispatch
     def _(self, _, obj: spmatrix | sparray) -> Reals:
         obj = self.validate_object(obj)
-        return jnp.asarray(obj.data.sum())
+        ecount = jnp.asarray(obj.data.sum())
+        if self.model.is_undirected:
+            ecount = ecount / 2
+        return ecount
 
     try:
         import igraph as ig

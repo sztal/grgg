@@ -84,6 +84,8 @@ class AbstractStatistic[MT](AbstractModule):
 
     def postprocess(self, moment: Reals) -> Reals:
         """Post-process the computed moments."""
+        if self.normalize:
+            moment = moment / self.model.n_units
         return moment
 
     def _get_moment_method(self, n: int) -> MomentMethodT:
@@ -138,6 +140,7 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
     average: bool = eqx.field(static=True)
     same_seed: bool = eqx.field(static=True)
     key: Integers | None
+    normalize: bool = eqx.field(static=True)
 
     supports_monte_carlo: ClassVar[bool] = True
 
@@ -147,6 +150,7 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
         *,
         key: Integers | None = None,
         rng: Integers | None = None,
+        normalize: bool = False,
         **kwargs: Any,
     ) -> None:
         """ERGM statistic.
@@ -175,6 +179,9 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
         key, rng
             The random key (or generator) to use for sampling-based estimates.
             `rng` is an alias for `key`.
+        normalize
+            Whether to normalize the statistic by the number of nodes.
+            This is useful for avoiding overflow for large graphs.
         """
         if not self.supports_monte_carlo:
             if kwargs.get((field := "mc"), False):
@@ -200,6 +207,7 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
         if isinstance(key, RandomGenerator):
             key = key.child
         self.key = RandomGenerator.make_key(key) if self.use_mc else None
+        self.normalize = normalize
 
     @property
     def use_mc(self) -> bool:
@@ -274,6 +282,8 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
 
     @dispatch
     def _postprocess_observed(self, model: Any, observed: Reals) -> Reals:  # noqa
+        if self.normalize:
+            observed = observed / model.n_units
         return observed
 
     def validate_object(self, obj: Any) -> Any:

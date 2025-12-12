@@ -3,7 +3,6 @@ from typing import Any, Self, TypeVar
 
 import equinox as eqx
 import jax.numpy as jnp
-from jaxtyping import ArrayLike as _ArrayLike
 from jaxtyping import DTypeLike
 
 from grgg.abc import AbstractModule
@@ -12,10 +11,10 @@ from grgg.utils.misc import format_array
 
 from .variable import Variable
 
-__all__ = ("ArrayBundle", "AbstractArrayBundle")
+__all__ = ("AbstractArrayBundle", "ArrayBundle", "FixedArrayBundle")
 
 
-ArrayLike = _ArrayLike | Variable
+ArrayLike = jnp.ndarray | Variable
 
 A = TypeVar("A", bound=ArrayLike)
 
@@ -86,6 +85,21 @@ class AbstractArrayBundle(AbstractModule, Sequence[A]):
         """Return `self` with arrays cast to a common data type."""
         return self.astype(self.dtype)
 
+    def select(self, *names: str) -> "ArrayBundle":
+        """Select a subset of arrays by name.
+
+        Parameters
+        ----------
+        names
+            Names of the arrays to select.
+
+        Returns
+        -------
+        ArrayBundle
+            A new bundle containing only the selected arrays.
+        """
+        return ArrayBundle(**{name: self.mapping[name] for name in names})
+
 
 class ArrayBundle[A](AbstractArrayBundle[A]):
     """Bundle of named arrays accessible by index or name.
@@ -154,3 +168,17 @@ class ArrayBundle[A](AbstractArrayBundle[A]):
     def mapping(self) -> dict[str, A]:
         """Mapping of names to arrays."""
         return dict(zip(self.names, self.arrays, strict=True))
+
+
+class FixedArrayBundle(AbstractArrayBundle[A]):
+    """Bundle of named arrays with fixed names."""
+
+    @property
+    def mapping(self) -> dict[str, A]:
+        """Mapping of names to arrays."""
+        return {name: getattr(self, name) for name in self.names}
+
+    @property
+    def names(self) -> list[str]:
+        """Names of the arrays in the bundle."""
+        return list(self.get_instance_fields())

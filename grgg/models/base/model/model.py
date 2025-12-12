@@ -1,17 +1,19 @@
 from abc import abstractmethod
-from collections.abc import Container
-from typing import Any, Self, TypeVar
+from typing import Any, Literal, Self, TypeVar
 
 import equinox as eqx
+import jax.numpy as jnp
 
+from grgg._typing import ArrayLike
 from grgg.utils.dispatch import dispatch
-from grgg.utils.misc import partition_choices
+from grgg.utils.random import RandomGenerator
+from grgg.utils.validation import validate
 from grgg.utils.variables import ArrayBundle
 
 from .fitting import AbstractModelFit, LeastSquaresFit
 from .functions import AbstractModelFunctions
 from .modules import AbstractModelModule
-from .parameters import AbstractParameter, Parameters
+from .parameters import AbstractObservables, AbstractParameters
 
 __all__ = ("AbstractModel",)
 
@@ -21,14 +23,17 @@ O = TypeVar("O", bound="ArrayBundle")
 class AbstractModel(AbstractModelModule[Self]):
     """Abstract base class for models."""
 
-    Parameters: eqx.AbstractClassVar[type[Parameters]]
+    Parameters: eqx.AbstractClassVar[type[AbstractParameters]]
+    Observables: eqx.AbstractClassVar[type[AbstractObservables]]
     functions: eqx.AbstractClassVar[type[AbstractModelFunctions]]
 
     n_units: eqx.AbstractVar[int]
     parameters: eqx.AbstractVar["Self.Parameters"]
 
     @abstractmethod
-    def __init__(self, parameters: Parameters | None = None, **kwargs: Any) -> None:
+    def __init__(
+        self, parameters: AbstractParameters | None = None, **kwargs: Any
+    ) -> None:
         if parameters is not None and kwargs:
             errmsg = "cannot specify both 'parameters' and parameter keyword arguments"
             raise ValueError(errmsg)
@@ -107,104 +112,68 @@ class AbstractModel(AbstractModelModule[Self]):
         """Get the default fitting method for a given model and target statistics."""
         return "least_squares"
 
-    @dispatch.abstract
-    def get_target_cls(self, method: str) -> type[ArrayBundle]:
-        """Get the target statistics class for a given fitting method."""
+    @dispatch
+    def get_fit_cls(self, method: Literal["least_squares"]) -> type[LeastSquaresFit]:  # noqa
+        """Get the default fitting class for a given model and fitting method."""
+        return LeastSquaresFit
 
-    def prepare_fit_target(
+    @validate
+    def fit(
         self,
-        method: str,
-        data: Any,
+        obj: Any,
+        default: Literal["homogeneous", "heterogeneous"] = "homogeneous",
         *,
-        homogeneous: bool | str | Container[str] | None = None,
-        heterogeneous: bool | str | Container[str] | None = None,
-    ) -> ArrayBundle:
-        """Prepare target statistics for model fitting.
+        every: bool = True,
+        method: str | None = None,
+        rng: RandomGenerator | None = None,
+        **initializers: str | ArrayLike,
+    ) -> AbstractModelFit:
+        """Instantiate model fitting interface.
 
         Parameters
         ----------
+        obj
+            Object from which to derive target statistics.
         method
-            The fitting method to use.
-        data
-            The data to fit the model to.
-        **kwargs
-            Additional arguments passed to :meth:`~prepare_fit_target`.
+            Fitting method to use. If `None`, uses the model's default fitting method.
+        *args, **kwargs
+            Additional arguments to passed to :meth:`AbstractModelFit.init` method.
+            No initialization is done if both `*args` and `**kwargs` are empty.
         """
-        if homogeneous is None and heterogeneous is None:
-            _homogeneous = []
-            for name, param in self.parameters.mapping.items():
-                if param.is_homogeneous:
-                    _homogeneous.append(name)
+        if method is None:
+            method = self.get_default_fit_method(obj)
+        if isinstance(obj, self.Observables):
+            target = obj
         else:
-            if homogeneous is False and heterogeneous is None:
-                heterogeneous = True
-            elif heterogeneous is False and homogeneous is None:
-                homogeneous = True
-            _homogeneous, _ = partition_choices(
-                self.parameters.names,
-                homogeneous=homogeneous,
-                heterogeneous=heterogeneous,
-            )
-        observables = {}
-        for name, param in self.parameters.mapping.items():
-            stat, statmethod = param.get_statistic(
-                self, method, homogeneous=name in _homogeneous
-            )
-            observable = statmethod.observed(data)
-            observables[stat] = observable
-        target_cls = self.get_target_cls(method)
-        return target_cls(**observables)
-
-    @dispatch
-    def fit(self, target: ArrayBundle) -> LeastSquaresFit:
-        """Prepare a model fitting procedure."""
-        return LeastSquaresFit(self, target)
-
-    @fit.dispatch
-    def _(
-        self,
-        data: Any,
-        *args: Any,
-        method: str | None = None,
-        init_params: bool = True,
-        **kwargs: Any,
-    ) -> AbstractModelFit:
-        """Prepare a model fitting procedure."""
-        if not method:
-            method = self.get_default_fit_method(data)
-        target = self.prepare_fit_target(method, data, *args, **kwargs)
-        if init_params:
-            self = self.init_params(target)
-        return self.fit(target)
-
-    def init_params(self, target: ArrayBundle) -> Self:
-        """Initialize model parameters for fitting."""
+            # Handle extraction of target statistics from object
+            target = {}
+            for param in self.parameters:
+                stat, statmethod = param.get_statistic(self, method, homogeneous=False)
+                if stat in target:
+                    continue
+                statistic = statmethod.observed(obj)
+                target[stat] = statistic
+            target = self.Observables(**target)
+        # Handle parameter initialization
         params = {}
-        for param, stat in zip(
-            self.model.parameters.mapping.items(),
-            target,
-            strict=True,
-        ):
-            name, param = param
-            params[name] = self.init_param(param, stat)
-        return self.replace(parameters=self.parameters.replace(**params))
-
-    def init_param(
-        self,
-        param: AbstractParameter,
-        target: ArrayBundle,
-    ) -> AbstractParameter:
-        """Abstract method to initialize model parameters for fitting."""
-        return self._init_param(param, target, target.shape == ())
-
-    @dispatch.abstract
-    def _init_param(
-        self,
-        param: AbstractParameter,
-        target: ArrayBundle,
-        homogeneous: bool,
-    ) -> AbstractParameter:
-        """Abstract method to initialize model parameters for fitting."""
+        for name, param in self.parameters.mapping.items():
+            if not every and name not in initializers:
+                continue
+            initializer = initializers.get(name, default)
+            if not isinstance(initializer, str):
+                value = jnp.asarray(initializer).astype(float)
+            else:
+                try:
+                    value = param.initialize(self, target, initializer, rng=rng)
+                except TypeError as exc:
+                    if "argument 'rng'" in str(exc):
+                        value = param.initialize(self, target, initializer)
+            params[name] = value
+        params = self.parameters.replace(**params)
+        model = self.replace(parameters=params)
+        fit_cls = self.get_fit_cls(method)
+        fit = fit_cls(model, target)
+        return fit
 
     # Model sampling interface -------------------------------------------------------
 

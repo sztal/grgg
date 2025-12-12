@@ -11,7 +11,7 @@ from grgg.statistics import EdgeCount
 
 from ..model import AbstractModel
 from ..traits import EdgeDirection, EdgeWeighting
-from .fitting import ExpectedStatistics, LagrangianFit, SufficientStatistics
+from .fitting import LagrangianFit
 from .functions import AbstractErgmFunctions
 from .views import AbstractErgmNodePairView, AbstractErgmNodeView
 
@@ -106,8 +106,10 @@ class AbstractErgm(AbstractModel, EdgeDirection, EdgeWeighting):
     def edge_density(self, *args: Any, **kwargs: Any) -> float:
         """Expected edge density of the model."""
         n = self.n_nodes
-        ecount = self.edge_count(*args, **kwargs).mean() / (self.n_nodes - 1)
-        density = ecount / (n * (n - 1))
+        ecount = self.edge_count(*args, **kwargs).mean()
+        density = ecount / (n - 1)
+        if not kwargs.get("normalized"):
+            density /= n
         if self.is_undirected:
             density *= 2
         return density
@@ -132,23 +134,9 @@ class AbstractErgm(AbstractModel, EdgeDirection, EdgeWeighting):
 
     # Model fitting interface --------------------------------------------------------
 
-    @AbstractModel.fit.dispatch
-    def _(self: "AbstractErgm", target: SufficientStatistics) -> LagrangianFit:
-        return LagrangianFit(self, target)
-
-    @AbstractModel.get_target_cls.dispatch
-    def _(
-        self: "AbstractErgm",
-        method: Literal["lagrangian"],  # noqa
-    ) -> type[SufficientStatistics]:
-        return SufficientStatistics
-
-    @AbstractModel.get_target_cls.dispatch
-    def _(
-        self: "AbstractErgm",
-        method: Literal["least_squares"],  # noqa
-    ) -> type[ExpectedStatistics]:
-        return ExpectedStatistics
+    @AbstractModel.get_fit_cls.dispatch
+    def _(self: "AbstractErgm", method: Literal["lagrangian"]) -> type[LagrangianFit]:  # noqa
+        return LagrangianFit
 
 
 # ERGM Sample ------------------------------------------------------------------------

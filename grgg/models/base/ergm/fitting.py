@@ -1,79 +1,52 @@
-from collections.abc import Callable, Mapping
-from typing import Any, ClassVar, Literal, TypeVar
+from collections.abc import Mapping
+from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import ArrayLike
+from jaxtyping import PyTree
 
-from grgg._typing import Number, Numbers, Real
-from grgg.utils.dispatch import dispatch
+from grgg._typing import Real
 from grgg.utils.variables import ArrayBundle
 
 from ..model import AbstractModelFit
 
-__all__ = (
-    "SufficientStatistics",
-    "ExpectedStatistics",
-    "LagrangianFit",
-)
+if TYPE_CHECKING:
+    from .model import AbstractErgm
+
+__all__ = ("LagrangianFit",)
 
 
 T = TypeVar("T", bound="AbstractErgm")
-FT = TypeVar("FT", bound="AbstractErgmFitTarget")
-SS = TypeVar("SS", bound="SufficientStatistics")
-OS = TypeVar("OS", bound="ExpectedStatistics")
-
-
-class AbstractErgmFitTarget(ArrayBundle[Numbers]):
-    """Abstract base class for ERGM fitting targets."""
-
-    reduction: eqx.AbstractClassVar[Literal["sum", "mean"]]
-
-    def reduce(self, statistic: ArrayLike) -> Number:
-        """Reduce statistic according to the specified reduction method."""
-        return self._reduce(self.reduction, statistic)
-
-    @dispatch.abstract
-    def _reduce(self, _: Literal["sum", "mean"], statistic: Any) -> Number:
-        """Implementation of reduction methods."""
-
-    @_reduce.dispatch
-    @eqx.filter_jit
-    def _(self, _: Literal["sum"], statistic: Any) -> Number:
-        return jnp.sum(statistic)
-
-    @_reduce.dispatch
-    @eqx.filter_jit
-    def _(self, _: Literal["mean"], statistic: Any) -> Number:
-        return jnp.mean(statistic)
-
-
-class ExpectedStatistics(AbstractErgmFitTarget):
-    """Abstract base class for expected statistics used in ERGM fitting."""
-
-    reduction: ClassVar[Literal["mean"]] = "mean"
-
-
-class SufficientStatistics(AbstractErgmFitTarget):
-    """Abstract base class for sufficient statistics used in ERGM fitting."""
-
-    reduction: ClassVar[Literal["sum"]] = "sum"
 
 
 class LagrangianFit[T, SS](AbstractModelFit[T, SS]):
     """ERGM model fit based on the model Lagrangian."""
 
-    target: SufficientStatistics
+    model: T
+    target: ArrayBundle
     method: ClassVar[str] = "lagrangian"
 
     @property
-    def sufficient_statistics(self) -> SufficientStatistics:
+    def sufficient_statistics(self) -> ArrayBundle:
         """Sufficient statistics used for fitting (alias for `self.target`)."""
         return self.target
 
-    def hamiltonian(self) -> Real:
+    def hamiltonian(
+        self,
+        model: "AbstractErgm | None" = None,
+        *,
+        normalize: bool = False,
+    ) -> Real:
         """Compute the Hamiltonian of the model.
+
+        Parameters
+        ----------
+        model
+            The model to compute the Hamiltonian for.
+            If `None`, uses the model associated with this fit.
+        normalize
+            Whether to normalize the Hamiltonian by the number of nodes.
 
         Examples
         --------
@@ -88,29 +61,47 @@ class LagrangianFit[T, SS](AbstractModelFit[T, SS]):
         >>> model = RandomGraph(n)
 
         Homogeneous (Erdős-Rényi) case.
-        >>> fit = model.fit(G, homogeneous=True)
+        >>> fit = model.fit(G, "homogeneous")
         >>> H = fit.hamiltonian()
         >>> H_naive = fit.model.mu.theta * G.ecount()
         >>> jnp.allclose(H, H_naive).item()
         True
 
         Heterogeneous (soft configuration model) case.
-        >>> fit = model.fit(G, heterogeneous=True)
+        >>> fit = model.fit(G, "heterogeneous")
         >>> H = fit.hamiltonian()
         >>> H_naive = jnp.sum(fit.model.mu.theta * jnp.array(G.degree()))
         >>> jnp.allclose(H, H_naive).item()
         True
         """
+        if model is None:
+            model = self.model  # type: ignore[assignment]
         stats = self.sufficient_statistics
+        if normalize:
+            stats = stats.normalize(model.n_nodes)
         H = 0.0
-        for param in self.model.parameters:
-            stat, _ = param.get_statistic(self.model, self.method)
+        for param in model.parameters:
+            statname, _ = param.get_statistic(model, self.method)
             # 'param.theta' is Lagrange multiplier
-            H += jnp.sum(param.theta * stats[stat])
+            hvec = param.theta * stats[statname]
+            H += jnp.sum(hvec)
         return H
 
-    def lagrangian(self) -> Real:
+    def lagrangian(
+        self,
+        model: "AbstractErgm | None" = None,
+        *,
+        normalize: bool = False,
+    ) -> Real:
         """Compute the Lagrangian of the model.
+
+        Parameters
+        ----------
+        model
+            The model to compute the Lagrangian for.
+            If `None`, uses the model associated with this fit.
+        normalize
+            Whether to normalize the Lagrangian by the number of nodes.
 
         Examples
         --------
@@ -123,74 +114,105 @@ class LagrangianFit[T, SS](AbstractModelFit[T, SS]):
         >>> rng = RandomGenerator(0)
         >>> n = 1000
         >>> G = ig.Graph.Erdos_Renyi(n, p=10/n)
+        >>> def naive_lagrangian(model, G, normalize=False):
+        ...     if model.is_homogeneous:
+        ...         H = model.mu.theta * G.ecount()
+        ...     else:
+        ...         H = jnp.sum(model.mu.theta * jnp.array(G.degree()))
+        ...     F = model.free_energy()
+        ...     if normalize:
+        ...         H /= model.n_nodes
+        ...         F /= model.n_nodes
+        ...     return H - F
 
         Homogeneous (Erdős-Rényi) case.
-        >>> fit = RandomGraph(n).fit(G, homogeneous=True)
-        >>> objective = fit.define_objective()
+        >>> fit = RandomGraph(n).fit(G, mu=0)
+        >>> jnp.isclose(fit.lagrangian(), naive_lagrangian(fit.model, G)).item()
+        True
+        >>> # Lagrangian objective is normalized by default
+        >>> # See next section of this docstring for details.
+        >>> objective = fit.define_objective(normalize=False)
         >>> grad = jax.grad(objective)(fit.model)
-        >>> def lagrangian(model):
-        ...     return model.lagrangian(fit.sufficient_statistics)
-        >>> grad_naive = jax.grad(lagrangian)(fit.model)
+        >>> grad_naive = jax.grad(naive_lagrangian)(fit.model, G)
         >>> g, g_naive = grad.mu.data, grad_naive.mu.data
-        >>> jnp.allclose(g, g_naive, rtol=1e-3).item()
+        >>> jnp.allclose(g, g_naive, atol=1e-3, rtol=1e-3).item()
         True
 
         Heterogeneous (soft configuration model) case.
-        >>> fit = RandomGraph(n).fit(G, heterogeneous=True)
-        >>> objective = fit.define_objective()
+        >>> fit = RandomGraph(n).fit(G, mu="zeros")
+        >>> jnp.isclose(fit.lagrangian(), naive_lagrangian(fit.model, G)).item()
+        True
+        >>> objective = fit.define_objective(normalize=False)
         >>> grad = jax.grad(objective)(fit.model)
-        >>> def lagrangian(model):
-        ...     return model.lagrangian(fit.sufficient_statistics)
-        >>> grad_naive = jax.grad(lagrangian)(fit.model)
+        >>> grad_naive = jax.grad(naive_lagrangian)(fit.model, G)
         >>> g, g_naive = grad.mu.data, grad_naive.mu.data
-        >>> jnp.allclose(g, g_naive, rtol=1e-2).item()
+        >>> jnp.allclose(g, g_naive, atol=1e-3, rtol=1e-2).item()
+        True
+
+        Lagrangians (and Hamiltonians) can be normalized by the number of nodes.
+        This is useful, for instance, for preventing overflows for computations on
+        very large graphs (e.g. during parameter optimization).
+
+        Homogeneous case with normalization.
+        >>> fit = RandomGraph(n).fit(G, mu=0)
+        >>> L = fit.lagrangian(normalize=True)
+        >>> L_naive = naive_lagrangian(fit.model, G, normalize=True)
+        >>> jnp.isclose(L, L_naive).item()
+        True
+        >>> objective = fit.define_objective(normalize=True)
+        >>> grad = jax.grad(objective)(fit.model)
+        >>> grad_naive = eqx.filter_grad(naive_lagrangian)(fit.model, G, normalize=True)
+        >>> g, g_naive = grad.mu.data, grad_naive.mu.data
+        >>> jnp.allclose(g, g_naive, atol=1e-3, rtol=1e-3).item()
         True
         """
-        H = self.hamiltonian()
-        F = self.model.free_energy()
+        if model is None:
+            model = self.model  # type: ignore[assignment]
+        H = self.hamiltonian(model, normalize=normalize)
+        F = model.free_energy(normalize=normalize)
         return H - F
 
-    @dispatch
     def define_objective(
         self,
-        target: SufficientStatistics,  # noqa
-    ) -> "ObjectiveT":
-        """Define Lagrangian objective function."""
-        return self._define_objective()
-
-    def _define_objective(
-        self,
+        *,
+        normalize: bool = True,
         options: Mapping[str, Any] | None = None,
         **stats_options: Mapping[str, Any],
     ) -> Real:
         """Define Lagrangian objective function."""
 
+        stats = self.target.normalize(self.model.n_nodes) if normalize else self.target
+        stats = stats.select(*self.get_expected_statistics_names())
+
         @eqx.filter_custom_vjp
         @eqx.filter_jit
-        def objective(model: T) -> Real:
-            return model.lagrangian(self.target)
+        def objective(model: T, args: PyTree[Any] = None) -> Real:  # noqa
+            """Lagrangian objective function.
+
+            Parameters
+            ----------
+            model
+                The model to evaluate the objective for.
+            args
+                Additional arguments (not used).
+                Here for compatibility with :mod:`optimistix`.
+            """
+            return self.lagrangian(model, normalize=normalize)
 
         @objective.def_fwd
         @eqx.filter_jit
-        def objective_fwd(_, model: T) -> tuple[Real, None]:
-            return objective(model), None
+        def objective_fwd(_, model: T, args: PyTree[Any] = None) -> tuple[Real, None]:
+            return objective(model, args), None
 
         @objective.def_bwd
         @eqx.filter_jit
-        def objective_bwd(_, g_out: Real, __, model: T) -> T:
+        def objective_bwd(_, g_out: Real, __, model: T, args: PyTree[Any] = None) -> T:  # noqa
             expectations = self.compute_expectations(
-                model, options=options, **stats_options
+                model, normalize=normalize, options=options, **stats_options
             )
             gradient = model.parameters.__class__(
-                *jax.tree.map(lambda e, s: (e - s) * g_out, expectations, self.target)
+                *jax.tree.map(lambda e, s: (e - s) * g_out, expectations, stats)
             )
             return model.replace(parameters=gradient)
 
         return objective
-
-
-# Avoid circular imports -------------------------------------------------------------
-
-from .model import AbstractErgm  # noqa
-
-ObjectiveT = Callable[[AbstractErgm, ...], Real]

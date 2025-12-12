@@ -3,11 +3,13 @@ from functools import partial, wraps
 from inspect import Signature, signature
 from itertools import product
 from typing import Any, ClassVar, get_origin
+from equinox._module._prebuilt import BoundMethod
 
 import equinox as eqx
 import jax
 import jax.numpy as jnp
 from equinox import tree_pformat
+from plum.function import _BoundFunction
 from jax.scipy.special import expit
 from grgg.utils.dispatch import dispatch
 
@@ -477,14 +479,25 @@ def split_kwargs_by_signature(
     unmatched
         A dictionary of unmatched keyword arguments.
     """
-    sig = func if isinstance(func, Signature) else signature(func)
+    sig = func if isinstance(func, Signature) else get_signature(func)
     return split_kwargs(sig.parameters, **kwargs)
+
+
+def get_signature(callable: Callable, method: int = 0) -> Signature:
+    """Get the signature of a callable, including bound methods
+    and allowing for selecting specific method overloads.
+    """
+    if isinstance(callable, BoundMethod):
+        callable = callable.__func__
+    if isinstance(callable, _BoundFunction):
+        callable = callable.methods[method].implementation
+    return signature(callable)
 
 
 @dispatch
 def format_array(x: jnp.ndarray) -> str:
     """Format a JAX array for display."""
-    if jnp.isscalar(x):
+    if jnp.isscalar(x) and not isinstance(x, jax.core.Tracer):
         return (
             f"{x.item():.2f}"
             if jnp.issubdtype(x.dtype, jnp.floating)

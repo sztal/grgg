@@ -49,11 +49,7 @@ class Degree(AbstractErgmNodeStatistic):
     supports_monte_carlo: ClassVar[bool] = False
 
     @dispatch
-    def _observed(self, model: Any, obj: Any, *args: Any, **kwargs: Any) -> Reals:
-        return super()._observed(model, obj, *args, **kwargs)
-
-    @_observed.dispatch
-    def _(self, _, obj: jnp.ndarray) -> Reals:
+    def _observed(self, _, obj: Any) -> Reals:
         obj = self.validate_object(obj)
         return jnp.sum(obj, axis=-1)
 

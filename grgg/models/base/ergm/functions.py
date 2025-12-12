@@ -1,6 +1,5 @@
 from typing import TYPE_CHECKING, Any
 
-import equinox as eqx
 import jax.numpy as jnp
 
 from grgg._typing import Real, Reals
@@ -8,7 +7,6 @@ from grgg._typing import Real, Reals
 from ..model import AbstractModelFunctions
 
 if TYPE_CHECKING:
-    from .fitting import AbstractSufficientStatistics
     from .model import AbstractErgm
 
 __all__ = ("AbstractErgmFunctions",)
@@ -41,46 +39,72 @@ class AbstractErgmFunctions(AbstractModelFunctions):
     """
 
     @classmethod
-    @eqx.filter_jit
-    def free_energy(cls, model: "AbstractErgm", *args: Any, **kwargs: Any) -> Reals:
-        """Compute the free energy of the model."""
+    def free_energy(
+        cls, model: "AbstractErgm", *args: Any, normalize: bool = True, **kwargs: Any
+    ) -> Reals:
+        """Compute the free energy of the model.
+
+        Parameters
+        ----------
+        model
+            The model to compute the free energy for.
+        normalize
+            Whether to normalize the free energy by the number of nodes.
+        *args, **kwargs
+            Additional arguments.
+        """
         raise NotImplementedError
 
     @classmethod
-    @eqx.filter_jit
     def partition_function(
         cls, model: "AbstractErgm", *args: Any, **kwargs: Any
     ) -> Reals:
-        """Compute the partition function of the model."""
+        """Compute the partition function of the model.
+
+        Parameters
+        ----------
+        model
+            The model to compute the partition function for.
+        *args, **kwargs
+            Additional arguments passed to :meth:`free_energy`.
+        """
         free_energy = cls.free_energy(model, *args, **kwargs)
         return jnp.exp(-free_energy)
 
     @classmethod
-    def hamiltonian(cls, model: "AbstractErgm", obj: tuple, **kwargs: Any) -> Real:
-        """Compute the Hamiltonian of the model."""
-        fit = model.fit(obj, **kwargs)
-        return cls._hamiltonian_impl(model, fit.target)
-
-    @classmethod
-    def lagrangian(cls, model: "AbstractErgm", obj: tuple, **kwargs: Any) -> Real:
-        """Compute the Lagrangian of the model."""
-        fit = model.fit(obj, **kwargs)
-        return cls._lagrangian_impl(model, fit.target)
-
-    # Internals ----------------------------------------------------------------------
-
-    @classmethod
-    @eqx.filter_jit
-    def _hamiltonian_impl(
-        cls, model: "AbstractErgm", stats: "AbstractSufficientStatistics"
+    def hamiltonian(
+        cls, model: "AbstractErgm", obj: Any, *args: Any, **kwargs: Any
     ) -> Real:
-        return model.fit(stats).hamiltonian()
+        """Compute the Hamiltonian of the model.
+
+        Parameters
+        ----------
+        model
+            The model to compute the Hamiltonian for.
+        obj
+            The object (e.g., graph) to compute the Hamiltonian of.
+        *args, **kwargs
+            Passed to :meth:`grgg.models.ergm.AbstractErgm.fit`.
+        """
+        fit = model.fit(obj, *args, **{"every": False, **kwargs})
+        return fit.hamiltonian()
 
     @classmethod
-    @eqx.filter_jit
-    def _lagrangian_impl(
-        cls, model: "AbstractErgm", stats: "AbstractSufficientStatistics"
+    def lagrangian(
+        cls, model: "AbstractErgm", obj: Any, *args: Any, **kwargs: Any
     ) -> Real:
-        H = cls._hamiltonian_impl(model, stats)
+        """Compute the Lagrangian of the model.
+
+        Parameters
+        ----------
+        model
+            The model to compute the Lagrangian for.
+        obj
+            The object (e.g., graph) to compute the Lagrangian of.
+        *args, **kwargs
+            Passed to :meth:`grgg.models.ergm.AbstractErgm.fit`.
+        """
+        fit = model.fit(obj, *args, **{"every": False, **kwargs})
+        H = fit.hamiltonian()
         F = model.free_energy()
         return H - F

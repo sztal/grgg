@@ -1,7 +1,5 @@
 from typing import TYPE_CHECKING
 
-import equinox as eqx
-
 from grgg._typing import Reals
 from grgg.models.base.random_graphs import AbstractRandomGraphFunctions
 
@@ -28,7 +26,6 @@ class RandomGraphFunctions(AbstractRandomGraphFunctions):
     """
 
     @classmethod
-    @eqx.filter_jit
     def couplings(cls, params: "RandomGraph.Parameters.Data") -> Reals:
         """Compute edge couplings."""
-        return -params.mu
+        return params.mu.theta

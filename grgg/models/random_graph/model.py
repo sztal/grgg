@@ -1,13 +1,14 @@
 from collections.abc import Callable
-from typing import Annotated, Any, ClassVar, Literal
+from typing import Any, ClassVar, Literal
 
 import equinox as eqx
 import jax.numpy as jnp
 
-from grgg._typing import IsHeterogeneous, IsHomogeneous, Real, Reals
-from grgg.models.base.model import Parameters
+from grgg._typing import Real, Reals
+from grgg.models.base.model import AbstractObservables, AbstractParameters
 from grgg.models.base.random_graphs import AbstractRandomGraph, Mu
 from grgg.models.base.traits import Undirected, Unweighted
+from grgg.utils.random import RandomGenerator
 
 from .functions import RandomGraphFunctions
 from .views import RandomGraphNodePairView, RandomGraphNodeView
@@ -65,7 +66,7 @@ class RandomGraph(AbstractRandomGraph, Undirected, Unweighted):
     >>> model.parameters.mu.is_homogeneous
     True
     >>> model.parameters.mu.data
-    Array(-2.0, ...)
+    Array(-2., ...)
 
     Sample a graph instance:
 
@@ -73,6 +74,10 @@ class RandomGraph(AbstractRandomGraph, Undirected, Unweighted):
     >>> sample.A.shape  # adjacency matrix
     (100, 100)
     >>> sample.G.vcount()  # igraph.Graph object
+    100
+    >>> sample.nx.number_of_nodes()  # networkx.Graph object
+    100
+    >>> sample.struct.vcount  # pathcensus.PathCensus object
     100
 
     Check expected vs. observed average degree:
@@ -113,15 +118,50 @@ class RandomGraph(AbstractRandomGraph, Undirected, Unweighted):
     >>> import igraph as ig
     >>> G = ig.Graph.Erdos_Renyi(n=100, p=0.1)
     >>> model = RandomGraph(100)
-    >>> fit = model.fit(G, homogeneous=True)
+    >>> fit = model.fit(G, "homogeneous")
     >>> fit.model.parameters.mu.is_homogeneous  # infers homogeneous structure
     True
-    >>> jnp.isclose(fit.model.edge_density(), G.density()).item()
+    >>> jnp.isclose(fit.model.edge_density(), G.density(), rtol=1e-3).item()
+    True
+
+    Fit a heterogeneous model to match observed degree sequence:
+
+    >>> fit = model.fit(G, "heterogeneous")
+    >>> fit.model.parameters.mu.is_heterogeneous  # infers heterogeneous structure
+    True
+    >>> expected_degrees = fit.model.nodes.degree()
+    >>> observed_degrees = jnp.asarray(G.degree())
+    >>> (jnp.corrcoef(expected_degrees, observed_degrees)[0, 1] > 0.95).item()
+    True
+
+    Heterogeneous model can also be initialized for fitting with random values in
+    [-1, 1] (with possible control over the random generator) or just zeros.
+    >>> from grgg import RandomGenerator
+    >>> rng = RandomGenerator(123)
+    >>> fit_random = model.fit(G, mu="random", rng=rng)
+    >>> mu = fit_random.model.parameters.mu.data
+    >>> (jnp.all(mu >= -1.0) and jnp.all(mu <= 1.0)).item()
+    True
+    >>> fit_zeros = model.fit(G, mu="zeros")
+    >>> mu = fit_zeros.model.parameters.mu.data
+    >>> (jnp.all(mu == 0.0)).item()
     True
     """
 
-    class Parameters(Parameters):
+    class Parameters(AbstractParameters):
         mu: Mu = eqx.field(default_factory=lambda: Mu(), converter=Mu)
+
+    class Observables(AbstractObservables):
+        degree: Reals
+
+        @property
+        def names(self) -> list[str]:
+            return [*super().names, "edge_count"]
+
+        @property
+        def edge_count(self) -> Real:
+            """Total number of edges."""
+            return jnp.sum(self.degree) / 2
 
     n_nodes: int = eqx.field(static=True)
     parameters: Parameters
@@ -135,51 +175,8 @@ class RandomGraph(AbstractRandomGraph, Undirected, Unweighted):
         self.n_nodes = n_nodes
         super().__init__(**kwargs)
 
-    # Model fitting interface --------------------------------------------------------
 
-    @AbstractRandomGraph._init_param.dispatch
-    def _(
-        self: "RandomGraph",
-        param: Mu,
-        target: Reals,
-        homogeneous: Literal[True],  # noqa
-    ) -> Mu:
-        return self._init_erdos_renyi(param, target)
-
-    @AbstractRandomGraph._init_param.dispatch
-    def _(
-        self: "RandomGraph",
-        param: Mu,
-        target: Reals,
-        homogeneous: Literal[False],  # noqa
-    ) -> Mu:
-        return self._init_chung_lu(param, target)
-
-    @eqx.filter_jit
-    def _init_chung_lu(
-        self,
-        param: Annotated[Mu, IsHeterogeneous],
-        degree: Reals,
-    ) -> Mu:
-        """Chung-Lu initialization."""
-        return param.replace(data=jnp.log(degree / jnp.sqrt(jnp.sum(degree))))
-
-    @eqx.filter_jit
-    def _init_erdos_renyi(
-        self,
-        param: Annotated[Mu, IsHomogeneous],
-        ecount: Real,
-    ) -> Mu:
-        """Erdős–Rényi initialization."""
-        n = self.n_nodes
-        p = ecount / (n * (n - 1))
-        if self.is_undirected:
-            p *= 2
-        theta = jnp.log((1 - p) / p)
-        return param.replace(data=-theta)
-
-
-# Mapping between parameters and observables -----------------------------------------
+# Parameters' initialization interface -----------------------------------------------
 
 
 @Mu._get_statistic.dispatch
@@ -200,3 +197,51 @@ def _(
     method: Literal["lagrangian", "least_squares"],  # noqa
 ) -> tuple[Literal["degree"], Callable[..., Reals]]:
     return "degree", model.nodes.degree
+
+
+@Mu.initialize.dispatch
+def _(
+    self: Mu,  # noqa
+    model: RandomGraph,  # noqa
+    target: RandomGraph.Observables,
+    method: Literal["homogeneous", "erdos_renyi", "er", "erdos"],  # noqa
+) -> Mu:
+    n = model.n_nodes
+    ecount = target.edge_count
+    p = 2 * jnp.asarray(ecount / n / (n - 1))
+    theta = jnp.log((1 - p) / p)
+    return self.replace(data=-theta)
+
+
+@Mu.initialize.dispatch
+def _(
+    self: Mu,  # noqa
+    model: RandomGraph,  # noqa
+    target: RandomGraph.Observables,
+    method: Literal["heterogeneous", "chung-lu", "configuration-model", "cm"],  # noqa
+) -> Mu:
+    degree = target.degree
+    return self.replace(data=jnp.log(degree / jnp.sqrt(jnp.sum(degree))))
+
+
+@Mu.initialize.dispatch
+def _(
+    self: Mu,  # noqa
+    model: RandomGraph,  # noqa
+    target: RandomGraph.Observables,  # noqa
+    method: Literal["random"],  # noqa
+    rng: RandomGenerator | None = None,
+) -> Mu:
+    rng = RandomGenerator(rng)
+    theta = rng.uniform(model.n_nodes, minval=-1.0, maxval=1.0)
+    return self.replace(data=-theta)
+
+
+@Mu.initialize.dispatch
+def _(
+    self: Mu,  # noqa
+    model: RandomGraph,  # noqa
+    target: RandomGraph.Observables,  # noqa
+    method: Literal["zeros"],  # noqa
+) -> Mu:
+    return self.replace(data=jnp.zeros(model.n_nodes))

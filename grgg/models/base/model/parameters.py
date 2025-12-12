@@ -1,15 +1,20 @@
 from abc import abstractmethod
 from collections.abc import Callable
-from typing import Any, ClassVar
+from typing import Any, ClassVar, Self
 
 import equinox as eqx
 import jax.numpy as jnp
 
 from grgg._typing import Numbers, Real, Reals
 from grgg.utils.dispatch import dispatch
-from grgg.utils.variables import AbstractArrayBundle, Constraints, Variable
+from grgg.utils.variables import (
+    ArrayBundle,
+    Constraints,
+    FixedArrayBundle,
+    Variable,
+)
 
-__all__ = ("AbstractParameter", "Parameters")
+__all__ = ("AbstractParameter", "AbstractParameters", "AbstractObservables")
 
 
 class AbstractParameter(Variable):
@@ -79,19 +84,18 @@ class AbstractParameter(Variable):
     ) -> tuple[str, Callable[..., Numbers]]:
         """Get observable statistics corresponding to the parameter."""
 
+    @dispatch.abstract
+    def initialize(
+        self,
+        model: Any,
+        target: ArrayBundle,
+        method: str,
+    ) -> Self:
+        """Initialize parameter value(s) from `model` and `target` using `method`."""
 
-class Parameters(AbstractArrayBundle[AbstractParameter]):
+
+class AbstractParameters(FixedArrayBundle[AbstractParameter]):
     """Model parameters container."""
-
-    @property
-    def mapping(self) -> dict[str, AbstractParameter]:
-        """Mapping of parameter names to parameter objects."""
-        return {name: getattr(self, name) for name in self.names}
-
-    @property
-    def names(self) -> list[str]:
-        """List of parameter names."""
-        return list(self.get_instance_fields())
 
     @property
     def are_heterogeneous(self) -> bool:
@@ -102,3 +106,22 @@ class Parameters(AbstractArrayBundle[AbstractParameter]):
     def are_homogeneous(self) -> bool:
         """Whether the parameters container has homogeneous parameters."""
         return not self.are_heterogeneous
+
+
+class AbstractObservables(FixedArrayBundle[Numbers]):
+    """Model observables container."""
+
+    def normalize(self, n_units: int) -> Self:
+        """Normalize observables by number of units.
+
+        Parameters
+        ----------
+        n_units
+            Number of units to normalize by.
+
+        Returns
+        -------
+        Normalized observables.
+        """
+        normalized = {name: self[name] / n_units for name in self.get_instance_fields()}
+        return self.__class__(**normalized)

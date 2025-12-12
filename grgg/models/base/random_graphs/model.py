@@ -2,14 +2,16 @@ from collections.abc import Mapping
 from typing import Any
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 import numpy as np
 from rich.progress import track
 from scipy.sparse import csr_array
 
 from grgg._options import options
-from grgg._typing import Booleans, BoolVector, Integer, IntVector
+from grgg._typing import Booleans, BoolVector, Integer, IntVector, Real
 from grgg.models.base.ergm import AbstractErgm, ErgmSample
+from grgg.utils.compute import fori
 from grgg.utils.dispatch import dispatch
 from grgg.utils.misc import batch_starts
 from grgg.utils.random import RandomGenerator
@@ -28,10 +30,23 @@ class AbstractRandomGraph(AbstractErgm):
     nodes_cls: eqx.AbstractClassVar[type[AbstractRandomGraphNodeView]]
     pairs_cls: eqx.AbstractClassVar[type[AbstractRandomGraphNodePairView]]
 
+    # Model functions ----------------------------------------------------------------
+
+    def free_energy(self, *args: Any, **kwargs: Any) -> Real:
+        """Compute the free energy of the model."""
+        fe = self._free_energy(*args, **kwargs)
+        return fe / 2 if self.is_undirected else fe
+
+    def _free_energy(self, *args: Any, **kwargs: Any) -> Real:
+        """Implementation of free energy function."""
+        if self.is_homogeneous:
+            return _free_energy_homogeneous(self, *args, **kwargs)
+        return _free_energy_heterogeneous(self, *args, **kwargs)
+
     # Model fitting interface --------------------------------------------------------
 
     @dispatch
-    def get_default_fit_method(self, data: Any) -> str:  # noqa
+    def get_default_fit_method(self: "AbstractRandomGraph", data: Any) -> str:  # noqa
         """Get the default fitting method for a given model and target statistics."""
         return "lagrangian"
 
@@ -147,3 +162,64 @@ def _sample_impl_offdiag(
     p = model.pairs[jnp.ix_(i, j)].probs()
     mask = rng.uniform(shape=p.shape) < p
     return mask
+
+
+@eqx.filter_jit
+def _free_energy_homogeneous(
+    model: "AbstractRandomGraph", *args: Any, normalize: bool = False, **kwargs: Any
+) -> Real:
+    """Compute the free energy of a homogeneous model."""
+    fe = model.nodes.free_energy(*args, **kwargs)
+    return fe if normalize else fe * model.n_nodes
+
+
+@eqx.filter_custom_vjp
+@eqx.filter_jit
+def _free_energy_heterogeneous(
+    model: "AbstractRandomGraph", *args: Any, **kwargs: Any
+) -> Real:
+    """Compute the free energy of a heterogeneous model."""
+
+    @fori(0, model.n_nodes, init=0.0)
+    def fe(i: Integer, carry: Real) -> Real:
+        fe = model.functions.node_free_energy(model, i, *args, **kwargs)
+        return carry + fe
+
+    return fe
+
+
+@_free_energy_heterogeneous.def_fwd
+@eqx.filter_jit
+def _free_energy_heterogeneous_fwd(
+    _, model: "AbstractRandomGraph", *args: Any, **kwargs: Any
+) -> tuple[Real, None]:
+    """Forward pass for custom VJP of free energy."""
+    return _free_energy_heterogeneous(model, *args, **kwargs), None
+
+
+@_free_energy_heterogeneous.def_bwd
+@eqx.filter_jit
+def _free_energy_heterogeneous_bwd(
+    _,
+    g_out: Real,
+    __,
+    model: "AbstractRandomGraph",
+    *args: Any,
+    **kwargs: Any,
+) -> "AbstractRandomGraph":
+    """Backward pass for custom VJP of free energy."""
+    # Initialize gradients with zeros matching the model structure
+    init_grads = jax.tree_util.tree_map(jnp.zeros_like, model)
+    # Pre-compile the gradient function for a single index
+    grad_fn = eqx.filter_grad(model.functions.node_free_energy)
+
+    @fori(0, model.n_nodes, init=init_grads)
+    def gradient(i: Integer, carry: "AbstractRandomGraph") -> "AbstractRandomGraph":
+        # Compute gradient for the i-th pair/node
+        g_i = grad_fn(model, i, *args, **kwargs)
+        # Accumulate gradients
+        return jax.tree_util.tree_map(jnp.add, carry, g_i)
+
+    # Apply the chain rule:
+    # multiply accumulated grads by the output gradient (g_out)
+    return jax.tree_util.tree_map(lambda g: g * g_out, gradient)

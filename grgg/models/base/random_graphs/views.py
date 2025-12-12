@@ -1,8 +1,10 @@
 from typing import TYPE_CHECKING, Any, TypeVar
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 
+from grgg._options import options
 from grgg._typing import Reals
 from grgg.models.base.ergm import AbstractErgmNodePairView, AbstractErgmNodeView
 
@@ -45,7 +47,9 @@ class AbstractRandomGraphNodeView[T](AbstractErgmNodeView[T]):
 
     def free_energy(self, *args: Any, **kwargs: Any) -> Reals:
         """Compute node free energies for selected nodes."""
-        return _nodes_free_energy(self, *args, **kwargs)
+        if self.model.is_homogeneous:
+            return _nodes_free_energy_homogeneous(self, *args, **kwargs)
+        return _nodes_free_energy_heterogeneous(self, *args, **kwargs)
 
 
 class AbstractRandomGraphNodePairView[T](AbstractErgmNodePairView[T]):
@@ -65,16 +69,6 @@ class AbstractRandomGraphNodePairView[T](AbstractErgmNodePairView[T]):
 
 
 # Internals --------------------------------------------------------------------------
-
-
-@eqx.filter_jit
-def _nodes_free_energy(
-    nodes: AbstractRandomGraphNodeView,
-    *args: jnp.ndarray,
-    **kwargs: Any,
-) -> Reals:
-    """Compute node free energies."""
-    return nodes.model.functions.node_free_energy(nodes, *args, **kwargs)
 
 
 @eqx.filter_jit
@@ -116,3 +110,33 @@ def _pairs_free_energy(
     """Compute pairwise edge free energies."""
     couplings = pairs.couplings(*args, **kwargs)
     return pairs.model.functions.edge_free_energy(couplings)
+
+
+@eqx.filter_jit
+def _nodes_free_energy_homogeneous(
+    nodes: AbstractRandomGraphNodeView, *args: Any, **kwargs: Any
+) -> Reals:
+    """Compute the free energy contributions from nodes in a homogeneous model."""
+    n = nodes.model.n_nodes
+    if n < 2:
+        fe = nodes.model.pairs[0, 0].free_energy(*args, **kwargs)
+    else:
+        fe = nodes.model.pairs[1, 0].free_energy(*args, **kwargs)
+    fe *= n - 1
+    if nodes.is_active and (size := nodes.size) > 1:
+        return jnp.full((size,), fe)
+    return fe
+
+
+@eqx.filter_jit
+def _nodes_free_energy_heterogeneous(
+    nodes: AbstractRandomGraphNodeView, *args: Any, **kwargs: Any
+) -> Reals:
+    """Compute the free energy contribution from node i in a heterogeneous model."""
+    batch_size = kwargs.pop("batch_size", options.loop.batch_size)
+    f = eqx.filter_jit(
+        lambda i: nodes.model.functions.node_free_energy(
+            nodes.model, i, *args, **kwargs
+        )
+    )
+    return jax.lax.map(f, nodes.coords[0], batch_size=batch_size)
