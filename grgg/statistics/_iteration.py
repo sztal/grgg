@@ -122,9 +122,6 @@ class NodeIteration(AbstractCallable):
         if self.mc < 0:
             errmsg = f"expected 'mc' >= 0, got {self.mc}"
             raise ValueError(errmsg)
-        if self.mc > 0 and self.weights is None:
-            errmsg = "MC sampling requires 'weights' function"
-            raise ValueError(errmsg)
 
     @classmethod
     def from_kernel(
@@ -157,11 +154,22 @@ class NodeIteration(AbstractCallable):
         if indices.ndim < 2:
             indices = indices[:, jnp.newaxis]
         kwargs = {"batch_size": self.batch_size, **kwargs}
-        return jax.lax.map(
-            eqx.filter_jit(lambda vids: self(model, vids, key=self.key)),
-            indices,
-            **kwargs,
-        )
+        base_key = self.key
+
+        def mapped_fn(vids: Integers) -> Real:
+            # Derive unique key for each focal node tuple by folding in all vids
+            if base_key is not None:
+                key = jax.lax.fori_loop(
+                    0,
+                    vids.shape[0],
+                    lambda i, k: jax.random.fold_in(k, vids[i]),
+                    base_key,
+                )
+            else:
+                key = None
+            return self(model, vids, key=key)
+
+        return jax.lax.map(eqx.filter_jit(mapped_fn), indices, **kwargs)
 
     def __call__(
         self,
@@ -332,12 +340,12 @@ class NodeIteration(AbstractCallable):
                 result, vids, key = carry
                 all_vids = jnp.concatenate([focal_nodes, vids])
 
-                # Sample mc indices for next depth
+                # Derive unique key for this (depth, sample_idx) by folding
+                # Key evolves through carry, so sequential fold_ins ensure uniqueness
                 key = jax.random.fold_in(key, sample_idx)
-                key, subkey = jax.random.split(key)
 
                 # Compute weights for this depth
-                w = weights(model, depth, all_vids)
+                w = _get_mc_weigths(weights, model, depth, all_vids)
 
                 # Zero out already-used indices if unique
                 # At depth d, vids[d] was just set by the outer loop.
@@ -352,7 +360,7 @@ class NodeIteration(AbstractCallable):
                 mult = w_sum / mc
 
                 # Sample mc indices
-                sampled = jax.random.choice(subkey, n_nodes, shape=(mc,), p=w / w_sum)
+                sampled = jax.random.choice(key, n_nodes, shape=(mc,), p=w / w_sum)
 
                 # Create zero accumulator with same structure as init
                 inner_init = jax.tree.map(jnp.zeros_like, init)
@@ -382,13 +390,12 @@ class NodeIteration(AbstractCallable):
         # Sample at depth 0 and start recursion
         # Note: at depth 0, unique=True does NOT zero out the focal node
         # (matching original behavior where range(0) is empty)
-        key, subkey = jax.random.split(key)
         all_vids = jnp.concatenate([focal_nodes, vids])
-        w = weights(model, 0, all_vids)
+        w = _get_mc_weigths(weights, model, 0, all_vids)
         # No zeroing at depth 0 - unique only applies at depth >= 1
         w_sum = w.sum()
         mult = w_sum / mc
-        sampled = jax.random.choice(subkey, n_nodes, shape=(mc,), p=w / w_sum)
+        sampled = jax.random.choice(key, n_nodes, shape=(mc,), p=w / w_sum)
 
         loop = make_loop(1)
 
@@ -419,6 +426,17 @@ def _tree_add(a: Any, b: Any) -> Any:
 
 def _tree_mul(a: Any, s: Any) -> Any:
     return jax.tree.map(lambda x: x * s, a)
+
+
+def _get_mc_weigths(
+    f: NodeIterationWeightsFunctionT, model: Any, depth: int, vids: Integers
+) -> Reals:
+    """Default MC weights function that raises an error."""
+    try:
+        return f(model, depth, vids)
+    except NotImplementedError as exc:
+        errmsg = f"invalid '{depth=}' for MC sampling weights."
+        raise NotImplementedError(errmsg) from exc
 
 
 # Custom VJP for memory-efficient gradient computation in NodeIteration

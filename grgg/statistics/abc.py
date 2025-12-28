@@ -206,7 +206,7 @@ class AbstractErgmStatistic[MT](AbstractStatistic[MT]):
     @property
     def use_mc(self) -> bool:
         """Whether to use Monte Carlo sampling for estimates."""
-        return bool(self.mc)
+        return bool(self.mc) and self.supports_monte_carlo
 
     def moment(self, n: int, **kwargs: Any) -> Reals:
         if kwargs:

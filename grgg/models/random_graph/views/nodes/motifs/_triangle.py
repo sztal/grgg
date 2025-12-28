@@ -88,8 +88,7 @@ class RandomGraphTriangleMotif(TriangleMotif):
     def _mc_weights(model: "RandomGraph", depth: int, vids: Integers) -> Reals:
         if depth == 0:
             return model.pairs[vids[depth]].probs()
-        errmsg = f"invalid 'depth={depth}' for triangle motif weights."
-        raise ValueError(errmsg)
+        raise NotImplementedError
 
     def _homogeneous_m1(self) -> Reals:
         n = self.model.n_nodes

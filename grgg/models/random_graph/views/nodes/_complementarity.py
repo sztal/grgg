@@ -56,7 +56,7 @@ class RandomGraphStructuralComplementarity(StructuralComplementarity):
         ...     return jnp.asarray(s)
         >>>
         >>> C = jnp.array([compute_comp(model) for _ in range(20)])
-        >>> jnp.isclose(comp.mean(), C.mean(), rtol=1e-1).item()
+        >>> jnp.isclose(comp.mean(), C.mean(), rtol=5e-2).item()
         True
         >>> vids = jnp.array([0, 11, 27, 89])
         >>> s = model.nodes[vids].complementarity()

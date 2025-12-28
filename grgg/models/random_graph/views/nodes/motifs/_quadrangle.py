@@ -96,8 +96,7 @@ class RandomGraphQuadrangleMotif(QuadrangleMotif):
             p_jk = model.pairs[vids[1]].probs()
             p_ik = model.pairs[vids[0]].probs()
             return (p_jk * (1 - p_ik)).at[vids[:2]].set(0.0)
-        errmsg = f"invalid 'depth={depth}' for quadrangle motif sampling weights"
-        raise ValueError(errmsg)
+        raise NotImplementedError
 
     def _homogeneous_m1(self) -> Reals:
         n = self.model.n_nodes
