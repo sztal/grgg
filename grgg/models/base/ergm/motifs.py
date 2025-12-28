@@ -39,9 +39,6 @@ class AbstractErgmMotifs[T](AbstractModelModule[T]):
         """The model the motifs are computed for."""
         return self.view.model
 
-    def _equals(self, other: object) -> bool:
-        return super()._equals(other) and self.view.equals(other.view)
-
     @dispatch.abstract
     def _get_motif(
         self,

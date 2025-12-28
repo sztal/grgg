@@ -3,12 +3,13 @@ from typing import Any
 
 import jax.numpy as jnp
 from beartype.vale import Is, IsAttr, IsEqual
-from jaxtyping import Array, ArrayLike, Bool, Integer, Num, PyTree  # noqa
+from jaxtyping import Array, ArrayLike, Bool, DTypeLike, Integer, Num, PyTree  # noqa
 from jaxtyping import Float as _Float
 
 __all__ = (
     "PyTree",
     "ArrayLike",
+    "DTypeLike",
     "Reals",
     "Real",
     "RealVector",

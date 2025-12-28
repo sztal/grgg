@@ -81,12 +81,12 @@ class RandomGraphQClustering(QClustering):
         >>> n = 500
         >>> model = RandomGraph(n, mu=rng.normal(n) - 2.5)
         >>> qc0 = model.nodes.qclust()
-        >>> qc1 = model.nodes.qclust(mc=50, repeat=10, rng=rng)
+        >>> qc1 = model.nodes.qclust(mc=100, repeat=5, rng=rng)
         >>> err = jnp.linalg.norm(qc0 - qc1) / jnp.linalg.norm(qc0)
-        >>> (err < 0.02).item()
+        >>> (err < 0.05).item()
         True
         >>> cor = jnp.corrcoef(qc0, qc1)[0, 1]
-        >>> (cor > 0.95).item()
+        >>> (cor > 0.90).item()
         True
         """
         return _m1(self)

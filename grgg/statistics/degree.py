@@ -17,6 +17,7 @@ class Degree(AbstractErgmNodeStatistic):
     --------
     Statistics can be computed not only as model expectatiosns but also
     as observed values on given objects.
+
     >>> import numpy as np
     >>> from scipy.sparse import csr_matrix, csr_array
     >>> from grgg import RandomGraph
@@ -24,23 +25,23 @@ class Degree(AbstractErgmNodeStatistic):
     >>> model = RandomGraph(n)
     >>> A = np.ones((n, n)) - np.eye(n)
     >>> model.nodes.degree.observed(A)
-    Array([9., 9., 9., 9., 9., 9., 9., 9., 9., 9.])
+    Array([9., 9., 9., 9., 9., 9., 9., 9., 9., 9.], ...)
     >>> model.nodes.degree.observed(A.tolist())
-    Array([9., 9., 9., 9., 9., 9., 9., 9., 9., 9.])
+    Array([9., 9., 9., 9., 9., 9., 9., 9., 9., 9.], ...)
     >>> A_sparse = csr_matrix(A)
     >>> model.nodes.degree.observed(A_sparse)
-    Array([9., 9., 9., 9., 9., 9., 9., 9., 9., 9.])
+    Array([9., 9., 9., 9., 9., 9., 9., 9., 9., 9.], ...)
     >>> A_sparse = csr_array(A)
     >>> model.nodes.degree.observed(A_sparse)
-    Array([9., 9., 9., 9., 9., 9., 9., 9., 9., 9.])
+    Array([9., 9., 9., 9., 9., 9., 9., 9., 9., 9.], ...)
     >>> import networkx as nx
     >>> G = nx.complete_graph(n)
     >>> model.nodes.degree.observed(G)
-    Array([9., 9., 9., 9., 9., 9., 9., 9., 9., 9.])
+    Array([9, 9, 9, 9, 9, 9, 9, 9, 9, 9], ...)
     >>> import igraph as ig
     >>> G_ig = ig.Graph.Full(n)
     >>> model.nodes.degree.observed(G_ig)
-    Array([9., 9., 9., 9., 9., 9., 9., 9., 9., 9.])
+    Array([9, 9, 9, 9, 9, 9, 9, 9, 9, 9], ...)
     """
 
     module: VT

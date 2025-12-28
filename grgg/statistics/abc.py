@@ -13,6 +13,8 @@ from grgg.utils.dispatch import dispatch
 from grgg.utils.misc import split_kwargs
 from grgg.utils.random import RandomGenerator
 
+from ._iteration import NodeIteration, NodeIterationKernelT
+
 if TYPE_CHECKING:
     from grgg.models.base.ergm.model import AbstractErgm, E, P, Q, S, V
     from grgg.models.base.model import AbstractModel, AbstractModelModule
@@ -116,14 +118,6 @@ class AbstractStatistic[MT](AbstractModule):
         cn = cls.__name__
         errmsg = f"'{cn}' does not support module of type '{type(module)}'"
         return TypeError(errmsg)
-
-    def _equals(self, other: object) -> bool:
-        return (
-            super()._equals(other)
-            and self.label == other.label
-            and self.supported_moments == other.supported_moments
-            and self.module.equals(other.module)
-        )
 
     def _get_homogeneous_method(self, n: int) -> MomentMethodT:
         return getattr(self, f"_homogeneous_m{n}")
@@ -383,6 +377,18 @@ class AbstractErgmNodeStatistic[VT](AbstractErgmViewStatistic[VT]):
     @property
     def pairs(self) -> "ET":
         return self.model.pairs
+
+    def iteration(
+        self, order: int, kernel: NodeIterationKernelT, *args: Any, **kwargs: Any
+    ) -> "NodeIteration":
+        kwargs = {
+            "unroll": self.unroll,
+            "mc": self.mc,
+            "batch_size": self.batch_size,
+            "key": self.key,
+            **kwargs,
+        }
+        return NodeIteration(order, kernel, *args, **kwargs)
 
 
 class AbstractErgmNodePairStatistic[ET](AbstractErgmViewStatistic[ET]):

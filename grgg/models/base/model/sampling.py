@@ -18,9 +18,6 @@ class ModelSampler[T](AbstractModelModule[T]):
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
         return self.sample(*args, **kwargs)
 
-    def _equals(self, other: object) -> bool:
-        return super()._equals(other) and self.model.equals(other.model)
-
     def sample(self, *args: Any, **kwargs: Any) -> Any:
         """Sample from the model."""
         return self._sample(self.model, *args, **kwargs)

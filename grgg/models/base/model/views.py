@@ -55,8 +55,3 @@ class AbstractModelView[T](AbstractModelModule[T]):
     @abstractmethod
     def materialize(self, *, copy: bool = False) -> T:
         """Materialize a new model with the current selection."""
-
-    @abstractmethod
-    def _equals(self, other: object) -> bool:
-        """Check equality with another view."""
-        return super()._equals(other) and self.model.equals(other.model)

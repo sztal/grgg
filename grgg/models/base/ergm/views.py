@@ -165,14 +165,6 @@ class AbstractErgmView[T](AbstractModelView[T], Shaped):
         """Reset the view."""
         return self.replace(_index=None)
 
-    def _equals(self, other: object) -> bool:
-        """Check equality with another view."""
-        return (
-            super()._equals(other)
-            and self.model.equals(other.model)
-            and self.index.equals(other.index)
-        )
-
     @abstractmethod
     def materialize(self, indices: Integers | None = None, *, copy: bool = False) -> T:
         """Materialize the view into a new model instance.

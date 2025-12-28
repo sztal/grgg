@@ -175,14 +175,6 @@ class DynamicSlice(AbstractModule):
         cn = self.__class__.__name__
         return f"{cn}({self.start}, {self.end}, {self.step})"
 
-    def _equals(self, other: object) -> bool:
-        return (
-            super()._equals(other)
-            and self.start == other.start
-            and self.end == other.end
-            and self.step == other.step
-        )
-
     @property
     def indices(self) -> IntVector:
         """Get the indices represented by the slice."""
@@ -279,20 +271,6 @@ class DynamicIndex(Shaped, Sequence):
         if not isinstance(n, int):
             return NotImplemented
         return DynamicIndex(self.args * n)
-
-    def _equals(self, other: object) -> bool:
-        return (
-            super()._equals(other)
-            and len(self) == len(other)
-            and all(
-                jnp.array_equal(a, b)
-                if isinstance(a, jnp.ndarray)
-                else a.equals(b)
-                if isinstance(a, DynamicSlice)
-                else a == b
-                for a, b in zip(self.args, other.args, strict=True)
-            )
-        )
 
     @property
     def shape(self) -> tuple[int, ...]:
@@ -528,9 +506,6 @@ class IndexExpression(Shaped):
     def static(self) -> Self:
         """A static version of this index expression."""
         return self
-
-    def _equals(self, other: object) -> bool:
-        return super()._equals(other) and self.shape == other.shape
 
     def _resolve_args(
         self, args: IndexArgT | tuple[IndexArgT, ...]

@@ -42,15 +42,6 @@ class ManifoldComputeNamespace(AbstractModule):
     distance_density: ManifoldDistanceDensityFunction
     cosine_law: ManifoldCosineLawFunction
 
-    def _equals(self, other: object) -> bool:
-        return (
-            super()._equals(other)
-            and self.volume.equals(other.volume)
-            and self.metric.equals(other.metric)
-            and self.distance_density.equals(other.distance_density)
-            and self.cosine_law.equals(other.cosine_law)
-        )
-
     @classmethod
     def from_manifold(cls, manifold: "Manifold") -> Self:
         """Create a compute namespace for the specified manifold."""
@@ -120,14 +111,6 @@ class Manifold(AbstractModule):
     @abstractmethod
     def with_volume(cls, volume: float) -> Self:
         """Create a manifold instance with the specified volume."""
-
-    @abstractmethod
-    def _equals(self, other: object) -> bool:
-        return (
-            super()._equals(other)
-            and self.dim == other.dim
-            and self.compute.equals(other.compute)
-        )
 
     def metric(self, x: RealVector, y: RealVector) -> Real:
         """Geodesic distance between two points on the manifold."""

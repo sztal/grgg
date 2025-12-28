@@ -76,13 +76,6 @@ class AbstractModel(AbstractModelModule[Self]):
             return self.parameters[name]
         return object.__getattribute__(self, name)
 
-    def _equals(self, other: object) -> bool:
-        return (
-            super()._equals(other)
-            and self.n_units == other.n_units
-            and self.parameters.equals(other.parameters)
-        )
-
     # Properties ---------------------------------------------------------------------
 
     @property

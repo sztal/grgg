@@ -68,15 +68,6 @@ class AbstractArrayBundle(AbstractModule, Sequence[A]):
             dtype = jnp.promote_types(dtype, param.dtype)
         return dtype
 
-    def _equals(self, other: object) -> bool:
-        return (
-            type(self) is type(other)
-            and len(self.mapping) == len(other.mapping)
-            and all(
-                jnp.array_equal(self.mapping[n], other.mapping[n]) for n in self.names
-            )
-        )
-
     def astype(self, dtype: DTypeLike) -> Self:
         """Return `self` with arrays cast to a given data type."""
         return self.__class__(**{n: v.astype(dtype) for n, v in self.mapping.items()})

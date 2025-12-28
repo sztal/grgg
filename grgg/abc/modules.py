@@ -21,12 +21,15 @@ class AbstractModule(eqx.Module):
             result = result.item()
         return bool(result)
 
-    @abstractmethod
-    def _equals(self, other: object) -> bool:
+    def _equals(self, other: object, *, only_types: bool = False) -> bool:
         """Check equality with another model element."""
         t1 = type(self)
         t2 = type(other)
-        return issubclass(t1, t2) or issubclass(t2, t1)
+        if not (issubclass(t1, t2) or issubclass(t2, t1)):
+            return False
+        if only_types:
+            return True
+        return eqx.tree_equal(self, other)
 
     def __copy__(self) -> Self:
         """Create a shallow copy of the model element."""
@@ -73,6 +76,3 @@ class AbstractCallable(AbstractModule):
 
 class AbstractFunction(AbstractCallable):
     """Abstract base class for model functions."""
-
-    def _equals(self, other: Any) -> bool:
-        return super()._equals(other)

@@ -28,13 +28,6 @@ class AbstractModelFit[T, O](AbstractModelModule[T]):
 
     method: eqx.AbstractClassVar[str]
 
-    def _equals(self, other: object) -> bool:
-        return (
-            super()._equals(other)
-            and self.model.equals(other.model)
-            and self.target.equals(other.target)
-        )
-
     def __check_init__(self) -> None:
         expected_stat_names = [
             p.get_statistic(self.model, self.method, homogeneous=False)[0]

@@ -146,4 +146,6 @@ class RandomGenerator(AbstractModule):
         return self.__class__(new_key)
 
     def _equals(self, other: object) -> bool:
-        return super()._equals(other) and jnp.array_equal(self.key, other.key)
+        return super()._equals(other, only_types=True) and jnp.array_equal(
+            self.key, other.key
+        )

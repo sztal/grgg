@@ -291,6 +291,3 @@ class Variable(Shaped):
 
     def astype(self, dtype: DTypeLike) -> Self:
         return self.replace(data=self.data.astype(dtype))
-
-    def _equals(self, other: object) -> bool:
-        return super()._equals(other) and jnp.array_equal(self, other)
