@@ -115,5 +115,10 @@ class AbstractRandomGraphFunctions(AbstractErgmFunctions):
         *args, **kwargs
             Additional arguments.
         """
-        fe = model.pairs[i].free_energy(*args, **kwargs).sum(axis=0)
-        return fe / model.n_nodes if normalize else fe
+        if model.is_homogeneous:
+            ij = (0, 0) if (n := model.n_nodes) < 2 else (1, 0)
+            fe = model.pairs[ij].free_energy(*args, **kwargs) * (n - 1)
+        else:
+            fe = model.pairs[i].free_energy(*args, **kwargs).sum(axis=0)
+        fe = fe / model.n_nodes if normalize else fe
+        return fe if model.is_directed else fe / 2

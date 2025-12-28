@@ -25,7 +25,7 @@ class Mu(AbstractParameter):
     >>> Mu(1.0)  # homogeneous value
     Mu(1.0)
     >>> Mu([1, 2, 3])  # heterogeneous value
-    Mu(f32[3])
+    Mu(f...[3])
     """
 
     constraints: ClassVar[Constraints] = Constraints("real")

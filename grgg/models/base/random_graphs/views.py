@@ -117,12 +117,7 @@ def _nodes_free_energy_homogeneous(
     nodes: AbstractRandomGraphNodeView, *args: Any, **kwargs: Any
 ) -> Reals:
     """Compute the free energy contributions from nodes in a homogeneous model."""
-    n = nodes.model.n_nodes
-    if n < 2:
-        fe = nodes.model.pairs[0, 0].free_energy(*args, **kwargs)
-    else:
-        fe = nodes.model.pairs[1, 0].free_energy(*args, **kwargs)
-    fe *= n - 1
+    fe = nodes.model.functions.node_free_energy(nodes.model, 0, *args, **kwargs)
     if nodes.is_active and (size := nodes.size) > 1:
         return jnp.full((size,), fe)
     return fe

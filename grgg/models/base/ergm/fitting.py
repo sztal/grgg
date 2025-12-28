@@ -4,9 +4,12 @@ from typing import TYPE_CHECKING, Any, ClassVar, TypeVar
 import equinox as eqx
 import jax
 import jax.numpy as jnp
+import lineax as lx
+import optimistix as optx
 from jaxtyping import PyTree
 
 from grgg._typing import Real
+from grgg.utils.dispatch import dispatch
 from grgg.utils.variables import ArrayBundle
 
 from ..model import AbstractModelFit
@@ -21,11 +24,43 @@ T = TypeVar("T", bound="AbstractErgm")
 
 
 class LagrangianFit[T, SS](AbstractModelFit[T, SS]):
-    """ERGM model fit based on the model Lagrangian."""
+    """ERGM model fit based on the model Lagrangian.
+
+    Examples
+    --------
+    >>> import random
+    >>> import jax
+    >>> import jax.numpy as jnp
+    >>> import igraph as ig
+    >>> from grgg import RandomGraph
+    >>> random.seed(303)
+    >>> n = 1000
+    >>> G = ig.Graph.Erdos_Renyi(n, p=10/n)
+
+    Homogeneous case.
+    >>> solution = RandomGraph(n).fit(G, mu=0).solve()
+    >>> model = solution.value
+    >>> jnp.isclose(model.edge_density(), G.density()).item()
+    True
+
+    Heterogeneous case.
+    >>> solution = RandomGraph(n).fit(G, mu="zeros").solve()
+    >>> model = solution.value
+    >>> expected = model.nodes.degree()
+    >>> observed = jnp.array(G.degree())
+    >>> jnp.allclose(observed, expected, rtol=1e-3, atol=5e-2).item()
+    True
+    """
 
     model: T
     target: ArrayBundle
     method: ClassVar[str] = "lagrangian"
+    solver_cls: ClassVar[type[eqx.Module]] = optx.LBFGS
+
+    @dispatch
+    def get_tags(self, model: Any) -> frozenset:  # noqa
+        """Get solver tags for the given model."""
+        return frozenset({lx.negative_semidefinite_tag})
 
     @property
     def sufficient_statistics(self) -> ArrayBundle:
@@ -79,8 +114,9 @@ class LagrangianFit[T, SS](AbstractModelFit[T, SS]):
         stats = self.sufficient_statistics
         if normalize:
             stats = stats.normalize(model.n_nodes)
+        nodes = model.nodes
         H = 0.0
-        for param in model.parameters:
+        for param in nodes.parameters:
             statname, _ = param.get_statistic(model, self.method)
             # 'param.theta' is Lagrange multiplier
             hvec = param.theta * stats[statname]

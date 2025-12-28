@@ -5,6 +5,7 @@ from types import EllipsisType
 from typing import TYPE_CHECKING, Any, ClassVar, Self, TypeVar
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 
 from grgg._typing import Integers, IntVector
@@ -27,6 +28,7 @@ from grgg.utils.indexing import (
     Shaped,
 )
 from grgg.utils.misc import cartesian_product
+from grgg.utils.random import RandomGenerator
 
 from ..model import AbstractModelView, AbstractParameter
 from .motifs import (
@@ -235,6 +237,66 @@ class AbstractErgmNodeView[T](AbstractErgmView[T]):
             return param
         return param[self.index.coords]
 
+    def materialize(self, *, copy: bool = False) -> T:
+        """Materialize the view into a new model instance.
+
+        Parameters
+        ----------
+        copy
+            Whether to deep copy the model.
+        """
+        indices = self.unique_indices
+        return super().materialize(indices, copy=copy)
+
+    def sample(
+        self,
+        n: int,
+        *,
+        replace: bool = False,
+        rng: RandomGenerator | None = None,
+        **kwargs: Any,
+    ) -> Self:
+        """Randomly sample nodes from the view.
+
+        Parameters
+        ----------
+        n
+            Number of nodes to sample.
+        replace
+            Whether to sample with replacement.
+        rng
+            Random number generator to use.
+        **kwargs
+            Additional keyword arguments passed to :func:`jax.random.choice`.
+
+        Examples
+        --------
+        >>> from grgg import RandomGraph, RandomGenerator
+        >>> rng = RandomGenerator(177)
+        >>> n = 100
+        >>> model = RandomGraph(n)
+        >>> view = model.nodes.sample(10, rng=rng)
+        >>> view.n_nodes
+        10
+        >>> view.sample(20, replace=True, rng=rng)
+        Traceback (most recent call last):
+        ...
+        IndexError: '...NodeView' can only be indexed once
+        >>> view = model.nodes.sample(200, replace=True, rng=rng)
+        >>> view.n_nodes <= 100
+        True
+        >>> len(view.coords[0])
+        200
+        >>> len(view.degree())
+        200
+        """
+        if isinstance(rng, RandomGenerator):
+            key = rng.child.key
+        else:
+            key = RandomGenerator.make_key(rng)
+        indices = jax.random.choice(key, self.n_nodes, (n,), replace=replace, **kwargs)
+        return self[indices]
+
     # Statistics ---------------------------------------------------------------------
 
     @property
@@ -290,17 +352,6 @@ class AbstractErgmNodeView[T](AbstractErgmView[T]):
     def qstats(self) -> jnp.ndarray:
         """Quadrangle statistics for the nodes in the view."""
         return self._get_statistic("qstats")
-
-    def materialize(self, *, copy: bool = False) -> T:
-        """Materialize the view into a new model instance.
-
-        Parameters
-        ----------
-        copy
-            Whether to deep copy the model.
-        """
-        indices = self.unique_indices
-        return super().materialize(indices, copy=copy)
 
 
 class AbstractErgmNodePairView[T](AbstractErgmView[T]):

@@ -1,6 +1,6 @@
 from collections.abc import Iterator, Mapping, MutableMapping
 from copy import deepcopy
-from dataclasses import replace
+from dataclasses import asdict, replace
 from types import TracebackType
 from typing import Any, Literal, Self
 
@@ -73,6 +73,10 @@ class Options(MutableMapping[str, Any]):
         """Set an option value."""
         new = self.replace(**{option: value})
         setattr(self, option, getattr(new, option))
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert options to a dictionary."""
+        return asdict(self)
 
 
 @dataclass(slots=True)
@@ -147,14 +151,33 @@ class ProgressOptions(Options):
 
 
 @dataclass(slots=True)
-class AutoOptions(Options):
-    mc: PositiveInt = 1000
-    progress: NonNegativeFloat = 1.0
+class ConstraintsOptions(Options):
+    method: Literal["log", "logexp1m"] = "logexp1m"
 
 
 @dataclass(slots=True)
-class ConstraintsOptions(Options):
-    method: Literal["log", "logexp1m"] = "logexp1m"
+class _SolverOptions(Options):
+    rtol: NonNegativeFloat = 1e-5
+    atol: NonNegativeFloat = 1e-5
+    verbose: frozenset[str] = frozenset()
+
+
+@dataclass(slots=True)
+class _SolverControl(Options):
+    max_steps: PositiveInt = 128
+    throw: bool = False
+
+
+@dataclass(slots=True)
+class SolverOptions(Options):
+    options: _SolverOptions = Field(default_factory=_SolverOptions)
+    control: _SolverControl = Field(default_factory=_SolverControl)
+
+
+@dataclass(slots=True)
+class AutoOptions(Options):
+    mc: PositiveInt = 1000
+    progress: NonNegativeFloat = 1.0
 
 
 @dataclass(slots=True)
@@ -164,8 +187,9 @@ class PackageOptions(Options):
     loop: LoopOptions = Field(default_factory=LoopOptions)
     monte_carlo: MonteCarloOptions = Field(default_factory=MonteCarloOptions)
     progress: ProgressOptions = Field(default_factory=ProgressOptions)
-    auto: AutoOptions = Field(default_factory=AutoOptions)
     constraints: ConstraintsOptions = Field(default_factory=ConstraintsOptions)
+    solver: SolverOptions = Field(default_factory=SolverOptions)
+    auto: AutoOptions = Field(default_factory=AutoOptions)
 
 
 options = PackageOptions()

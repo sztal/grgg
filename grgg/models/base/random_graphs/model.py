@@ -34,14 +34,11 @@ class AbstractRandomGraph(AbstractErgm):
 
     def free_energy(self, *args: Any, **kwargs: Any) -> Real:
         """Compute the free energy of the model."""
-        fe = self._free_energy(*args, **kwargs)
-        return fe / 2 if self.is_undirected else fe
-
-    def _free_energy(self, *args: Any, **kwargs: Any) -> Real:
-        """Implementation of free energy function."""
-        if self.is_homogeneous:
-            return _free_energy_homogeneous(self, *args, **kwargs)
-        return _free_energy_heterogeneous(self, *args, **kwargs)
+        return (
+            _free_energy_homogeneous(self, *args, **kwargs)
+            if self.is_homogeneous
+            else _free_energy_heterogeneous(self, *args, **kwargs)
+        )
 
     # Model fitting interface --------------------------------------------------------
 
